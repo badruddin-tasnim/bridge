@@ -41,7 +41,7 @@ jobs:
           cp android-app/app/build/outputs/apk/debug/app-debug.apk "Bridge-${TAG_NAME}-Android.apk"
 
       - name: Upload Android asset
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-android
           path: Bridge-*-Android.apk
@@ -61,7 +61,7 @@ jobs:
           ditto -c -k --sequesterRsrc --keepParent Bridge.app "../Bridge-${TAG_NAME}-macOS.zip"
 
       - name: Upload macOS asset
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-macos
           path: Bridge-*-macOS.zip
