@@ -1,0 +1,36 @@
+name: Feature Request
+description: Suggest an improvement or a feature for upcoming Bridge versions
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: dropdown
+    id: area
+    attributes:
+      label: Roadmap Area
+      description: Which part of Bridge does this feature relate to?
+      options:
+        - "v1.1 — Clipboard Image & Screenshot Sync"
+        - "v1.2 — Notification Sync"
+        - "v1.3 — Direct File & Media Transfer"
+        - "v1.4+ — Device Status, Quick Actions & Security"
+        - "UI / UX Improvement (Android or macOS)"
+        - "New Idea / Other"
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What workflow or problem would this solve?
+      description: Explain how you want your Android phone and Mac to work together.
+      placeholder: "When I am working on my Mac and..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: How should this work in the Android app and/or Mac menu bar popover?
+    validations:
+      required: false

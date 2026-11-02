@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Bridge Design Tokens -->
+    <color name="bridge_ink">#0E0F12</color>
+    <color name="bridge_panel">#181B20</color>
+    <color name="bridge_pill">#1C1F25</color>
+    <color name="bridge_node_bg">#262A31</color>
+    <color name="bridge_line">#2B2F36</color>
+    <color name="bridge_outline">#3A3F47</color>
+    <color name="bridge_text">#F4F5F2</color>
+    <color name="bridge_soft">#C9CED4</color>
+    <color name="bridge_muted">#9BA3AD</color>
+    <color name="bridge_lime">#C8F135</color>
+    <color name="bridge_coral">#FF9A8A</color>
+    <color name="bridge_error_bg">#1D1514</color>
+    <color name="bridge_error_border">#5A3A36</color>
+    <color name="bridge_connected_bg">#171D0C</color>
+    <color name="bridge_connected_border">#4B5A1D</color>
+    <color name="bridge_connecting_bg">#15171B</color>
+
+    <!-- Legacy / Compatibility Tokens -->
+    <color name="primary">#C8F135</color>
+    <color name="primary_dark">#0E0F12</color>
+    <color name="primary_light">#181B20</color>
+    <color name="text_primary">#F4F5F2</color>
+    <color name="text_secondary">#9BA3AD</color>
+    <color name="text_muted">#9BA3AD</color>
+    <color name="bg_page">#0E0F12</color>
+    <color name="bg_card">#181B20</color>
+    <color name="border_color">#2B2F36</color>
+</resources>

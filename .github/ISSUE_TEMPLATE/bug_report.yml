@@ -1,0 +1,71 @@
+name: Bug Report
+description: Report a connection, pairing, UI, or background sync issue between Android and macOS
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report an issue with **Bridge**! Please fill out the details below so we can reproduce and fix it quickly.
+
+  - type: input
+    id: android_device
+    attributes:
+      label: Android Device & OS Version
+      description: What phone model and Android / OEM skin version are you using?
+      placeholder: "e.g., Samsung Galaxy A52s (Android 14 / One UI 6.1) or Pixel 8 (Android 15)"
+    validations:
+      required: true
+
+  - type: input
+    id: macos_version
+    attributes:
+      label: Mac Model & macOS Version
+      description: What Mac and macOS version are you running?
+      placeholder: "e.g., MacBook Air M2, macOS Sequoia 15.1"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: network_type
+    attributes:
+      label: Wi-Fi / Network Environment
+      description: How are your Android phone and Mac connected?
+      options:
+        - Home Wi-Fi Router (same subnet)
+        - Phone Wi-Fi Hotspot
+        - Office / University / Public Wi-Fi (may block mDNS multicast)
+        - Mesh Wi-Fi Network
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of the bug and what you expected to happen instead.
+      placeholder: "Describe the issue..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to Reproduce
+      description: How can we trigger this bug?
+      placeholder: |
+        1. Open Bridge on Mac...
+        2. Open Bridge on Android and scan QR...
+        3. ...
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: permissions_check
+    attributes:
+      label: Android Background Configuration
+      description: Have you enabled these on your Android phone?
+      options:
+        - label: Bridge Background Link is enabled in Android Accessibility Settings
+        - label: Battery optimization is set to Unrestricted for Bridge

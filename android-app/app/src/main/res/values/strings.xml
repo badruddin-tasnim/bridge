@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Bridge</string>
+    <string name="accessibility_service_label">Bridge Auto-Sync</string>
+    <string name="accessibility_service_description">Automatically synchronizes copied text between your Android device and Mac seamlessly in real time.</string>
+</resources>

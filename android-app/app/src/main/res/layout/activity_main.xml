@@ -1,0 +1,752 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bridge_ink"
+    android:fillViewport="true"
+    android:scrollbars="none">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:clipChildren="false"
+        android:clipToPadding="false"
+        android:orientation="vertical"
+        android:paddingStart="20dp"
+        android:paddingTop="36dp"
+        android:paddingEnd="20dp"
+        android:paddingBottom="28dp">
+
+        <!-- Header: Logo, Wordmark, Status Pill -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <!-- Logo Mark: 34dp rounded lime square -->
+            <ImageView
+                android:id="@+id/ivHeaderMark"
+                android:layout_width="34dp"
+                android:layout_height="34dp"
+                android:src="@drawable/ic_bridge_mark"
+                android:contentDescription="Bridge logo" />
+
+            <!-- Wordmark: lowercase "bridge" in Medium weight -->
+            <TextView
+                android:id="@+id/tvWordmark"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="10dp"
+                android:text="bridge"
+                android:textColor="@color/bridge_text"
+                android:fontFamily="@font/plus_jakarta_sans_medium"
+                android:textSize="22sp"
+                android:letterSpacing="-0.02" />
+
+            <!-- Status Pill: 28dp height, smaller Regular label -->
+            <LinearLayout
+                android:id="@+id/layoutStatusPill"
+                android:layout_width="wrap_content"
+                android:layout_height="28dp"
+                android:background="@drawable/bg_pill"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="10dp"
+                android:paddingEnd="10dp">
+
+                <View
+                    android:id="@+id/dotStatus"
+                    android:layout_width="6dp"
+                    android:layout_height="6dp"
+                    android:background="@drawable/bg_pill"
+                    android:backgroundTint="@color/bridge_lime" />
+
+                <TextView
+                    android:id="@+id/tvStatusPill"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="6dp"
+                    android:text="Not linked"
+                    android:textColor="@color/bridge_muted"
+                    android:fontFamily="@font/plus_jakarta_sans_regular"
+                    android:textSize="11.5sp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <!-- Optional Accessibility Notice Card (styled seamlessly in dark theme) -->
+        <LinearLayout
+            android:id="@+id/layoutServiceNotice"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/bg_card_panel"
+            android:padding="16dp"
+            android:layout_marginTop="20dp"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Bridge Background Service"
+                android:textColor="@color/bridge_text"
+                android:fontFamily="@font/plus_jakarta_sans_medium"
+                android:textSize="15sp" />
+
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="Enable Bridge in Accessibility Settings to keep your devices in sync."
+                android:textColor="@color/bridge_muted"
+                android:fontFamily="@font/plus_jakarta_sans_regular"
+                android:textSize="13sp" />
+
+            <Button
+                android:id="@+id/btnEnableAccessibility"
+                android:layout_width="match_parent"
+                android:layout_height="44dp"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/bg_button_outline"
+                app:backgroundTint="@null"
+                android:text="Enable in Settings"
+                android:textAllCaps="false"
+                android:letterSpacing="0"
+                android:textColor="@color/bridge_lime"
+                android:fontFamily="@font/plus_jakarta_sans_medium"
+                android:textSize="14sp" />
+        </LinearLayout>
+
+        <!-- SCREEN A: CONNECTED STATE -->
+        <LinearLayout
+            android:id="@+id/layoutScreenConnected"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipChildren="false"
+            android:clipToPadding="false"
+            android:orientation="vertical"
+            android:visibility="gone">
+
+            <!-- Hero Card: Lime (#C8F135) when connected, Dark (#181B20) when idle/connecting -->
+            <LinearLayout
+                android:id="@+id/heroCard"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="24dp"
+                android:background="@drawable/bg_card_lime"
+                android:clipChildren="false"
+                android:clipToPadding="false"
+                android:orientation="vertical"
+                android:padding="24dp">
+
+                <TextView
+                    android:id="@+id/tvHeroTitle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_horizontal"
+                    android:textAlignment="center"
+                    android:text="Phone and Mac connected!"
+                    android:maxLines="1"
+                    app:autoSizeTextType="uniform"
+                    app:autoSizeMinTextSize="17sp"
+                    app:autoSizeMaxTextSize="22sp"
+                    android:textColor="@color/bridge_ink"
+                    android:fontFamily="@font/plus_jakarta_sans_bold"
+                    android:textSize="22sp"
+                    android:lineSpacingMultiplier="1.05"
+                    android:letterSpacing="-0.02" />
+
+                <TextView
+                    android:id="@+id/tvHeroSub"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="Paired over your Wi-Fi. Keep Bridge running on both and they stay in step."
+                    android:textColor="@color/bridge_ink"
+                    android:fontFamily="@font/plus_jakarta_sans_regular"
+                    android:textSize="15sp"
+                    android:lineSpacingMultiplier="1.4"
+                    android:visibility="gone" />
+
+                <!-- Native link animation view -->
+                <com.link.clipboardsync.BridgeLinkView
+                    android:id="@+id/linkViewHero"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="18dp" />
+            </LinearLayout>
+
+            <!-- Devices Card -->
+            <LinearLayout
+                android:id="@+id/devicesCard"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="14dp"
+                android:background="@drawable/bg_card_devices"
+                android:orientation="vertical"
+                android:paddingStart="18dp"
+                android:paddingTop="6dp"
+                android:paddingEnd="18dp"
+                android:paddingBottom="6dp">
+
+                <!-- Row 1: THIS PHONE -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:paddingTop="14dp"
+                    android:paddingBottom="14dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="THIS PHONE"
+                        android:textColor="@color/bridge_muted"
+                        android:fontFamily="@font/dm_mono"
+                        android:textSize="11sp"
+                        android:letterSpacing="0.12" />
+
+                    <TextView
+                        android:id="@+id/tvDevicePhoneName"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="Galaxy A52s"
+                        android:textColor="@color/bridge_text"
+                        android:fontFamily="@font/plus_jakarta_sans_medium"
+                        android:textSize="17sp"
+                        android:letterSpacing="-0.01" />
+                </LinearLayout>
+
+                <!-- Divider line -->
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:background="@color/bridge_line" />
+
+                <!-- Row 2: YOUR MAC -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingTop="14dp"
+                    android:paddingBottom="14dp">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="YOUR MAC"
+                            android:textColor="@color/bridge_muted"
+                            android:fontFamily="@font/dm_mono"
+                            android:textSize="11sp"
+                            android:letterSpacing="0.12" />
+
+                        <TextView
+                            android:id="@+id/tvDeviceMacName"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="4dp"
+                            android:text="MacBook"
+                            android:textColor="@color/bridge_text"
+                            android:fontFamily="@font/plus_jakarta_sans_medium"
+                            android:textSize="17sp"
+                            android:letterSpacing="-0.01" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/tvLiveBadge"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Live"
+                        android:textColor="@color/bridge_lime"
+                        android:fontFamily="@font/dm_mono"
+                        android:textSize="12sp" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- NEXT ON THE BRIDGE Label -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="18dp"
+                android:text="NEXT ON THE BRIDGE"
+                android:textColor="@color/bridge_muted"
+                android:fontFamily="@font/dm_mono"
+                android:textSize="11sp"
+                android:letterSpacing="0.14" />
+
+            <!-- Placeholder tiles: Files / Notifications -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:orientation="horizontal">
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginEnd="5dp"
+                    android:background="@drawable/bg_placeholder_tile"
+                    android:orientation="vertical"
+                    android:padding="14dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Files"
+                        android:textColor="@color/bridge_text"
+                        android:fontFamily="@font/plus_jakarta_sans_medium"
+                        android:textSize="16sp" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="Soon"
+                        android:textColor="@color/bridge_muted"
+                        android:fontFamily="@font/plus_jakarta_sans_regular"
+                        android:textSize="13sp" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="5dp"
+                    android:background="@drawable/bg_placeholder_tile"
+                    android:orientation="vertical"
+                    android:padding="14dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Notifications"
+                        android:textColor="@color/bridge_text"
+                        android:fontFamily="@font/plus_jakarta_sans_medium"
+                        android:textSize="16sp" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="Soon"
+                        android:textColor="@color/bridge_muted"
+                        android:fontFamily="@font/plus_jakarta_sans_regular"
+                        android:textSize="13sp" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:minHeight="20dp" />
+
+            <!-- Connect to Mac Button (Visible when offline/idle or reconnecting) -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnHeroConnect"
+                android:layout_width="match_parent"
+                android:layout_height="54dp"
+                android:layout_marginTop="20dp"
+                android:background="@drawable/bg_button_lime"
+                app:backgroundTint="@null"
+                app:cornerRadius="27dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:text="Connect to Mac"
+                android:textAllCaps="false"
+                android:letterSpacing="0"
+                android:textColor="@color/bridge_ink"
+                android:fontFamily="@font/plus_jakarta_sans_semibold"
+                android:textSize="16sp"
+                android:visibility="gone" />
+
+            <!-- Unpair this Mac Button (ALWAYS present so user can unpair even when offline) -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnHeroUnpair"
+                android:layout_width="match_parent"
+                android:layout_height="54dp"
+                android:layout_marginTop="12dp"
+                android:background="@drawable/bg_button_outline"
+                app:backgroundTint="@null"
+                app:cornerRadius="27dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:text="Unpair this Mac"
+                android:textAllCaps="false"
+                android:letterSpacing="0"
+                android:textColor="@color/bridge_coral"
+                android:fontFamily="@font/plus_jakarta_sans_medium"
+                android:textSize="16sp" />
+        </LinearLayout>
+
+        <!-- SCREEN B: NOT PAIRED / PAIRING STATE -->
+        <LinearLayout
+            android:id="@+id/layoutScreenPairing"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipChildren="false"
+            android:clipToPadding="false"
+            android:orientation="vertical"
+            android:visibility="visible">
+
+            <!-- Link illustration with generous top space below topbar -->
+            <com.link.clipboardsync.BridgeLinkView
+                android:id="@+id/linkViewPairing"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="32dp" />
+
+            <!-- Headline on a single line with reduced font size -->
+            <TextView
+                android:id="@+id/tvPairingTitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="26dp"
+                android:text="Let's link up with your Mac."
+                android:maxLines="1"
+                app:autoSizeTextType="uniform"
+                app:autoSizeMinTextSize="17sp"
+                app:autoSizeMaxTextSize="22sp"
+                android:textColor="@color/bridge_text"
+                android:fontFamily="@font/plus_jakarta_sans_bold"
+                android:textSize="22sp"
+                android:lineSpacingMultiplier="1.05"
+                android:letterSpacing="-0.02" />
+
+            <TextView
+                android:id="@+id/tvPairingSub"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="12dp"
+                android:text="Open Bridge in your Mac's menu bar, then scan the code it shows."
+                android:textColor="@color/bridge_muted"
+                android:fontFamily="@font/plus_jakarta_sans_regular"
+                android:textSize="15sp"
+                android:lineSpacingMultiplier="1.45" />
+
+            <!-- Error / Status Note Banner -->
+            <LinearLayout
+                android:id="@+id/layoutNoteBanner"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp"
+                android:background="@drawable/bg_note_error"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:padding="12dp"
+                android:visibility="gone">
+
+                <View
+                    android:id="@+id/dotNote"
+                    android:layout_width="8dp"
+                    android:layout_height="8dp"
+                    android:background="@drawable/bg_pill"
+                    android:backgroundTint="@color/bridge_coral" />
+
+                <TextView
+                    android:id="@+id/tvNoteText"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:layout_marginStart="10dp"
+                    android:text="Couldn't reach your Mac. Check that you're on the same Wi-Fi and Bridge is open on it."
+                    android:textColor="@color/bridge_coral"
+                    android:fontFamily="@font/plus_jakarta_sans_regular"
+                    android:textSize="14sp"
+                    android:lineSpacingMultiplier="1.35" />
+            </LinearLayout>
+
+            <!-- Primary Action: Scan QR Code -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnScanQr"
+                android:layout_width="match_parent"
+                android:layout_height="56dp"
+                android:layout_marginTop="22dp"
+                android:background="@drawable/bg_button_lime"
+                app:backgroundTint="@null"
+                app:icon="@drawable/ic_camera_scan"
+                app:iconGravity="textStart"
+                app:iconPadding="10dp"
+                app:iconTint="@null"
+                app:cornerRadius="28dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:text="Scan QR code"
+                android:textAllCaps="false"
+                android:letterSpacing="0"
+                android:textColor="@color/bridge_ink"
+                android:fontFamily="@font/plus_jakarta_sans_semibold"
+                android:textSize="16sp" />
+
+            <!-- OR Divider -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="22dp"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <View
+                    android:layout_width="0dp"
+                    android:layout_height="1dp"
+                    android:layout_weight="1"
+                    android:background="@color/bridge_line" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="12dp"
+                    android:layout_marginEnd="12dp"
+                    android:text="OR TYPE THE CODE"
+                    android:textColor="@color/bridge_muted"
+                    android:fontFamily="@font/dm_mono"
+                    android:textSize="11sp"
+                    android:letterSpacing="0.14" />
+
+                <View
+                    android:layout_width="0dp"
+                    android:layout_height="1dp"
+                    android:layout_weight="1"
+                    android:background="@color/bridge_line" />
+            </LinearLayout>
+
+            <!-- 6 Digit Code Boxes backed by single hidden numeric input -->
+            <FrameLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="16dp">
+
+                <!-- 6 Visual Boxes with dash between 3+3 -->
+                <LinearLayout
+                    android:id="@+id/layoutCodeBoxes"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="center"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <!-- Box 0 -->
+                    <TextView
+                        android:id="@+id/tvCode0"
+                        android:layout_width="46dp"
+                        android:layout_height="60dp"
+                        android:background="@drawable/bg_code_box_active"
+                        android:gravity="center"
+                        android:textColor="@color/bridge_lime"
+                        android:fontFamily="@font/dm_mono_medium"
+                        android:textSize="26sp" />
+
+                    <!-- Box 1 -->
+                    <TextView
+                        android:id="@+id/tvCode1"
+                        android:layout_width="46dp"
+                        android:layout_height="60dp"
+                        android:layout_marginStart="8dp"
+                        android:background="@drawable/bg_code_box"
+                        android:gravity="center"
+                        android:textColor="@color/bridge_lime"
+                        android:fontFamily="@font/dm_mono_medium"
+                        android:textSize="26sp" />
+
+                    <!-- Box 2 -->
+                    <TextView
+                        android:id="@+id/tvCode2"
+                        android:layout_width="46dp"
+                        android:layout_height="60dp"
+                        android:layout_marginStart="8dp"
+                        android:background="@drawable/bg_code_box"
+                        android:gravity="center"
+                        android:textColor="@color/bridge_lime"
+                        android:fontFamily="@font/dm_mono_medium"
+                        android:textSize="26sp" />
+
+                    <!-- Dash separator -->
+                    <View
+                        android:layout_width="10dp"
+                        android:layout_height="2dp"
+                        android:layout_marginStart="8dp"
+                        android:layout_marginEnd="8dp"
+                        android:background="@color/bridge_outline" />
+
+                    <!-- Box 3 -->
+                    <TextView
+                        android:id="@+id/tvCode3"
+                        android:layout_width="46dp"
+                        android:layout_height="60dp"
+                        android:background="@drawable/bg_code_box"
+                        android:gravity="center"
+                        android:textColor="@color/bridge_lime"
+                        android:fontFamily="@font/dm_mono_medium"
+                        android:textSize="26sp" />
+
+                    <!-- Box 4 -->
+                    <TextView
+                        android:id="@+id/tvCode4"
+                        android:layout_width="46dp"
+                        android:layout_height="60dp"
+                        android:layout_marginStart="8dp"
+                        android:background="@drawable/bg_code_box"
+                        android:gravity="center"
+                        android:textColor="@color/bridge_lime"
+                        android:fontFamily="@font/dm_mono_medium"
+                        android:textSize="26sp" />
+
+                    <!-- Box 5 -->
+                    <TextView
+                        android:id="@+id/tvCode5"
+                        android:layout_width="46dp"
+                        android:layout_height="60dp"
+                        android:layout_marginStart="8dp"
+                        android:background="@drawable/bg_code_box"
+                        android:gravity="center"
+                        android:textColor="@color/bridge_lime"
+                        android:fontFamily="@font/dm_mono_medium"
+                        android:textSize="26sp" />
+                </LinearLayout>
+
+                <!-- Hidden numeric EditText covering the area -->
+                <EditText
+                    android:id="@+id/etPairCode"
+                    android:layout_width="match_parent"
+                    android:layout_height="60dp"
+                    android:background="@null"
+                    android:cursorVisible="false"
+                    android:textColor="@android:color/transparent"
+                    android:inputType="number"
+                    android:maxLength="6"
+                    android:importantForAutofill="yes"
+                    android:autofillHints="smsOTPCode" />
+            </FrameLayout>
+
+            <!-- Manual IP setup link -->
+            <TextView
+                android:id="@+id/tvToggleManualIp"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="center_horizontal"
+                android:layout_marginTop="16dp"
+                android:padding="6dp"
+                android:text="Enter IP address instead"
+                android:textColor="@color/bridge_muted"
+                android:fontFamily="@font/plus_jakarta_sans_regular"
+                android:textSize="14sp" />
+
+            <!-- Expandable Manual IP Container -->
+            <LinearLayout
+                android:id="@+id/layoutManualIp"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/bg_card_panel"
+                android:orientation="vertical"
+                android:padding="16dp"
+                android:visibility="gone">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="MAC IP ADDRESS"
+                    android:textColor="@color/bridge_muted"
+                    android:fontFamily="@font/dm_mono"
+                    android:textSize="11sp"
+                    android:letterSpacing="0.12" />
+
+                <EditText
+                    android:id="@+id/etServerIp"
+                    android:layout_width="match_parent"
+                    android:layout_height="44dp"
+                    android:layout_marginTop="6dp"
+                    android:background="@drawable/bg_code_box"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:textColor="@color/bridge_text"
+                    android:fontFamily="@font/dm_mono"
+                    android:textSize="14sp"
+                    android:hint="192.168.0.102"
+                    android:textColorHint="@color/bridge_muted"
+                    android:inputType="textUri" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="PORT"
+                    android:textColor="@color/bridge_muted"
+                    android:fontFamily="@font/dm_mono"
+                    android:textSize="11sp"
+                    android:letterSpacing="0.12" />
+
+                <EditText
+                    android:id="@+id/etServerPort"
+                    android:layout_width="match_parent"
+                    android:layout_height="44dp"
+                    android:layout_marginTop="6dp"
+                    android:background="@drawable/bg_code_box"
+                    android:paddingStart="12dp"
+                    android:paddingEnd="12dp"
+                    android:textColor="@color/bridge_text"
+                    android:fontFamily="@font/dm_mono"
+                    android:textSize="14sp"
+                    android:text="8765"
+                    android:inputType="number" />
+            </LinearLayout>
+
+            <View
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:minHeight="24dp" />
+
+            <!-- Bottom Outlined Connect Button -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnPair"
+                android:layout_width="match_parent"
+                android:layout_height="54dp"
+                android:layout_marginTop="20dp"
+                android:alpha="0.45"
+                android:background="@drawable/bg_button_outline"
+                app:backgroundTint="@null"
+                app:cornerRadius="27dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:enabled="false"
+                android:text="Connect"
+                android:textAllCaps="false"
+                android:letterSpacing="0"
+                android:textColor="@color/bridge_text"
+                android:fontFamily="@font/plus_jakarta_sans_medium"
+                android:textSize="16sp" />
+
+            <!-- Bottom Outlined Unpair Button (Hidden when not paired) -->
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnUnpairPairing"
+                android:layout_width="match_parent"
+                android:layout_height="54dp"
+                android:layout_marginTop="12dp"
+                android:background="@drawable/bg_button_outline"
+                app:backgroundTint="@null"
+                app:cornerRadius="27dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:text="Unpair this Mac"
+                android:textAllCaps="false"
+                android:letterSpacing="0"
+                android:textColor="@color/bridge_coral"
+                android:fontFamily="@font/plus_jakarta_sans_medium"
+                android:textSize="16sp"
+                android:visibility="gone" />
+        </LinearLayout>
+
+    </LinearLayout>
+</ScrollView>

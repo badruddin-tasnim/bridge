@@ -1,0 +1,22 @@
+# macOS
+.DS_Store
+Icon?
+
+# Android / Gradle build outputs & local config
+android-app/.gradle/
+android-app/.kotlin/
+android-app/build/
+android-app/app/build/
+android-app/local.properties
+.idea/
+*.iml
+*.jks
+*.keystore
+
+# macOS compiled app bundle (built via `make` or downloaded from GitHub Releases)
+mac-app/Bridge.app/
+
+# Local release staging artifacts (uploaded to GitHub Releases)
+releases/
+*.apk
+*.zip
