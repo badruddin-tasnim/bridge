@@ -34,15 +34,15 @@ A lightweight, native open-source bridge that links your **Android phone** and y
 
 ---
 
-## ✨ Bridge - Features (v1.0)
+## Bridge - Features (v1.0)
 
 | Feature | Description |
 | :--- | :--- |
-| **⚡ Instant QR & 6-Digit Pairing** | Open Bridge in your Mac's menu bar and scan the QR code from the Android app—or type the 6-digit pairing code—to link your devices in seconds. |
-| **📡 Zero-Config Bonjour Discovery** | Automatically discovers your Mac on your local Wi-Fi via mDNS (`_clipboardsync._tcp`), seamlessly handling router DHCP IP changes. |
-| **💻 Sleep & Lid-Close Resilience** | Gracefully pauses when you close your MacBook lid and automatically re-establishes the link within seconds when your Mac wakes up. |
-| **🔄 Seamless Background Sync** | Keeps your Android phone and Mac in step in the background—starting in `v1.0` with instant, bi-directional text clipboard synchronization. |
-| **🛡️ 100% Local Wi-Fi Architecture** | Every packet travels directly between your phone and your Mac over your local router (`TCP :8765`). Zero cloud relays, zero accounts, zero tracking. |
+| **Instant QR & 6-Digit Pairing** | Open Bridge in your Mac's menu bar and scan the QR code from the Android app—or type the 6-digit pairing code—to link your devices in seconds. |
+| **Zero-Config Bonjour Discovery** | Automatically discovers your Mac on your local Wi-Fi via mDNS (`_clipboardsync._tcp`), seamlessly handling router DHCP IP changes. |
+| **Sleep & Lid-Close Resilience** | Gracefully pauses when you close your MacBook lid and automatically re-establishes the link within seconds when your Mac wakes up. |
+| **Seamless Background Sync** | Keeps your Android phone and Mac in step in the background—starting in `v1.0` with instant, bi-directional text clipboard synchronization. |
+| **100% Local Wi-Fi Architecture** | Every packet travels directly between your phone and your Mac over your local router (`TCP :8765`). Zero cloud relays, zero accounts, zero tracking. |
 
 ---
 
