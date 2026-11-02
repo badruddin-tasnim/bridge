@@ -13,7 +13,7 @@ $(APP_NAME): $(SWIFT_SOURCES) Info.plist
 	@mkdir -p $(MACOS) $(RESOURCES)
 	@cp Info.plist $(CONTENTS)/Info.plist
 	@cp -R Resources/* $(RESOURCES)/ 2>/dev/null || true
-	swiftc $(SWIFT_SOURCES) -o $(MACOS)/Bridge -framework AppKit -framework SwiftUI -framework Network -framework CryptoKit -framework CoreImage -framework CoreText -O
+	swiftc $(SWIFT_SOURCES) -o $(MACOS)/Bridge -framework AppKit -framework SwiftUI -framework Network -framework CryptoKit -framework CoreImage -framework CoreText -framework UserNotifications -O
 	@xattr -cr $(APP_NAME) 2>/dev/null || true
 	@codesign --force --deep --sign - $(APP_NAME) 2>/dev/null || true
 	@swift -e 'import AppKit; if let img = NSImage(contentsOfFile: "Resources/Bridge.icns") { NSWorkspace.shared.setIcon(img, forFile: "Bridge.app", options: []) }' 2>/dev/null || true

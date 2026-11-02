@@ -258,7 +258,7 @@ class NetworkSyncClient(private val context: Context) {
                                     log("Mac lid closed / entering sleep.")
                                     break // Immediately terminate read loop & prepare for reconnect
                                 }
-                                "clip" -> if (authenticated) notifyPayloadReceived(payload)
+                                "clip", "image" -> if (authenticated) notifyPayloadReceived(payload)
                                 "ping" -> {
                                     // Acknowledge ping
                                     writeRaw(ClipboardPayload(type = "pong"))

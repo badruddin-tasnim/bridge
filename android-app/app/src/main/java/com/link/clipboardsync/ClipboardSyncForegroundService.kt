@@ -15,6 +15,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.util.Base64
 import android.util.Log
 import androidx.core.app.NotificationCompat
 
@@ -75,6 +76,7 @@ class ClipboardSyncForegroundService : Service(), NetworkSyncClient.SyncListener
 
         ClipboardSyncManager.init(this)
         ClipboardSyncManager.networkClient?.addListener(this)
+        UpdateChecker.startPeriodicChecks(this)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_STICKY
@@ -165,25 +167,62 @@ class ClipboardSyncForegroundService : Service(), NetworkSyncClient.SyncListener
     }
 
     override fun onPayloadReceived(payload: ClipboardPayload) {
-        if (payload.type != "clip") return
+        when (payload.type) {
+            "clip" -> {
+                val text = payload.text
+                if (text.isEmpty()) return
+                val hash = payload.hash.ifEmpty { ClipboardPayload.computeSHA256(text) }
 
-        val text = payload.text
-        val hash = payload.hash.ifEmpty { ClipboardPayload.computeSHA256(text) }
+                if (hash == ClipboardSyncManager.lastSentHash || hash == ClipboardSyncManager.lastReceivedHash) {
+                    return
+                }
 
-        if (hash == ClipboardSyncManager.lastSentHash || hash == ClipboardSyncManager.lastReceivedHash) {
-            return
-        }
+                mainHandler.post {
+                    try {
+                        ClipboardSyncManager.lastReceivedHash = hash
+                        ClipboardSyncManager.isInternalMutation = true
+                        clipboardManager.setPrimaryClip(ClipData.newPlainText("Bridge", text))
+                        ClipboardSyncManager.recordHistory(text, outgoing = false)
+                        Log.d(TAG, "Injected remote clipboard into Android (${text.length} chars, hash: ${hash.take(8)})")
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to set clipboard: ${e.message}", e)
+                        ClipboardSyncManager.isInternalMutation = false
+                    }
+                }
+            }
 
-        mainHandler.post {
-            try {
-                ClipboardSyncManager.lastReceivedHash = hash
-                ClipboardSyncManager.isInternalMutation = true
-                clipboardManager.setPrimaryClip(ClipData.newPlainText("Bridge", text))
-                ClipboardSyncManager.recordHistory(text, outgoing = false)
-                Log.d(TAG, "Injected remote clipboard into Android (${text.length} chars, hash: ${hash.take(8)})")
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to set clipboard: ${e.message}", e)
-                ClipboardSyncManager.isInternalMutation = false
+            "image" -> {
+                val base64Data = payload.data ?: return
+                if (base64Data.length > 25 * 1024 * 1024) return
+                try {
+                    val bytes = Base64.decode(base64Data, Base64.DEFAULT)
+                    if (bytes.isEmpty()) return
+                    val hash = payload.hash.ifEmpty { ClipboardPayload.computeSHA256(bytes) }
+
+                    if (hash == ClipboardSyncManager.lastSentHash || hash == ClipboardSyncManager.lastReceivedHash) {
+                        return
+                    }
+
+                    val mime = payload.mime ?: "image/jpeg"
+                    val imageUri = ClipboardImageProvider.saveImageAndGetUri(this, bytes, mime) ?: return
+
+                    mainHandler.post {
+                        try {
+                            ClipboardSyncManager.lastReceivedHash = hash
+                            ClipboardSyncManager.lastRawImageHash = hash
+                            ClipboardSyncManager.isInternalMutation = true
+                            val clipData = ClipData.newUri(contentResolver, "Bridge Image", imageUri)
+                            clipboardManager.setPrimaryClip(clipData)
+                            ClipboardSyncManager.recordHistory("[Image]", outgoing = false)
+                            Log.d(TAG, "Injected remote image into Android (${bytes.size / 1024} KB, hash=${hash.take(8)})")
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to set image clipboard: ${e.message}", e)
+                            ClipboardSyncManager.isInternalMutation = false
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to decode incoming image payload: ${e.message}", e)
+                }
             }
         }
     }

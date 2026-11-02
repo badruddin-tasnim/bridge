@@ -2,6 +2,7 @@ import Foundation
 import AppKit
 import SwiftUI
 import CoreImage.CIFilterBuiltins
+import UserNotifications
 
 class BridgeModel: ObservableObject {
     @Published var rawCode: String = ""
@@ -21,10 +22,31 @@ class BridgeModel: ObservableObject {
             onSizeChangeRequested?()
         }
     }
+    @Published var availableUpdateVersion: String? = nil {
+        didSet {
+            onSizeChangeRequested?()
+        }
+    }
+    @Published var availableUpdateUrl: String? = nil
+
     var onSizeChangeRequested: (() -> Void)?
     
     let server = BridgeServer()
     private var breatheTimer: Timer?
+    private var updateTimer: Timer?
+
+    // Update Checker Constants
+    private static let githubLatestReleaseUrl = "https://api.github.com/repos/badruddin-tasnim/bridge/releases/latest"
+    private static let fallbackReleasesUrl = "https://github.com/badruddin-tasnim/bridge/releases/latest"
+    private static let oneDaySeconds: TimeInterval = 24 * 60 * 60
+    private static let minCheckIntervalSeconds: TimeInterval = 60 * 60
+    private static let keyLatestVersion = "bridge_update_latest_version"
+    private static let keyDownloadUrl = "bridge_update_download_url"
+    private static let keyDismissedVersion = "bridge_update_dismissed_version"
+    private static let keyDismissedAt = "bridge_update_dismissed_at"
+    private static let keyLastNotifiedVersion = "bridge_update_last_notified_version"
+    private static let keyLastNotifiedAt = "bridge_update_last_notified_at"
+    private static let keyLastCheckAt = "bridge_update_last_check_at"
     
     init() {
         self.rawCode = server.pairingCode
@@ -45,6 +67,8 @@ class BridgeModel: ObservableObject {
         breatheTimer = Timer.scheduledTimer(withTimeInterval: 1.2, repeats: true) { [weak self] _ in
             self?.dotBreathe.toggle()
         }
+
+        startUpdateChecking()
     }
     
     private func setupServerCallbacks() {
@@ -131,5 +155,169 @@ class BridgeModel: ObservableObject {
             self.showPairingSection = true
             self.onSizeChangeRequested?()
         }
+    }
+
+    // MARK: - GitHub Release Update Checker (24-Hour Cooldown)
+
+    private func startUpdateChecking() {
+        evaluateCachedUpdateState()
+        checkForUpdates(forceNetwork: false)
+
+        updateTimer?.invalidate()
+        updateTimer = Timer.scheduledTimer(withTimeInterval: 6 * 3600, repeats: true) { [weak self] _ in
+            self?.checkForUpdates(forceNetwork: false)
+        }
+    }
+
+    func checkForUpdates(forceNetwork: Bool = false) {
+        let defaults = UserDefaults.standard
+        let now = Date().timeIntervalSince1970
+        let lastCheck = defaults.double(forKey: Self.keyLastCheckAt)
+
+        if !forceNetwork && (now - lastCheck < Self.minCheckIntervalSeconds) {
+            evaluateCachedUpdateState()
+            return
+        }
+
+        guard let url = URL(string: Self.githubLatestReleaseUrl) else { return }
+        var request = URLRequest(url: url, timeoutInterval: 8.0)
+        request.httpMethod = "GET"
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        request.setValue("Bridge-macOS-App", forHTTPHeaderField: "User-Agent")
+
+        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+            guard let self = self else { return }
+            if let httpResp = response as? HTTPURLResponse,
+               httpResp.statusCode == 200,
+               let data = data,
+               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let rawTag = json["tag_name"] as? String {
+
+                let cleanVersion = rawTag.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .replacingOccurrences(of: "^[vV]", with: "", options: .regularExpression)
+
+                if !cleanVersion.isEmpty {
+                    var targetUrl = (json["html_url"] as? String) ?? Self.fallbackReleasesUrl
+                    if let assets = json["assets"] as? [[String: Any]] {
+                        for asset in assets {
+                            if let name = asset["name"] as? String,
+                               let downloadUrl = asset["browser_download_url"] as? String,
+                               name.lowercased().contains("macos") && name.lowercased().hasSuffix(".zip") {
+                                targetUrl = downloadUrl
+                                break
+                            }
+                        }
+                    }
+
+                    if !targetUrl.hasPrefix("https://github.com/badruddin-tasnim/bridge/") &&
+                       !targetUrl.hasPrefix("https://objects.githubusercontent.com/") {
+                        targetUrl = Self.fallbackReleasesUrl
+                    }
+
+                    defaults.set(cleanVersion, forKey: Self.keyLatestVersion)
+                    defaults.set(targetUrl, forKey: Self.keyDownloadUrl)
+                    defaults.set(Date().timeIntervalSince1970, forKey: Self.keyLastCheckAt)
+                }
+            }
+            DispatchQueue.main.async {
+                self.evaluateCachedUpdateState()
+            }
+        }.resume()
+    }
+
+    private func evaluateCachedUpdateState() {
+        let defaults = UserDefaults.standard
+        guard let latestVersion = defaults.string(forKey: Self.keyLatestVersion), !latestVersion.isEmpty else {
+            if availableUpdateVersion != nil { availableUpdateVersion = nil }
+            return
+        }
+
+        let currentVersion = (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.0.0"
+        guard Self.isNewerVersion(remote: latestVersion, current: currentVersion) else {
+            if availableUpdateVersion != nil { availableUpdateVersion = nil }
+            return
+        }
+
+        // Check if user dismissed this version within the last 24 hours (1 day)
+        let now = Date().timeIntervalSince1970
+        let dismissedVer = defaults.string(forKey: Self.keyDismissedVersion)
+        let dismissedAt = defaults.double(forKey: Self.keyDismissedAt)
+        if dismissedVer == latestVersion && (now - dismissedAt) < Self.oneDaySeconds {
+            if availableUpdateVersion != nil { availableUpdateVersion = nil }
+            return
+        }
+
+        let downloadUrl = defaults.string(forKey: Self.keyDownloadUrl) ?? Self.fallbackReleasesUrl
+        availableUpdateUrl = downloadUrl
+        if availableUpdateVersion != latestVersion {
+            availableUpdateVersion = latestVersion
+        }
+
+        // Post native macOS notification at most once per day (24 hours)
+        let lastNotifiedVer = defaults.string(forKey: Self.keyLastNotifiedVersion)
+        let lastNotifiedAt = defaults.double(forKey: Self.keyLastNotifiedAt)
+        if lastNotifiedVer != latestVersion || (now - lastNotifiedAt) >= Self.oneDaySeconds {
+            postSystemUpdateNotification(version: latestVersion)
+            defaults.set(latestVersion, forKey: Self.keyLastNotifiedVersion)
+            defaults.set(now, forKey: Self.keyLastNotifiedAt)
+        }
+    }
+
+    func dismissUpdateForToday() {
+        let defaults = UserDefaults.standard
+        guard let latestVersion = defaults.string(forKey: Self.keyLatestVersion) else {
+            availableUpdateVersion = nil
+            return
+        }
+        defaults.set(latestVersion, forKey: Self.keyDismissedVersion)
+        defaults.set(Date().timeIntervalSince1970, forKey: Self.keyDismissedAt)
+
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ["bridge_update_notification"])
+        availableUpdateVersion = nil
+    }
+
+    func openUpdateDownload() {
+        let urlStr = availableUpdateUrl ?? Self.fallbackReleasesUrl
+        if let url = URL(string: urlStr) {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    private func postSystemUpdateNotification(version: String) {
+        let center = UNUserNotificationCenter.current()
+        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+            guard granted else { return }
+            let content = UNMutableNotificationContent()
+            content.title = "Bridge v\(version) is available"
+            content.body = "Open Bridge in your menu bar to download the latest update from GitHub."
+            content.sound = .default
+
+            let req = UNNotificationRequest(
+                identifier: "bridge_update_notification",
+                content: content,
+                trigger: nil
+            )
+            center.add(req, withCompletionHandler: nil)
+        }
+    }
+
+    static func isNewerVersion(remote: String, current: String) -> Bool {
+        let rParts = parseVersionParts(remote)
+        let cParts = parseVersionParts(current)
+        let count = max(rParts.count, cParts.count)
+        for i in 0..<count {
+            let r = i < rParts.count ? rParts[i] : 0
+            let c = i < cParts.count ? cParts[i] : 0
+            if r > c { return true }
+            if r < c { return false }
+        }
+        return false
+    }
+
+    private static func parseVersionParts(_ version: String) -> [Int] {
+        let cleaned = version.trimmingCharacters(in: .whitespacesAndNewlines)
+            .replacingOccurrences(of: "^[vV]", with: "", options: .regularExpression)
+            .components(separatedBy: CharacterSet(charactersIn: "-+")).first ?? ""
+        return cleaned.split(separator: ".").map { Int($0) ?? 0 }
     }
 }

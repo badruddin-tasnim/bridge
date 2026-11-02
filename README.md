@@ -9,7 +9,7 @@
 A lightweight, native open-source bridge that links your **Android phone** and your **Mac** over your local Wi-Fi network—with zero cloud accounts, zero telemetry, and zero latency.
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-v1.0.0-C8F135?style=for-the-badge&labelColor=0E0F12" alt="Version 1.0.0" />
+  <img src="https://img.shields.io/badge/Version-v1.1.0-C8F135?style=for-the-badge&labelColor=0E0F12" alt="Version 1.1.0" />
   <img src="https://img.shields.io/badge/Android-Kotlin-C8F135?style=for-the-badge&logo=android&logoColor=C8F135&labelColor=0E0F12" alt="Android Kotlin" />
   <img src="https://img.shields.io/badge/macOS-Swift_%26_SwiftUI-C8F135?style=for-the-badge&logo=apple&logoColor=C8F135&labelColor=0E0F12" alt="macOS Swift" />
   <img src="https://img.shields.io/badge/Network-100%25_Local_LAN-181B20?style=for-the-badge&labelColor=0E0F12&color=C8F135" alt="100% Local LAN" />
@@ -17,9 +17,9 @@ A lightweight, native open-source bridge that links your **Android phone** and y
 </p>
 
 <p align="center">
-  <a href="#-bridge---features-v10">Features</a> •
-  <a href="#-roadmap-upcoming-versions">Roadmap</a> •
-  <a href="#-getting-started-v10">Download & Install</a> •
+  <a href="#bridge---features-v11">Features</a> •
+  <a href="#️-roadmap-upcoming-versions">Roadmap</a> •
+  <a href="#-getting-started-v11">Download & Install</a> •
   <a href="#-how-to-pair--use-bridge">How to Use</a> •
   <a href="#-security-privacy--permissions-transparency">Security & Permissions</a>
 </p>
@@ -29,20 +29,21 @@ A lightweight, native open-source bridge that links your **Android phone** and y
 ---
 
 > [!IMPORTANT]
-> **Active Open-Source Project (`v1.0`)**  
-> **Bridge** is built to be a complete continuity bridge between Android and macOS—not just a single-purpose utility. `v1.0` establishes the native local-network link engine, instant QR & 6-digit pairing, automatic Bonjour/mDNS discovery, sleep/wake resilience, and real-time background clipboard synchronization. Upcoming versions will roll out **clipboard image sync**, **notification sync**, and **direct file & media transfer** one by one.
+> **Active Open-Source Project (`v1.1`)**  
+> **Bridge** is built to be a complete continuity bridge between Android and macOS—not just a single-purpose utility. `v1.1` delivers the native local-network link engine, instant QR & 6-digit pairing, automatic Bonjour/mDNS discovery, sleep/wake resilience, **real-time bi-directional text & photo/screenshot clipboard synchronization**, and **automatic GitHub release update notifications**. Upcoming versions will roll out **notification sync** and **direct file & media transfer** one by one.
 
 ---
 
-## Bridge - Features (v1.0)
+## Bridge - Features (v1.1)
 
 | Feature | Description |
 | :--- | :--- |
 | **Instant QR & 6-Digit Pairing** | Open Bridge in your Mac's menu bar and scan the QR code from the Android app—or type the 6-digit pairing code—to link your devices in seconds. |
+| **Two-Way Text & Photo Clipboard Sync** | Copy text, photos, or screenshots on either your Android phone or your Mac and immediately paste them on the other device with zero extra taps. |
 | **Zero-Config Bonjour Discovery** | Automatically discovers your Mac on your local Wi-Fi via mDNS (`_clipboardsync._tcp`), seamlessly handling router DHCP IP changes. |
 | **Sleep & Lid-Close Resilience** | Gracefully pauses when you close your MacBook lid and automatically re-establishes the link within seconds when your Mac wakes up. |
-| **Seamless Background Sync** | Keeps your Android phone and Mac in step in the background—starting in `v1.0` with instant, bi-directional text clipboard synchronization. |
-| **100% Local Wi-Fi Architecture** | Every packet travels directly between your phone and your Mac over your local router (`TCP :8765`). Zero cloud relays, zero accounts, zero tracking. |
+| **Release Update Notifications** | Automatically checks GitHub Releases and notifies you in the Android app and Mac menu bar whenever a new version of Bridge is available. |
+| **100% Local Wi-Fi Architecture** | Every clipboard packet travels directly between your phone and your Mac over your local router (`TCP :8765`). Zero cloud relays, zero accounts, zero tracking. |
 
 ---
 
@@ -53,28 +54,28 @@ Bridge is evolving step by step into a full cross-device ecosystem link between 
 | Version | Milestone | Status | Details |
 | :--- | :--- | :---: | :--- |
 | **`v1.0`** | **Core Link Engine & Text Sync** | ![Shipped](https://img.shields.io/badge/LIVE-C8F135?style=flat-square&labelColor=0E0F12) | Native macOS menu bar app & Android app, QR / 6-digit pairing, Bonjour auto-discovery, sleep/wake auto-reconnect, and two-way text clipboard sync. |
-| **`v1.1`** | **Clipboard Image & Screenshot Sync** | ![Next Up](https://img.shields.io/badge/IN_PROGRESS-181B20?style=flat-square&color=C8F135) | Copy an image or take a screenshot on your phone or Mac and paste it directly on the other device. |
-| **`v1.2`** | **Notification Sync** | ![Planned](https://img.shields.io/badge/PLANNED-2B2F36?style=flat-square&color=9BA3AD) | View, manage, and dismiss Android notifications directly from your Mac in real time. |
+| **`v1.1`** | **Clipboard Image & Screenshot Sync** | ![Shipped](https://img.shields.io/badge/LIVE-C8F135?style=flat-square&labelColor=0E0F12) | Copy an image or take a screenshot on your phone or Mac and paste it directly on the other device, plus automatic GitHub release update notifications. |
+| **`v1.2`** | **Notification Sync** | ![Next Up](https://img.shields.io/badge/IN_PROGRESS-181B20?style=flat-square&color=C8F135) | View, manage, and dismiss Android notifications directly from your Mac in real time. |
 | **`v1.3`** | **Direct File & Media Transfer** | ![Planned](https://img.shields.io/badge/PLANNED-2B2F36?style=flat-square&color=9BA3AD) | Drag and drop files into the Mac menu bar popover or share from Android's share sheet for full-speed local Wi-Fi transfers. |
 | **`v1.4+`** | **Quick Actions & E2E Encryption** | ![Planned](https://img.shields.io/badge/PLANNED-2B2F36?style=flat-square&color=9BA3AD) | Battery status, media playback controls, Find My Phone ring, and TLS/Noise channel encryption. |
 
 ---
 
-## 🚀 Getting Started (v1.0)
+## 🚀 Getting Started (v1.1)
 
 You can install Bridge either by downloading the pre-built release binaries directly from [**GitHub Releases**](../../releases), using terminal commands, or building from source.
 
 ### Option 1: Direct Download (Easiest)
 
-1. Visit the [**Releases**](../../releases) page and download the two `v1.0.0` packages:
-   - 💻 **`Bridge-v1.0.0-macOS.zip`** — Native macOS Menu Bar App (`macOS 11.0+`)
-   - 📱 **`Bridge-v1.0.0-Android.apk`** — Native Android App (`Android 8.0+`)
+1. Visit the [**Releases**](../../releases) page and download the two `v1.1.0` packages:
+   - 💻 **`Bridge-v1.1.0-macOS.zip`** — Native macOS Menu Bar App (`macOS 11.0+`)
+   - 📱 **`Bridge-v1.1.0-Android.apk`** — Native Android App (`Android 8.0+`)
 2. **Install on macOS:**
-   - Unzip `Bridge-v1.0.0-macOS.zip` and move **`Bridge.app`** into `/Applications`.
+   - Unzip `Bridge-v1.1.0-macOS.zip` and move **`Bridge.app`** into `/Applications`.
    - Launch **`Bridge.app`**. *(If macOS Gatekeeper prompts on first launch, right-click `Bridge.app` → **Open**, or run `xattr -cr /Applications/Bridge.app && open /Applications/Bridge.app` in Terminal).*
    - The Bridge icon will appear in your Mac's top menu bar.
 3. **Install on Android:**
-   - Open **`Bridge-v1.0.0-Android.apk`** on your Android phone to install the app.
+   - Open **`Bridge-v1.1.0-Android.apk`** on your Android phone to install the app.
 
 ---
 
@@ -84,13 +85,13 @@ If you prefer installing directly from your terminal using `curl` and `adb`:
 
 ```bash
 # 1. Download & launch the macOS Menu Bar app in /Applications
-curl -L -o /tmp/Bridge-macOS.zip "https://github.com/badruddin-tasnim/bridge/releases/download/v1.0.0/Bridge-v1.0.0-macOS.zip"
+curl -L -o /tmp/Bridge-macOS.zip "https://github.com/badruddin-tasnim/bridge/releases/download/v1.1.0/Bridge-v1.1.0-macOS.zip"
 unzip -q -o /tmp/Bridge-macOS.zip -d /Applications
 xattr -cr /Applications/Bridge.app
 open /Applications/Bridge.app
 
 # 2. Download & install the Android APK over ADB (with your phone plugged in via USB)
-curl -L -o /tmp/Bridge-Android.apk "https://github.com/badruddin-tasnim/bridge/releases/download/v1.0.0/Bridge-v1.0.0-Android.apk"
+curl -L -o /tmp/Bridge-Android.apk "https://github.com/badruddin-tasnim/bridge/releases/download/v1.1.0/Bridge-v1.1.0-Android.apk"
 adb install -r /tmp/Bridge-Android.apk
 ```
 
@@ -143,11 +144,11 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 As an open-source project that links your personal devices, **Bridge is designed to be 100% auditable and transparent**:
 
 ### Core Security Principles
-- **Zero Cloud / Zero Telemetry:** Bridge has no analytics SDKs, no crash-reporting trackers, and no external API calls. All traffic stays strictly on your local LAN (`192.168.x.x` / `10.x.x.x`).
+- **Zero Cloud Relays / Zero Telemetry:** Bridge has no analytics SDKs and no tracking. All clipboard data (text and photos) travels strictly on your local LAN (`192.168.x.x` / `10.x.x.x`). The only external request is a read-only check to GitHub's official Releases API (`api.github.com/repos/badruddin-tasnim/bridge/releases/latest`) to notify you when a new version is published.
 - **Unique Per-Mac Pairing Secret:** Each Mac generates a random 6-digit pairing code stored locally in `~/.bridge_pairing_code`. Unpairing from the Mac menu bar immediately terminates active sockets and rotates the pairing code.
-- **Redacted Diagnostic Logs:** Logcat statements never log plaintext clipboard contents—only character counts and 8-character SHA-256 hash prefixes used for loop prevention.
+- **Redacted Diagnostic Logs:** Logcat statements never log plaintext clipboard contents—only character/byte counts and 8-character SHA-256 hash prefixes used for loop prevention.
 - **No Cloud Credential Backups:** `android:allowBackup="false"` is enforced in [`AndroidManifest.xml`](android-app/app/src/main/AndroidManifest.xml) so local pairing state is never backed up to third-party servers.
-- **Non-Exported Internal Components:** Internal helper activities and services (`ClipboardReaderActivity`, `PortraitCaptureActivity`, `ClipboardSyncForegroundService`) are strictly marked `android:exported="false"`.
+- **Non-Exported Internal Components & Hardened Image Provider:** Internal helper activities and services (`ClipboardReaderActivity`, `PortraitCaptureActivity`, `ClipboardSyncForegroundService`) are strictly marked `android:exported="false"`, and [`ClipboardImageProvider`](android-app/app/src/main/java/com/link/clipboardsync/ClipboardImageProvider.kt) is a read-only `ContentProvider` with strict filename regex validation that serves only the active clipboard image from private cache.
 
 ### Why Each Permission Is Needed
 
@@ -155,7 +156,7 @@ Every permission declared in [`AndroidManifest.xml`](android-app/app/src/main/An
 
 | Permission | Purpose in Bridge | Source Reference |
 | :--- | :--- | :--- |
-| `INTERNET` | Opens a direct local TCP socket (`:8765`) between your phone and your Mac over your Wi-Fi router. Never connects to external internet hosts. | [`NetworkSyncClient.kt`](android-app/app/src/main/java/com/link/clipboardsync/NetworkSyncClient.kt) |
+| `INTERNET` | Opens a direct local TCP socket (`:8765`) between your phone and your Mac over your Wi-Fi router, and queries GitHub Releases to check for app updates. | [`NetworkSyncClient.kt`](android-app/app/src/main/java/com/link/clipboardsync/NetworkSyncClient.kt)<br>[`UpdateChecker.kt`](android-app/app/src/main/java/com/link/clipboardsync/UpdateChecker.kt) |
 | `ACCESS_NETWORK_STATE`<br>`ACCESS_WIFI_STATE` | Detects Wi-Fi state changes so Bridge can automatically reconnect when you switch networks or wake your device. | [`NetworkSyncClient.kt`](android-app/app/src/main/java/com/link/clipboardsync/NetworkSyncClient.kt) |
 | `CHANGE_WIFI_MULTICAST_STATE`<br>`WAKE_LOCK` | Required by Android's Bonjour/mDNS (`NsdManager`) to discover your Mac on Wi-Fi and by `WifiLock` to keep the radio from dropping idle connections. | [`ClipboardSyncForegroundService.kt`](android-app/app/src/main/java/com/link/clipboardsync/ClipboardSyncForegroundService.kt) |
 | `FOREGROUND_SERVICE`<br>`FOREGROUND_SERVICE_CONNECTED_DEVICE` | Keeps the socket connection to your Mac alive in the background so OEM battery managers don't freeze the process. | [`ClipboardSyncForegroundService.kt`](android-app/app/src/main/java/com/link/clipboardsync/ClipboardSyncForegroundService.kt) |

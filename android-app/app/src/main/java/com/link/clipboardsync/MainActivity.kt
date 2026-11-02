@@ -30,12 +30,19 @@ import com.journeyapps.barcodescanner.ScanIntentResult
 import com.journeyapps.barcodescanner.ScanOptions
 import org.json.JSONObject
 
-class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, ClipboardSyncManager.HistoryListener {
+class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, ClipboardSyncManager.HistoryListener, UpdateChecker.UpdateListener {
 
     // Header views
     private lateinit var dotStatus: View
     private lateinit var tvStatusPill: TextView
     private var dotBlinkAnimator: ObjectAnimator? = null
+
+    // Update notification banner
+    private lateinit var layoutUpdateBanner: LinearLayout
+    private lateinit var tvUpdateTitle: TextView
+    private lateinit var btnUpdateDownload: Button
+    private lateinit var btnDismissUpdate: ImageView
+    private var currentUpdateUrl: String? = null
 
     // Service notice (Accessibility)
     private lateinit var layoutServiceNotice: LinearLayout
@@ -102,6 +109,8 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         ClipboardSyncManager.init(this)
         ClipboardSyncManager.addHistoryListener(this)
         ClipboardSyncManager.networkClient?.addListener(this)
+        UpdateChecker.addListener(this, this)
+        UpdateChecker.checkForUpdates(this, forceNetwork = false)
 
         updateAccessibilityNotice()
         updateUI()
@@ -115,12 +124,19 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         super.onPause()
         ClipboardSyncManager.networkClient?.removeListener(this)
         ClipboardSyncManager.removeHistoryListener(this)
+        UpdateChecker.removeListener(this)
     }
 
     private fun initViews() {
         // Header
         dotStatus = findViewById(R.id.dotStatus)
         tvStatusPill = findViewById(R.id.tvStatusPill)
+
+        // Update Banner
+        layoutUpdateBanner = findViewById(R.id.layoutUpdateBanner)
+        tvUpdateTitle = findViewById(R.id.tvUpdateTitle)
+        btnUpdateDownload = findViewById(R.id.btnUpdateDownload)
+        btnDismissUpdate = findViewById(R.id.btnDismissUpdate)
 
         // Accessibility service notice
         layoutServiceNotice = findViewById(R.id.layoutServiceNotice)
@@ -177,6 +193,18 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
     }
 
     private fun setupListeners() {
+        btnUpdateDownload.setOnClickListener {
+            val url = currentUpdateUrl ?: "https://github.com/badruddin-tasnim/bridge/releases/latest"
+            try {
+                startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+            } catch (ignored: Exception) {}
+        }
+
+        btnDismissUpdate.setOnClickListener {
+            UpdateChecker.dismissUpdateForToday(this)
+            layoutUpdateBanner.visibility = View.GONE
+        }
+
         btnEnableAccessibility.setOnClickListener {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }
@@ -572,6 +600,20 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
 
     override fun onHistoryChanged() {
         // Feed removed per design specification
+    }
+
+    // MARK: - UpdateListener
+
+    override fun onUpdateStateChanged(update: UpdateChecker.UpdateInfo?) {
+        runOnUiThread {
+            if (update != null) {
+                currentUpdateUrl = update.downloadUrl
+                tvUpdateTitle.text = "Bridge v${update.version} is available"
+                layoutUpdateBanner.visibility = View.VISIBLE
+            } else {
+                layoutUpdateBanner.visibility = View.GONE
+            }
+        }
     }
 
     private fun checkPermissions() {

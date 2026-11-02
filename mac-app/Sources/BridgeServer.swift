@@ -6,21 +6,48 @@ import CryptoKit
 // MARK: - Protocol Models
 
 struct ClipboardPayload: Codable {
-    let type: String          // "clip", "ping", "pong", "hello", "welcome", "denied", "sleep"
+    let type: String          // "clip", "image", "ping", "pong", "hello", "welcome", "denied", "sleep", "unpair"
     let hash: String?         // SHA-256 hex string
     let text: String?         // Plain text content
+    let data: String?         // Base64-encoded image bytes
+    let mime: String?         // Image MIME type ("image/png" or "image/jpeg")
     let timestamp: Int64      // Milliseconds since epoch
     let code: String?         // Pairing code
     let device: String?       // Device name
     let name: String?         // Server / Host name
+
+    init(
+        type: String,
+        hash: String? = nil,
+        text: String? = nil,
+        data: String? = nil,
+        mime: String? = nil,
+        timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000),
+        code: String? = nil,
+        device: String? = nil,
+        name: String? = nil
+    ) {
+        self.type = type
+        self.hash = hash
+        self.text = text
+        self.data = data
+        self.mime = mime
+        self.timestamp = timestamp
+        self.code = code
+        self.device = device
+        self.name = name
+    }
 }
 
 // MARK: - Helpers
 
-func computeSHA256(_ string: String) -> String {
-    let data = Data(string.utf8)
+func computeSHA256(_ data: Data) -> String {
     let digest = SHA256.hash(data: data)
     return digest.map { String(format: "%02x", $0) }.joined()
+}
+
+func computeSHA256(_ string: String) -> String {
+    return computeSHA256(Data(string.utf8))
 }
 
 func getPrimaryIPv4Address() -> String? {
@@ -59,7 +86,14 @@ class BridgeServer {
     private var authenticatedConnections = Set<UUID>()
     private var clientDeviceNames = [UUID: String]()
     private let networkQueue = DispatchQueue(label: "com.link.bridge.network")
+    private let imageQueue = DispatchQueue(label: "com.link.bridge.image", qos: .userInitiated)
     private let pathMonitor = NWPathMonitor()
+    private static let maxImageDimension = 2560
+    private static let maxUnauthBufferBytes = 8 * 1024
+    private static let maxAuthBufferBytes = 25 * 1024 * 1024
+    private static let supportedImageExtensions: Set<String> = [
+        "png", "jpg", "jpeg", "webp", "heic", "tiff", "tif", "bmp", "gif"
+    ]
     
     // Pairing state
     private(set) var pairingCode: String = ""
@@ -141,11 +175,6 @@ class BridgeServer {
     private func handleWillSleep() {
         let sleepPayload = ClipboardPayload(
             type: "sleep",
-            hash: nil,
-            text: nil,
-            timestamp: Int64(Date().timeIntervalSince1970 * 1000),
-            code: nil,
-            device: nil,
             name: Host.current().localizedName ?? "Mac"
         )
         broadcastPayload(sleepPayload)
@@ -173,7 +202,9 @@ class BridgeServer {
                 DispatchQueue.main.async { self.onIpChanged?(ip) }
             }
             self.startServer()
-            self.checkPasteboard()
+            DispatchQueue.main.async {
+                self.checkPasteboard()
+            }
         }
     }
     
@@ -267,6 +298,15 @@ class BridgeServer {
             var currentBuffer = buffer
             if let data = content, !data.isEmpty {
                 currentBuffer.append(data)
+                let maxAllowed = self.authenticatedConnections.contains(id) ? Self.maxAuthBufferBytes : Self.maxUnauthBufferBytes
+                if currentBuffer.count > maxAllowed {
+                    conn.cancel()
+                    self.connections.removeValue(forKey: id)
+                    self.authenticatedConnections.remove(id)
+                    self.clientDeviceNames.removeValue(forKey: id)
+                    self.notifyUiStatus()
+                    return
+                }
                 while let newlineIndex = currentBuffer.firstIndex(of: UInt8(ascii: "\n")) {
                     let lineData = currentBuffer.subdata(in: 0..<newlineIndex)
                     currentBuffer.removeSubrange(0...newlineIndex)
@@ -301,27 +341,11 @@ class BridgeServer {
                 self.clientDeviceNames[id] = device
                 
                 let macName = Host.current().localizedName ?? "Mac"
-                let welcome = ClipboardPayload(
-                    type: "welcome",
-                    hash: nil,
-                    text: nil,
-                    timestamp: Int64(Date().timeIntervalSince1970 * 1000),
-                    code: nil,
-                    device: nil,
-                    name: macName
-                )
+                let welcome = ClipboardPayload(type: "welcome", name: macName)
                 self.sendDirect(payload: welcome, to: conn)
                 self.notifyUiStatus()
             } else {
-                let denied = ClipboardPayload(
-                    type: "denied",
-                    hash: nil,
-                    text: nil,
-                    timestamp: Int64(Date().timeIntervalSince1970 * 1000),
-                    code: nil,
-                    device: nil,
-                    name: nil
-                )
+                let denied = ClipboardPayload(type: "denied")
                 self.sendDirect(payload: denied, to: conn)
             }
             return
@@ -330,15 +354,7 @@ class BridgeServer {
         guard self.authenticatedConnections.contains(id) else { return }
         
         if payload.type == "ping" {
-            let pong = ClipboardPayload(
-                type: "pong",
-                hash: nil,
-                text: nil,
-                timestamp: Int64(Date().timeIntervalSince1970 * 1000),
-                code: nil,
-                device: nil,
-                name: nil
-            )
+            let pong = ClipboardPayload(type: "pong")
             self.sendDirect(payload: pong, to: conn)
             return
         }
@@ -363,6 +379,23 @@ class BridgeServer {
                 self.lastChangeCount = self.pasteboard.changeCount
                 self.onClipboardSynced?(text, false)
             }
+            return
+        }
+
+        if payload.type == "image", let base64Data = payload.data, let hash = payload.hash {
+            if hash == self.lastSentHash || hash == self.lastReceivedHash { return }
+            guard let imageData = Data(base64Encoded: base64Data, options: .ignoreUnknownCharacters),
+                  let image = NSImage(data: imageData) else { return }
+
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.lastReceivedHash = hash
+                self.pasteboard.clearContents()
+                self.pasteboard.writeObjects([image])
+                self.lastChangeCount = self.pasteboard.changeCount
+                self.onClipboardSynced?("[Image]", false)
+            }
+            return
         }
     }
     
@@ -410,6 +443,36 @@ class BridgeServer {
         if count == lastChangeCount { return }
         lastChangeCount = count
         
+        let types = pasteboard.types ?? []
+
+        // 1. Check if the user copied a file in Finder (.fileURL)
+        if types.contains(.fileURL) {
+            if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL],
+               let firstURL = urls.first,
+               firstURL.isFileURL {
+                let ext = firstURL.pathExtension.lowercased()
+                if Self.supportedImageExtensions.contains(ext),
+                   let image = NSImage(contentsOf: firstURL) {
+                    dispatchImageToAndroid(image)
+                    return
+                }
+            }
+            // Non-image file copied in Finder: do not sync Finder's file icon as a photo
+            return
+        }
+
+        // 2. Check if the user copied an image or screenshot (.png / .tiff before .string)
+        let imageTypeIndex = types.firstIndex(where: { $0 == .png || $0 == .tiff })
+        let stringTypeIndex = types.firstIndex(of: .string)
+
+        if let imgIdx = imageTypeIndex, (stringTypeIndex == nil || imgIdx < stringTypeIndex!) {
+            if let image = NSImage(pasteboard: pasteboard) {
+                dispatchImageToAndroid(image)
+                return
+            }
+        }
+
+        // 3. Standard plain text copy
         guard let text = pasteboard.string(forType: .string), !text.isEmpty else { return }
         let hash = computeSHA256(text)
         if hash == lastReceivedHash || hash == lastSentHash { return }
@@ -418,30 +481,96 @@ class BridgeServer {
         let payload = ClipboardPayload(
             type: "clip",
             hash: hash,
-            text: text,
-            timestamp: Int64(Date().timeIntervalSince1970 * 1000),
-            code: nil,
-            device: nil,
-            name: nil
+            text: text
         )
         broadcastPayload(payload)
         DispatchQueue.main.async { [weak self] in
             self?.onClipboardSynced?(text, true)
         }
     }
+
+    private func dispatchImageToAndroid(_ image: NSImage) {
+        guard let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return }
+
+        imageQueue.async { [weak self] in
+            guard let self = self else { return }
+            guard let (encodedData, mime) = Self.encodeCGImageForSync(cgImage) else { return }
+
+            let hash = computeSHA256(encodedData)
+            if hash == self.lastReceivedHash || hash == self.lastSentHash { return }
+            self.lastSentHash = hash
+
+            let base64String = encodedData.base64EncodedString()
+            let payload = ClipboardPayload(
+                type: "image",
+                hash: hash,
+                text: "[Image]",
+                data: base64String,
+                mime: mime
+            )
+            self.broadcastPayload(payload)
+            DispatchQueue.main.async { [weak self] in
+                self?.onClipboardSynced?("[Image]", true)
+            }
+        }
+    }
+
+    private static func encodeCGImageForSync(_ cgImage: CGImage) -> (Data, String)? {
+        let width = cgImage.width
+        let height = cgImage.height
+        guard width > 0 && height > 0 else { return nil }
+
+        let maxDim = max(width, height)
+        let finalCGImage: CGImage
+
+        if maxDim > maxImageDimension {
+            let scale = Double(maxImageDimension) / Double(maxDim)
+            let newW = max(1, Int(Double(width) * scale))
+            let newH = max(1, Int(Double(height) * scale))
+            let colorSpace = CGColorSpaceCreateDeviceRGB()
+            let bitmapInfo = CGImageAlphaInfo.premultipliedLast.rawValue
+
+            if let ctx = CGContext(
+                data: nil,
+                width: newW,
+                height: newH,
+                bitsPerComponent: 8,
+                bytesPerRow: 0,
+                space: colorSpace,
+                bitmapInfo: bitmapInfo
+            ) {
+                ctx.interpolationQuality = .high
+                ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: newW, height: newH))
+                finalCGImage = ctx.makeImage() ?? cgImage
+            } else {
+                finalCGImage = cgImage
+            }
+        } else {
+            finalCGImage = cgImage
+        }
+
+        let bitmapRep = NSBitmapImageRep(cgImage: finalCGImage)
+        let usePng = bitmapRep.hasAlpha && (finalCGImage.width * finalCGImage.height <= 1_000_000)
+
+        if usePng, let pngData = bitmapRep.representation(using: .png, properties: [:]) {
+            return (pngData, "image/png")
+        }
+
+        if let jpegData = bitmapRep.representation(using: .jpeg, properties: [.compressionFactor: 0.88]) {
+            return (jpegData, "image/jpeg")
+        }
+
+        if let pngFallback = bitmapRep.representation(using: .png, properties: [:]) {
+            return (pngFallback, "image/png")
+        }
+
+        return nil
+    }
     
     private func startHeartbeat() {
         heartbeatTimer?.invalidate()
         heartbeatTimer = Timer.scheduledTimer(withTimeInterval: 12.0, repeats: true) { [weak self] _ in
-            let ping = ClipboardPayload(
-                type: "ping",
-                hash: nil,
-                text: nil,
-                timestamp: Int64(Date().timeIntervalSince1970 * 1000),
-                code: nil,
-                device: nil,
-                name: nil
-            )
+            let ping = ClipboardPayload(type: "ping")
             self?.broadcastPayload(ping)
         }
     }
@@ -455,15 +584,7 @@ class BridgeServer {
     }
     
     func unpairAllDevices() {
-        let unpairPayload = ClipboardPayload(
-            type: "unpair",
-            hash: nil,
-            text: nil,
-            timestamp: Int64(Date().timeIntervalSince1970 * 1000),
-            code: nil,
-            device: nil,
-            name: nil
-        )
+        let unpairPayload = ClipboardPayload(type: "unpair")
         broadcastPayload(unpairPayload)
         
         networkQueue.asyncAfter(deadline: .now() + 0.15) { [weak self] in

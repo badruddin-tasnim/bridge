@@ -76,6 +76,79 @@
             </LinearLayout>
         </LinearLayout>
 
+        <!-- Update Available Notification Banner (Dismissible for 24 hours) -->
+        <LinearLayout
+            android:id="@+id/layoutUpdateBanner"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:background="@drawable/bg_card_panel"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="16dp"
+            android:paddingTop="13dp"
+            android:paddingEnd="12dp"
+            android:paddingBottom="13dp"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/tvUpdateTitle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Bridge v1.1.0 is available"
+                    android:textColor="@color/bridge_text"
+                    android:fontFamily="@font/plus_jakarta_sans_semibold"
+                    android:textSize="14.5sp" />
+
+                <TextView
+                    android:id="@+id/tvUpdateSub"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="A new version is ready on GitHub"
+                    android:textColor="@color/bridge_muted"
+                    android:fontFamily="@font/plus_jakarta_sans_regular"
+                    android:textSize="12.5sp" />
+            </LinearLayout>
+
+            <com.google.android.material.button.MaterialButton
+                android:id="@+id/btnUpdateDownload"
+                android:layout_width="wrap_content"
+                android:layout_height="34dp"
+                android:layout_marginStart="8dp"
+                android:minWidth="0dp"
+                android:minHeight="0dp"
+                android:paddingStart="14dp"
+                android:paddingEnd="14dp"
+                android:insetTop="0dp"
+                android:insetBottom="0dp"
+                android:background="@drawable/bg_button_lime"
+                app:backgroundTint="@null"
+                app:cornerRadius="17dp"
+                android:text="Update"
+                android:textAllCaps="false"
+                android:letterSpacing="0"
+                android:textColor="@color/bridge_ink"
+                android:fontFamily="@font/plus_jakarta_sans_semibold"
+                android:textSize="13sp" />
+
+            <ImageView
+                android:id="@+id/btnDismissUpdate"
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                android:layout_marginStart="6dp"
+                android:padding="7dp"
+                android:src="@drawable/ic_close_small"
+                android:background="?attr/selectableItemBackgroundBorderless"
+                android:contentDescription="Dismiss update notification" />
+        </LinearLayout>
+
         <!-- Optional Accessibility Notice Card (styled seamlessly in dark theme) -->
         <LinearLayout
             android:id="@+id/layoutServiceNotice"

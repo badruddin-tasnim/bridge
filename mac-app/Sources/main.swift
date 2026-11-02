@@ -60,8 +60,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     private func updatePopoverSize() {
         guard let pop = popover else { return }
-        let targetHeight: CGFloat = model.isConnected ? (model.showPairingSection ? 580 : 230) : 490
-        pop.contentSize = NSSize(width: 360, height: targetHeight)
+        let baseHeight: CGFloat = model.isConnected ? (model.showPairingSection ? 580 : 230) : 490
+        let updateOffset: CGFloat = (model.availableUpdateVersion != nil) ? 66 : 0
+        pop.contentSize = NSSize(width: 360, height: baseHeight + updateOffset)
     }
     
     @objc private func togglePopover() {
@@ -69,6 +70,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if pop.isShown {
             pop.performClose(nil)
         } else {
+            model.checkForUpdates(forceNetwork: false)
             updatePopoverSize()
             pop.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             if let window = pop.contentViewController?.view.window {

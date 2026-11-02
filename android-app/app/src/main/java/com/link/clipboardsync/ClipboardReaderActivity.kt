@@ -12,21 +12,24 @@ class ClipboardReaderActivity : Activity() {
 
     companion object {
         private const val TAG = "ClipboardReaderActivity"
+        private const val MAX_ATTEMPTS = 3
+        private const val RETRY_DELAY_MS = 110L
     }
 
-    private var hasRead = false
+    private var isFinished = false
+    private var focusReadStarted = false
     private val handler = Handler(Looper.getMainLooper())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         overridePendingTransition(0, 0)
 
-        // Safety watchdog: Automatically finish after 250ms
+        // Safety watchdog: ensure the invisible activity always closes quickly
         handler.postDelayed({
-            if (!hasRead) {
-                readClipboardAndFinish()
+            if (!isFinished) {
+                tryReadClipboard(MAX_ATTEMPTS)
             }
-        }, 250)
+        }, 380)
     }
 
     override fun onResume() {
@@ -36,32 +39,46 @@ class ClipboardReaderActivity : Activity() {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus && !hasRead) {
-            readClipboardAndFinish()
+        if (hasFocus && !focusReadStarted && !isFinished) {
+            focusReadStarted = true
+            tryReadClipboard(1)
         }
     }
 
-    private fun readClipboardAndFinish() {
-        if (hasRead) return
-        hasRead = true
+    private fun tryReadClipboard(attempt: Int) {
+        if (isFinished) return
 
+        var dispatched = false
         try {
             val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             val clip = cm.primaryClip
             if (clip != null && clip.itemCount > 0) {
-                val item = clip.getItemAt(0)
-                val text = item.coerceToText(this)?.toString()
-                if (!text.isNullOrEmpty()) {
-                    Log.d(TAG, "Successfully read clipboard with window focus (${text.length} chars)")
-                    ClipboardSyncManager.dispatchTextToMac(applicationContext, text, "ClipboardReaderActivity")
-                }
+                dispatched = ClipboardSyncManager.extractAndDispatchClipboard(
+                    this,
+                    clip,
+                    "ClipboardReaderActivity#$attempt"
+                )
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to read clipboard in focused activity: ${e.message}")
-        } finally {
-            finish()
-            overridePendingTransition(0, 0)
+            Log.e(TAG, "Failed to read clipboard in focused activity (attempt $attempt): ${e.message}")
         }
+
+        if (dispatched || attempt >= MAX_ATTEMPTS) {
+            finishSilently()
+        } else {
+            // Some apps (Chrome, Gallery) write copied images asynchronously ~80-200ms after tapping "Copy image"
+            handler.postDelayed({
+                tryReadClipboard(attempt + 1)
+            }, RETRY_DELAY_MS)
+        }
+    }
+
+    private fun finishSilently() {
+        if (isFinished) return
+        isFinished = true
+        handler.removeCallbacksAndMessages(null)
+        finish()
+        overridePendingTransition(0, 0)
     }
 
     override fun onPause() {

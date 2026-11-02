@@ -123,6 +123,62 @@ struct BridgeMenuView: View {
                 }
             }
             .padding(.top, 4)
+
+            // Update Notification Banner (Dismissible for 24 hours)
+            if let updateVer = model.availableUpdateVersion {
+                HStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Bridge v\(updateVer) is available")
+                            .font(.custom("PlusJakartaSans-SemiBold", size: 13.5))
+                            .foregroundColor(BridgeColors.text)
+                            .lineLimit(1)
+
+                        Text("New release ready on GitHub")
+                            .font(.custom("PlusJakartaSans-Regular", size: 11.5))
+                            .foregroundColor(BridgeColors.muted)
+                            .lineLimit(1)
+                    }
+
+                    Spacer(minLength: 4)
+
+                    Button(action: {
+                        model.openUpdateDownload()
+                    }) {
+                        Text("Update")
+                            .font(.custom("PlusJakartaSans-SemiBold", size: 12))
+                            .foregroundColor(BridgeColors.ink)
+                            .padding(.horizontal, 12)
+                            .frame(height: 28)
+                            .background(
+                                RoundedRectangle(cornerRadius: 14)
+                                    .fill(BridgeColors.lime)
+                            )
+                    }
+                    .buttonStyle(.plain)
+
+                    Button(action: {
+                        model.dismissUpdateForToday()
+                    }) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundColor(BridgeColors.muted)
+                            .frame(width: 24, height: 24)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Dismiss for today")
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 14)
+                        .fill(BridgeColors.panel)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(BridgeColors.lime.opacity(0.35), lineWidth: 1)
+                )
+            }
             
             // Device Card (Visible while connected)
             if model.isConnected {
