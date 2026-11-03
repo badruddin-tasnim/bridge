@@ -5,6 +5,7 @@ import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.os.Build
 import android.util.Log
+import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
@@ -37,6 +38,7 @@ class NetworkSyncClient(private val context: Context) {
     interface SyncListener {
         fun onConnectionStatusChanged(isConnected: Boolean, host: String?) {}
         fun onPayloadReceived(payload: ClipboardPayload) {}
+        fun onNotificationPayloadReceived(jsonString: String) {}
         fun onLog(message: String) {}
         fun onPairingResult(accepted: Boolean, macName: String?) {}
         fun onRemoteUnpair() {}
@@ -159,6 +161,22 @@ class NetworkSyncClient(private val context: Context) {
         }
     }
 
+    fun sendRawJson(jsonString: String) {
+        sendExecutor.execute {
+            try {
+                if (isConnected()) {
+                    synchronized(this) {
+                        val out = writer ?: return@execute
+                        out.println(jsonString)
+                        out.flush()
+                    }
+                }
+            } catch (e: Exception) {
+                log("Error sending raw json: ${e.message}")
+            }
+        }
+    }
+
     private fun writeRaw(payload: ClipboardPayload) {
         synchronized(this) {
             writer?.println(payload.toJsonString())
@@ -228,45 +246,55 @@ class NetworkSyncClient(private val context: Context) {
                     var line: String? = reader.readLine()
                     while (line != null && isRunning.get()) {
                         if (line.isNotBlank()) {
-                            val payload = ClipboardPayload.fromJsonString(line.trim())
-                            when (payload?.type) {
-                                "welcome" -> {
-                                    authenticated = true
-                                    failedAttempts = 0
-                                    macName = payload.name ?: "Mac"
-                                    BridgePrefs.markPaired(context, macName)
-                                    log("Paired with ${payload.name} at $host:$currentPort")
-                                    notifyPairingResult(true, macName)
-                                    notifyConnectionStatusChanged(true, host)
-                                    startHeartbeat()
+                            val trimmed = line.trim()
+                            val jsonObj = try { JSONObject(trimmed) } catch (e: Exception) { null }
+                            val type = jsonObj?.optString("type")
+                            if (type != null && type.startsWith("notif_")) {
+                                if (authenticated) {
+                                    notifyNotificationPayloadReceived(trimmed)
                                 }
-                                "denied" -> {
-                                    log("Mac rejected the pairing code.")
-                                    isRunning.set(false)
-                                    notifyPairingResult(false, null)
+                            } else {
+                                val payload = ClipboardPayload.fromJsonString(trimmed)
+                                when (payload?.type) {
+                                    "welcome" -> {
+                                        authenticated = true
+                                        failedAttempts = 0
+                                        macName = payload.name ?: "Mac"
+                                        BridgePrefs.markPaired(context, macName)
+                                        log("Paired with ${payload.name} at $host:$currentPort")
+                                        notifyPairingResult(true, macName)
+                                        notifyConnectionStatusChanged(true, host)
+                                        startHeartbeat()
+                                        BridgeNotificationListenerService.instance?.syncActiveNotifications()
+                                    }
+                                    "denied" -> {
+                                        log("Mac rejected the pairing code.")
+                                        isRunning.set(false)
+                                        notifyPairingResult(false, null)
+                                    }
+                                    "unpair" -> {
+                                        log("Mac initiated unpair.")
+                                        pairCode = null
+                                        BridgePrefs.clear(context)
+                                        isRunning.set(false)
+                                        notifyRemoteUnpair()
+                                        notifyConnectionStatusChanged(false, null)
+                                        break
+                                    }
+                                    "sleep" -> {
+                                        log("Mac lid closed / entering sleep.")
+                                        break // Immediately terminate read loop & prepare for reconnect
+                                    }
+                                    "clip", "image" -> if (authenticated) notifyPayloadReceived(payload)
+                                    "ping" -> {
+                                        // Acknowledge ping
+                                        writeRaw(ClipboardPayload(type = "pong"))
+                                    }
+                                    "pong" -> {
+                                        // Keepalive ack received
+                                    }
+                                    else -> { /* unknown */ }
                                 }
-                                "unpair" -> {
-                                    log("Mac initiated unpair.")
-                                    pairCode = null
-                                    BridgePrefs.clear(context)
-                                    isRunning.set(false)
-                                    notifyRemoteUnpair()
-                                    notifyConnectionStatusChanged(false, null)
-                                    break
-                                }
-                                "sleep" -> {
-                                    log("Mac lid closed / entering sleep.")
-                                    break // Immediately terminate read loop & prepare for reconnect
-                                }
-                                "clip", "image" -> if (authenticated) notifyPayloadReceived(payload)
-                                "ping" -> {
-                                    // Acknowledge ping
-                                    writeRaw(ClipboardPayload(type = "pong"))
-                                }
-                                "pong" -> {
-                                    // Keepalive ack received
-                                }
-                                else -> { /* unknown */ }
                             }
                         }
                         line = reader.readLine()
@@ -320,6 +348,12 @@ class NetworkSyncClient(private val context: Context) {
     private fun notifyPayloadReceived(payload: ClipboardPayload) {
         for (l in listeners) {
             try { l.onPayloadReceived(payload) } catch (ignored: Exception) {}
+        }
+    }
+
+    private fun notifyNotificationPayloadReceived(jsonString: String) {
+        for (l in listeners) {
+            try { l.onNotificationPayloadReceived(jsonString) } catch (ignored: Exception) {}
         }
     }
 

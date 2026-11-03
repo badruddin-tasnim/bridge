@@ -1,6 +1,7 @@
 import Foundation
 import AppKit
 import SwiftUI
+import Combine
 import CoreImage.CIFilterBuiltins
 import UserNotifications
 
@@ -17,6 +18,19 @@ class BridgeModel: ObservableObject {
     @Published var qrCodeImage: NSImage? = nil
     @Published var copiedNotice: Bool = false
     @Published var dotBreathe: Bool = false
+    enum BridgeTab: String, CaseIterable {
+        case notifications = "Notifications"
+        case settings = "Settings"
+    }
+    @Published var selectedTab: BridgeTab = .notifications {
+        didSet {
+            onSizeChangeRequested?()
+        }
+    }
+    var notificationsManager: BridgeNotificationManager {
+        return BridgeNotificationManager.shared
+    }
+
     @Published var showPairingSection: Bool = false {
         didSet {
             onSizeChangeRequested?()
@@ -34,6 +48,7 @@ class BridgeModel: ObservableObject {
     let server = BridgeServer()
     private var breatheTimer: Timer?
     private var updateTimer: Timer?
+    private var cancellables = Set<AnyCancellable>()
 
     // Update Checker Constants
     private static let githubLatestReleaseUrl = "https://api.github.com/repos/badruddin-tasnim/bridge/releases/latest"
@@ -67,6 +82,13 @@ class BridgeModel: ObservableObject {
         breatheTimer = Timer.scheduledTimer(withTimeInterval: 1.2, repeats: true) { [weak self] _ in
             self?.dotBreathe.toggle()
         }
+
+        BridgeNotificationManager.shared.$activeNotifications
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.onSizeChangeRequested?()
+            }
+            .store(in: &cancellables)
 
         startUpdateChecking()
     }

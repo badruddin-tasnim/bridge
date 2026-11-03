@@ -48,6 +48,10 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
     private lateinit var layoutServiceNotice: LinearLayout
     private lateinit var btnEnableAccessibility: Button
 
+    // Service notice (Notification Listener)
+    private lateinit var layoutNotificationNotice: LinearLayout
+    private lateinit var btnEnableNotificationAccess: Button
+
     // Screen A: Connected
     private lateinit var layoutScreenConnected: LinearLayout
     private lateinit var heroCard: LinearLayout
@@ -57,6 +61,8 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
     private lateinit var tvDevicePhoneName: TextView
     private lateinit var tvDeviceMacName: TextView
     private lateinit var tvLiveBadge: TextView
+    private lateinit var cardNotificationFeature: LinearLayout
+    private lateinit var tvNotificationStatus: TextView
     private lateinit var btnHeroConnect: Button
     private lateinit var btnHeroUnpair: Button
 
@@ -101,6 +107,7 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         checkPermissions()
 
         ClipboardSyncManager.init(this)
+        BridgeNotificationManager.init(this)
         ClipboardSyncForegroundService.start(this)
     }
 
@@ -142,6 +149,10 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         layoutServiceNotice = findViewById(R.id.layoutServiceNotice)
         btnEnableAccessibility = findViewById(R.id.btnEnableAccessibility)
 
+        // Notification Access notice
+        layoutNotificationNotice = findViewById(R.id.layoutNotificationNotice)
+        btnEnableNotificationAccess = findViewById(R.id.btnEnableNotificationAccess)
+
         // Screen A
         layoutScreenConnected = findViewById(R.id.layoutScreenConnected)
         heroCard = findViewById(R.id.heroCard)
@@ -151,6 +162,8 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         tvDevicePhoneName = findViewById(R.id.tvDevicePhoneName)
         tvDeviceMacName = findViewById(R.id.tvDeviceMacName)
         tvLiveBadge = findViewById(R.id.tvLiveBadge)
+        cardNotificationFeature = findViewById(R.id.cardNotificationFeature)
+        tvNotificationStatus = findViewById(R.id.tvNotificationStatus)
         btnHeroConnect = findViewById(R.id.btnHeroConnect)
         btnHeroUnpair = findViewById(R.id.btnHeroUnpair)
 
@@ -207,6 +220,14 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
 
         btnEnableAccessibility.setOnClickListener {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        }
+
+        btnEnableNotificationAccess.setOnClickListener {
+            startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+        }
+
+        cardNotificationFeature.setOnClickListener {
+            startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
         }
 
         btnScanQr.setOnClickListener {
@@ -423,6 +444,18 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         } else {
             layoutServiceNotice.visibility = View.VISIBLE
         }
+
+        if (isNotificationServiceEnabled()) {
+            layoutNotificationNotice.visibility = View.GONE
+        } else {
+            layoutNotificationNotice.visibility = View.VISIBLE
+        }
+    }
+
+    private fun isNotificationServiceEnabled(): Boolean {
+        val flat = Settings.Secure.getString(contentResolver, "enabled_notification_listeners") ?: return false
+        val expected = "${packageName}/${BridgeNotificationListenerService::class.java.canonicalName}"
+        return flat.split(':').any { it.equals(expected, ignoreCase = true) || it.contains(packageName) }
     }
 
     private fun isAccessibilityServiceEnabled(): Boolean {
@@ -440,6 +473,14 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
             layoutScreenPairing.visibility = View.GONE
             layoutScreenConnected.visibility = View.VISIBLE
             tvDeviceMacName.text = macName
+
+            if (isNotificationServiceEnabled()) {
+                tvNotificationStatus.text = "Active"
+                tvNotificationStatus.setTextColor(colorLime)
+            } else {
+                tvNotificationStatus.text = "Tap to Enable"
+                tvNotificationStatus.setTextColor(colorCoral)
+            }
 
             if (connected) {
                 isConnectingState = false

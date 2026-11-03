@@ -11,6 +11,7 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:ignore="QueryAllPackagesCondition" />
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
@@ -75,6 +76,26 @@
             android:authorities="com.link.clipboardsync.clipboardprovider"
             android:exported="true"
             android:grantUriPermissions="true" />
+
+        <!-- Notification Listener Service for Mirroring Phone Notifications to Mac -->
+        <service
+            android:name=".BridgeNotificationListenerService"
+            android:label="Bridge Notification Mirror"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <!-- BroadcastReceiver for Mac Alert Dismiss Actions -->
+        <receiver
+            android:name=".MacAlertDismissReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.link.clipboardsync.ACTION_DISMISS_MAC_ALERT" />
+            </intent-filter>
+        </receiver>
 
     </application>
 </manifest>

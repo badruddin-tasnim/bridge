@@ -11,7 +11,7 @@ struct ClipboardPayload: Codable {
     let text: String?         // Plain text content
     let data: String?         // Base64-encoded image bytes
     let mime: String?         // Image MIME type ("image/png" or "image/jpeg")
-    let timestamp: Int64      // Milliseconds since epoch
+    let timestamp: Int64?     // Milliseconds since epoch
     let code: String?         // Pairing code
     let device: String?       // Device name
     let name: String?         // Server / Host name
@@ -22,7 +22,7 @@ struct ClipboardPayload: Codable {
         text: String? = nil,
         data: String? = nil,
         mime: String? = nil,
-        timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000),
+        timestamp: Int64? = Int64(Date().timeIntervalSince1970 * 1000),
         code: String? = nil,
         device: String? = nil,
         name: String? = nil
@@ -115,6 +115,9 @@ class BridgeServer {
     
     init() {
         loadOrGeneratePairingCode()
+        BridgeNotificationManager.shared.sendPayload = { [weak self] jsonString in
+            self?.broadcastRawJson(jsonString)
+        }
     }
     
     private func loadOrGeneratePairingCode() {
@@ -327,17 +330,22 @@ class BridgeServer {
     }
     
     private func processPayload(_ data: Data, from conn: NWConnection, id: UUID) {
-        guard let payload = try? JSONDecoder().decode(ClipboardPayload.self, from: data) else { return }
+        // Fast inspect message type from JSON structure
+        guard let jsonObject = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let type = jsonObject["type"] as? String else {
+            return
+        }
         
-        if payload.type == "hello" {
-            let incomingCode = payload.code?.replacingOccurrences(of: " ", with: "")
+        if type == "hello" {
+            let code = jsonObject["code"] as? String
+            let incomingCode = code?.replacingOccurrences(of: " ", with: "")
                 .replacingOccurrences(of: "-", with: "")
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
             let targetCode = self.pairingCode.replacingOccurrences(of: " ", with: "")
             
             if incomingCode == targetCode {
                 self.authenticatedConnections.insert(id)
-                let device = payload.device ?? "Android Device"
+                let device = (jsonObject["device"] as? String) ?? "Android Device"
                 self.clientDeviceNames[id] = device
                 
                 let macName = Host.current().localizedName ?? "Mac"
@@ -352,14 +360,20 @@ class BridgeServer {
         }
         
         guard self.authenticatedConnections.contains(id) else { return }
+
+        if type.hasPrefix("notif_") {
+            NSLog("[BridgeServer] Routing notif payload of type '%@' to BridgeNotificationManager", type)
+            BridgeNotificationManager.shared.handleIncomingPayload(data: data)
+            return
+        }
         
-        if payload.type == "ping" {
+        if type == "ping" {
             let pong = ClipboardPayload(type: "pong")
             self.sendDirect(payload: pong, to: conn)
             return
         }
         
-        if payload.type == "unpair" {
+        if type == "unpair" {
             self.connections.removeValue(forKey: id)
             self.authenticatedConnections.remove(id)
             self.clientDeviceNames.removeValue(forKey: id)
@@ -367,6 +381,8 @@ class BridgeServer {
             self.notifyUiStatus()
             return
         }
+        
+        guard let payload = try? JSONDecoder().decode(ClipboardPayload.self, from: data) else { return }
         
         if payload.type == "clip", let text = payload.text, let hash = payload.hash {
             if hash == self.lastSentHash || hash == self.lastReceivedHash { return }
@@ -426,6 +442,21 @@ class BridgeServer {
             for id in self.authenticatedConnections {
                 if let conn = self.connections[id] {
                     conn.send(content: line, completion: .contentProcessed({ _ in }))
+                }
+            }
+        }
+    }
+
+    func broadcastRawJson(_ jsonString: String) {
+        guard !authenticatedConnections.isEmpty else { return }
+        guard var data = jsonString.data(using: .utf8) else { return }
+        data.append(UInt8(ascii: "\n"))
+        
+        networkQueue.async { [weak self] in
+            guard let self = self else { return }
+            for id in self.authenticatedConnections {
+                if let conn = self.connections[id] {
+                    conn.send(content: data, completion: .contentProcessed({ _ in }))
                 }
             }
         }

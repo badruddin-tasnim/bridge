@@ -46,7 +46,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupPopover() {
         let pop = NSPopover()
         pop.behavior = .transient
-        pop.animates = true
+        pop.animates = false
         pop.appearance = NSAppearance(named: .darkAqua)
         pop.contentViewController = NSHostingController(rootView: BridgeMenuView(model: model))
         self.popover = pop
@@ -59,10 +59,33 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     private func updatePopoverSize() {
-        guard let pop = popover else { return }
-        let baseHeight: CGFloat = model.isConnected ? (model.showPairingSection ? 580 : 230) : 490
-        let updateOffset: CGFloat = (model.availableUpdateVersion != nil) ? 66 : 0
-        pop.contentSize = NSSize(width: 360, height: baseHeight + updateOffset)
+        guard let pop = popover, let controller = pop.contentViewController else { return }
+        controller.view.layoutSubtreeIfNeeded()
+        let fitting = controller.view.fittingSize
+        
+        let targetHeight: CGFloat
+        if fitting.height > 200 {
+            targetHeight = ceil(fitting.height)
+        } else {
+            let notifCount = BridgeNotificationManager.shared.activeNotifications.count
+            if !model.isConnected {
+                targetHeight = 510
+            } else if model.showPairingSection {
+                targetHeight = 680
+            } else if model.selectedTab == .settings {
+                targetHeight = 460
+            } else {
+                targetHeight = notifCount == 0 ? 430 : min(430 + CGFloat(notifCount) * 80.0, 600.0)
+            }
+        }
+        
+        let newSize = NSSize(width: 380, height: targetHeight)
+        if pop.contentSize != newSize {
+            pop.contentSize = newSize
+            if pop.isShown, let button = statusItem?.button {
+                pop.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            }
+        }
     }
     
     @objc private func togglePopover() {
@@ -70,6 +93,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if pop.isShown {
             pop.performClose(nil)
         } else {
+            BridgeNotificationManager.shared.checkNotificationAuth()
             model.checkForUpdates(forceNetwork: false)
             updatePopoverSize()
             pop.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)

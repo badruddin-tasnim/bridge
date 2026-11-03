@@ -76,6 +76,7 @@ class ClipboardSyncForegroundService : Service(), NetworkSyncClient.SyncListener
 
         ClipboardSyncManager.init(this)
         ClipboardSyncManager.networkClient?.addListener(this)
+        BridgeNotificationManager.init(this)
         UpdateChecker.startPeriodicChecks(this)
     }
 
@@ -225,6 +226,10 @@ class ClipboardSyncForegroundService : Service(), NetworkSyncClient.SyncListener
                 }
             }
         }
+    }
+
+    override fun onNotificationPayloadReceived(jsonString: String) {
+        BridgeNotificationManager.handleIncomingPayload(this, jsonString)
     }
 
     override fun onDestroy() {
