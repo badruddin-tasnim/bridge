@@ -7,6 +7,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.graphics.Color
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -54,11 +56,18 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
     private lateinit var tvHeroTitle: TextView
     private lateinit var tvHeroSub: TextView
     private lateinit var linkViewHero: BridgeLinkView
+    private lateinit var layoutHeroCautionBanner: LinearLayout
+    private lateinit var dotHeroCaution: View
+    private lateinit var tvHeroCautionText: TextView
     private lateinit var tvDevicePhoneName: TextView
     private lateinit var tvDeviceMacName: TextView
     private lateinit var tvLiveBadge: TextView
     private lateinit var btnHeroConnect: Button
     private lateinit var btnHeroUnpair: Button
+
+    // Failure / Retry tracking
+    private var consecutiveFailures = 0
+    private var userConnectAttempts = 0
 
     // Screen B: Pairing
     private lateinit var layoutScreenPairing: LinearLayout
@@ -148,6 +157,9 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         tvHeroTitle = findViewById(R.id.tvHeroTitle)
         tvHeroSub = findViewById(R.id.tvHeroSub)
         linkViewHero = findViewById(R.id.linkViewHero)
+        layoutHeroCautionBanner = findViewById(R.id.layoutHeroCautionBanner)
+        dotHeroCaution = findViewById(R.id.dotHeroCaution)
+        tvHeroCautionText = findViewById(R.id.tvHeroCautionText)
         tvDevicePhoneName = findViewById(R.id.tvDevicePhoneName)
         tvDeviceMacName = findViewById(R.id.tvDeviceMacName)
         tvLiveBadge = findViewById(R.id.tvLiveBadge)
@@ -266,6 +278,9 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
                 return@setOnClickListener
             }
 
+            userConnectAttempts++
+            val localNet = isLocalNetworkAvailable(this)
+
             var host = etServerIp.text.toString().trim()
             if (host.isEmpty()) {
                 host = BridgePrefs.host(this) ?: ""
@@ -273,7 +288,12 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
             val port = etServerPort.text.toString().toIntOrNull() ?: NetworkSyncClient.DEFAULT_PORT
 
             setConnectingState(true)
-            showPairingNote("Looking for your Mac on this Wi-Fi…", BannerStyle.CONNECTING)
+            val noteMsg = if (!localNet || userConnectAttempts >= 2 || consecutiveFailures >= 2) {
+                "Cannot reach your Mac. Check that your Mac and phone are connected to the same Wi-Fi."
+            } else {
+                "Looking for your Mac on this Wi-Fi…"
+            }
+            showPairingNote(noteMsg, BannerStyle.CONNECTING)
 
             val hostParam = host.ifEmpty { null }
             ClipboardSyncManager.pair(this, hostParam, port, code)
@@ -282,12 +302,20 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         btnUnpairPairing.setOnClickListener {
             ClipboardSyncManager.unpair(this)
             etPairCode.setText("")
+            consecutiveFailures = 0
+            userConnectAttempts = 0
             setConnectingState(false)
             updateUI()
             Toast.makeText(this, "Unpaired successfully", Toast.LENGTH_SHORT).show()
         }
 
         btnHeroConnect.setOnClickListener {
+            userConnectAttempts++
+            if (!isLocalNetworkAvailable(this)) {
+                layoutHeroCautionBanner.visibility = View.VISIBLE
+                tvHeroCautionText.text = "Cannot reach your Mac. Check that your Mac and phone are connected to the same Wi-Fi."
+            }
+
             setConnectingState(true)
             ClipboardSyncManager.networkClient?.start(
                 BridgePrefs.host(this),
@@ -299,6 +327,8 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         btnHeroUnpair.setOnClickListener {
             ClipboardSyncManager.unpair(this)
             etPairCode.setText("")
+            consecutiveFailures = 0
+            userConnectAttempts = 0
             setConnectingState(false)
             updateUI()
             Toast.makeText(this, "Unpaired successfully", Toast.LENGTH_SHORT).show()
@@ -431,10 +461,62 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         return enabledServices.split(':').any { it.equals(expectedService, ignoreCase = true) }
     }
 
+    private fun isLocalNetworkAvailable(context: Context): Boolean {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+        if (cm != null) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                val network = cm.activeNetwork
+                if (network != null) {
+                    val caps = cm.getNetworkCapabilities(network)
+                    if (caps != null && (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                                         caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET))) {
+                        return true
+                    }
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                val info = cm.activeNetworkInfo
+                if (info != null && info.isConnected &&
+                    (info.type == ConnectivityManager.TYPE_WIFI || info.type == ConnectivityManager.TYPE_ETHERNET)) {
+                    return true
+                }
+            }
+        }
+
+        // Check if Hotspot / SoftAP / Tethering or local network interface is UP
+        try {
+            val interfaces = java.net.NetworkInterface.getNetworkInterfaces() ?: return false
+            for (iface in interfaces) {
+                if (iface.isUp && !iface.isLoopback) {
+                    val name = iface.name.lowercase()
+                    val isLocalIface = name.startsWith("wlan") ||
+                                       name.startsWith("swlan") ||
+                                       name.startsWith("ap") ||
+                                       name.startsWith("softap") ||
+                                       name.startsWith("rndis") ||
+                                       name.startsWith("usb") ||
+                                       name.startsWith("p2p") ||
+                                       name.startsWith("eth")
+                    if (isLocalIface) {
+                        for (addr in iface.inetAddresses) {
+                            if (!addr.isLoopbackAddress && addr is java.net.Inet4Address) {
+                                return true
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (ignored: Exception) {}
+
+        return false
+    }
+
     private fun updateUI() {
         val paired = BridgePrefs.isPaired(this)
         val connected = ClipboardSyncManager.networkClient?.isConnected() == true
         val macName = BridgePrefs.macName(this) ?: "Mac"
+        val localNetAvailable = isLocalNetworkAvailable(this)
+        val isMultipleFailures = consecutiveFailures >= 2 || userConnectAttempts >= 2
 
         if (paired) {
             layoutScreenPairing.visibility = View.GONE
@@ -444,6 +526,11 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
             if (connected) {
                 isConnectingState = false
                 stopDotBlink()
+                consecutiveFailures = 0
+                userConnectAttempts = 0
+
+                // Hide Wi-Fi caution banner
+                layoutHeroCautionBanner.visibility = View.GONE
 
                 // Header status pill
                 tvStatusPill.text = "Linked"
@@ -467,6 +554,17 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
                 btnHeroUnpair.isEnabled = true
             } else {
                 // Paired but not connected (Idle or Reconnecting)
+                val showCaution = !localNetAvailable || isMultipleFailures
+                if (showCaution) {
+                    layoutHeroCautionBanner.visibility = View.VISIBLE
+                    tvHeroCautionText.text = "Cannot reach your Mac. Check that your Mac and phone are connected to the same Wi-Fi."
+                } else {
+                    layoutHeroCautionBanner.visibility = View.GONE
+                }
+
+                // Device badge is blank when not connected per instruction 5
+                tvLiveBadge.text = ""
+
                 if (isConnectingState) {
                     tvStatusPill.text = "Linking…"
                     tvStatusPill.setTextColor(colorLime)
@@ -478,10 +576,8 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
                     tvHeroTitle.setTextColor(colorText)
                     tvHeroSub.text = "Looking on your Wi-Fi. This only takes a moment."
                     tvHeroSub.setTextColor(colorMuted)
+                    tvHeroSub.visibility = View.VISIBLE
                     linkViewHero.setMode(BridgeLinkView.LinkMode.HERO_CONNECTING)
-
-                    tvLiveBadge.text = "Searching"
-                    tvLiveBadge.setTextColor(colorMuted)
 
                     btnHeroConnect.visibility = View.VISIBLE
                     btnHeroConnect.isEnabled = false
@@ -502,10 +598,8 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
                     tvHeroTitle.setTextColor(colorText)
                     tvHeroSub.text = "Your Mac isn't paired right now. Reconnect to pick up where you left off."
                     tvHeroSub.setTextColor(colorMuted)
+                    tvHeroSub.visibility = View.VISIBLE
                     linkViewHero.setMode(BridgeLinkView.LinkMode.HERO_IDLE)
-
-                    tvLiveBadge.text = "Offline"
-                    tvLiveBadge.setTextColor(colorMuted)
 
                     btnHeroConnect.visibility = View.VISIBLE
                     btnHeroConnect.isEnabled = true
@@ -552,7 +646,21 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
     override fun onConnectionStatusChanged(isConnected: Boolean, host: String?) {
         runOnUiThread {
             isConnectingState = false
+            if (isConnected) {
+                consecutiveFailures = 0
+                userConnectAttempts = 0
+            }
             updateUI()
+        }
+    }
+
+    override fun onConnectionFailed(consecutiveFailures: Int) {
+        runOnUiThread {
+            this.consecutiveFailures = consecutiveFailures
+            if (ClipboardSyncManager.networkClient?.isConnected() != true) {
+                isConnectingState = false
+                updateUI()
+            }
         }
     }
 
@@ -560,10 +668,18 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         runOnUiThread {
             isConnectingState = false
             if (accepted) {
+                consecutiveFailures = 0
+                userConnectAttempts = 0
                 showPairingNote("Connected. You're all set.", BannerStyle.CONNECTED)
                 updateUI()
             } else {
-                showPairingNote("Couldn't reach your Mac. Check that you're on the same Wi-Fi and Bridge is open on it.", BannerStyle.ERROR)
+                consecutiveFailures++
+                val msg = if (consecutiveFailures >= 2 || userConnectAttempts >= 2) {
+                    "Cannot reach your Mac. Check that your Mac and phone are connected to the same Wi-Fi."
+                } else {
+                    "Couldn't reach your Mac. Check that you're on the same Wi-Fi and Bridge is open on it."
+                }
+                showPairingNote(msg, BannerStyle.ERROR)
                 updateUI()
             }
         }
@@ -573,6 +689,8 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         runOnUiThread {
             isConnectingState = false
             etPairCode.setText("")
+            consecutiveFailures = 0
+            userConnectAttempts = 0
             layoutNoteBanner.visibility = View.GONE
             updateUI()
             Toast.makeText(this, "Unpaired from Mac", Toast.LENGTH_SHORT).show()
@@ -589,7 +707,12 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
             if (message.contains("Connection dropped or failed") || message.contains("Socket closed") || message.contains("failed")) {
                 if (!BridgePrefs.isPaired(this)) {
                     isConnectingState = false
-                    showPairingNote("Couldn't reach your Mac. Check that you're on the same Wi-Fi and Bridge is open on it.", BannerStyle.ERROR)
+                    val noteMsg = if (consecutiveFailures >= 2 || userConnectAttempts >= 2) {
+                        "Cannot reach your Mac. Check that your Mac and phone are connected to the same Wi-Fi."
+                    } else {
+                        "Couldn't reach your Mac. Check that you're on the same Wi-Fi and Bridge is open."
+                    }
+                    showPairingNote(noteMsg, BannerStyle.ERROR)
                     updateUI()
                 }
             }

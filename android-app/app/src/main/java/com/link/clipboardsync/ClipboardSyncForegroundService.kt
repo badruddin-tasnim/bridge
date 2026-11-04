@@ -166,6 +166,14 @@ class ClipboardSyncForegroundService : Service(), NetworkSyncClient.SyncListener
         }
     }
 
+    override fun onConnectionFailed(consecutiveFailures: Int) {
+        if (consecutiveFailures >= 2) {
+            mainHandler.post {
+                updateNotification("Cannot reach Mac: check that both are on same Wi-Fi")
+            }
+        }
+    }
+
     override fun onPayloadReceived(payload: ClipboardPayload) {
         when (payload.type) {
             "clip" -> {
