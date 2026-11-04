@@ -42,6 +42,7 @@ class NetworkSyncClient(private val context: Context) {
         fun onLog(message: String) {}
         fun onPairingResult(accepted: Boolean, macName: String?) {}
         fun onRemoteUnpair() {}
+        fun onConnectionFailed(consecutiveFailures: Int) {}
     }
 
     private val listeners = CopyOnWriteArrayList<SyncListener>()
@@ -205,10 +206,16 @@ class NetworkSyncClient(private val context: Context) {
     private fun connectLoop() {
         if (readThread?.isAlive == true) return
         val t = Thread({
+            var discoveryWaitCount = 0
             while (isRunning.get()) {
                 val host = currentHost
                 if (host.isNullOrBlank()) {
                     if (!isDiscovering) startDiscovery()
+                    discoveryWaitCount++
+                    if (discoveryWaitCount % 2 == 0) {
+                        failedAttempts++
+                        notifyConnectionFailed(failedAttempts)
+                    }
                     try {
                         Thread.sleep(1500)
                     } catch (ignored: InterruptedException) {
@@ -216,6 +223,7 @@ class NetworkSyncClient(private val context: Context) {
                     }
                     continue
                 }
+                discoveryWaitCount = 0
 
                 try {
                     log("Connecting to Mac at $host:$currentPort...")
@@ -305,6 +313,7 @@ class NetworkSyncClient(private val context: Context) {
                 } catch (e: Exception) {
                     log("Connection dropped or failed: ${e.message}")
                     failedAttempts++
+                    notifyConnectionFailed(failedAttempts)
                 } finally {
                     stopHeartbeat()
                     disconnectSocket()
@@ -366,6 +375,12 @@ class NetworkSyncClient(private val context: Context) {
     private fun notifyRemoteUnpair() {
         for (l in listeners) {
             try { l.onRemoteUnpair() } catch (ignored: Exception) {}
+        }
+    }
+
+    private fun notifyConnectionFailed(failures: Int) {
+        for (l in listeners) {
+            try { l.onConnectionFailed(failures) } catch (ignored: Exception) {}
         }
     }
 
