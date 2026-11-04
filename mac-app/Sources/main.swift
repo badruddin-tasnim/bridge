@@ -48,23 +48,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         pop.behavior = .transient
         pop.animates = false
         pop.appearance = NSAppearance(named: .darkAqua)
-        pop.contentViewController = NSHostingController(rootView: BridgeMenuView(model: model))
+        let hostingController = NSHostingController(rootView: BridgeMenuView(model: model))
+        if #available(macOS 13.0, *) {
+            hostingController.sizingOptions = [.preferredContentSize]
+        }
+        pop.contentViewController = hostingController
         self.popover = pop
         
         model.onSizeChangeRequested = { [weak self] in
             DispatchQueue.main.async {
-                self?.updatePopoverSize()
+                self?.applyPopoverSize()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.015) {
+                    self?.applyPopoverSize()
+                }
             }
         }
     }
     
-    private func updatePopoverSize() {
+    private func applyPopoverSize() {
         guard let pop = popover, let controller = pop.contentViewController else { return }
+        controller.view.invalidateIntrinsicContentSize()
         controller.view.layoutSubtreeIfNeeded()
         let fitting = controller.view.fittingSize
         
         let targetHeight: CGFloat
-        if fitting.height > 200 {
+        if fitting.height > 150 {
             targetHeight = ceil(fitting.height)
         } else {
             let notifCount = BridgeNotificationManager.shared.activeNotifications.count
@@ -75,16 +83,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             } else if model.selectedTab == .settings {
                 targetHeight = 460
             } else {
-                targetHeight = notifCount == 0 ? 430 : min(430 + CGFloat(notifCount) * 80.0, 600.0)
+                targetHeight = notifCount == 0 ? 410 : min(410 + CGFloat(notifCount) * 80.0, 600.0)
             }
         }
         
         let newSize = NSSize(width: 380, height: targetHeight)
         if pop.contentSize != newSize {
             pop.contentSize = newSize
-            if pop.isShown, let button = statusItem?.button {
-                pop.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            }
+        }
+        if let window = controller.view.window {
+            window.backgroundColor = NSColor(red: 0x12 / 255.0, green: 0x14 / 255.0, blue: 0x18 / 255.0, alpha: 1.0)
         }
     }
     
@@ -95,10 +103,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         } else {
             BridgeNotificationManager.shared.checkNotificationAuth()
             model.checkForUpdates(forceNetwork: false)
-            updatePopoverSize()
+            applyPopoverSize()
             pop.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             if let window = pop.contentViewController?.view.window {
+                window.backgroundColor = NSColor(red: 0x12 / 255.0, green: 0x14 / 255.0, blue: 0x18 / 255.0, alpha: 1.0)
                 window.makeKey()
+            }
+            DispatchQueue.main.async { [weak self] in
+                self?.applyPopoverSize()
             }
         }
     }

@@ -8,17 +8,47 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.Base64
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import org.json.JSONObject
+import java.util.concurrent.CopyOnWriteArraySet
 
 object BridgeNotificationManager {
 
     private const val TAG = "BridgeNotifManager"
     const val CHANNEL_MAC_ALERTS = "bridge_mac_alerts"
+    const val CHANNEL_MAC_ALERTS_SILENT = "bridge_mac_alerts_silent"
     private var appContext: Context? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val postedMacAlertIds = CopyOnWriteArraySet<Int>()
+
+    interface SettingsListener {
+        fun onSettingsChanged()
+    }
+
+    private val settingsListeners = CopyOnWriteArraySet<SettingsListener>()
+
+    fun addSettingsListener(listener: SettingsListener) {
+        settingsListeners.add(listener)
+    }
+
+    fun removeSettingsListener(listener: SettingsListener) {
+        settingsListeners.remove(listener)
+    }
+
+    fun notifySettingsChanged() {
+        mainHandler.post {
+            for (l in settingsListeners) {
+                try {
+                    l.onSettingsChanged()
+                } catch (ignored: Exception) {}
+            }
+        }
+    }
 
     fun init(context: Context) {
         appContext = context.applicationContext
@@ -27,6 +57,8 @@ object BridgeNotificationManager {
 
     private fun createNotificationChannel(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
             val channel = NotificationChannel(
                 CHANNEL_MAC_ALERTS,
                 "Mac Alerts",
@@ -35,12 +67,51 @@ object BridgeNotificationManager {
                 description = "Notifications forwarded from your connected Mac"
                 enableVibration(true)
             }
-            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             nm.createNotificationChannel(channel)
+
+            val silentChannel = NotificationChannel(
+                CHANNEL_MAC_ALERTS_SILENT,
+                "Mac Alerts (Silent)",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Silent notifications forwarded from your connected Mac"
+                enableVibration(false)
+                setSound(null, null)
+            }
+            nm.createNotificationChannel(silentChannel)
         }
     }
 
+    fun sendSettingsToMac(context: Context) {
+        val client = ClipboardSyncManager.networkClient
+        if (client != null && client.isConnected()) {
+            val json = JSONObject().apply {
+                put("type", "settings_sync")
+                put("notifMasterEnabled", BridgePrefs.isNotifMasterEnabled(context))
+                put("androidNotifEnabled", BridgePrefs.isAndroidNotifEnabled(context))
+                put("macNotifEnabled", BridgePrefs.isMacNotifEnabled(context))
+                put("updatedAt", BridgePrefs.getSettingsUpdatedAt(context))
+            }
+            client.sendRawJson(json.toString())
+            Log.d(TAG, "Sent settings_sync to Mac: $json")
+        }
+    }
+
+    fun cancelAllMacAlerts(context: Context) {
+        try {
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            for (id in postedMacAlertIds) {
+                nm.cancel(id)
+            }
+            postedMacAlertIds.clear()
+        } catch (ignored: Exception) {}
+    }
+
     fun postToMac(notif: BridgeNotification) {
+        val ctx = appContext
+        if (ctx != null && !BridgePrefs.isNotificationSyncEnabled(ctx)) {
+            return
+        }
         val client = ClipboardSyncManager.networkClient
         if (client != null && client.isConnected()) {
             client.sendRawJson(notif.toPostJsonString())
@@ -112,6 +183,52 @@ object BridgeNotificationManager {
         try {
             val json = JSONObject(jsonString)
             when (json.optString("type")) {
+                "settings_sync" -> {
+                    val remoteUpdatedAt = json.optLong("updatedAt", 0L)
+                    val localUpdatedAt = BridgePrefs.getSettingsUpdatedAt(context)
+                    if (remoteUpdatedAt > 0L && localUpdatedAt > remoteUpdatedAt) {
+                        // Local Android settings are newer than Mac's handshake; push ours back
+                        sendSettingsToMac(context)
+                        return
+                    }
+
+                    if (json.has("notifMasterEnabled")) {
+                        BridgePrefs.setNotifMasterEnabled(
+                            context,
+                            json.optBoolean("notifMasterEnabled", true),
+                            updateTimestamp = false
+                        )
+                    }
+                    if (json.has("androidNotifEnabled")) {
+                        BridgePrefs.setAndroidNotifEnabled(
+                            context,
+                            json.optBoolean("androidNotifEnabled", true),
+                            updateTimestamp = false
+                        )
+                    }
+                    if (json.has("macNotifEnabled")) {
+                        BridgePrefs.setMacNotifEnabled(
+                            context,
+                            json.optBoolean("macNotifEnabled", true),
+                            updateTimestamp = false
+                        )
+                    }
+                    if (remoteUpdatedAt > 0L) {
+                        BridgePrefs.setSettingsUpdatedAt(context, remoteUpdatedAt)
+                    }
+
+                    if (!BridgePrefs.isMacAlertsEnabled(context)) {
+                        cancelAllMacAlerts(context)
+                    }
+                    if (BridgePrefs.isNotificationSyncEnabled(context)) {
+                        BridgeNotificationListenerService.instance?.syncActiveNotifications()
+                    }
+                    notifySettingsChanged()
+                    Log.d(
+                        TAG,
+                        "Applied remote settings_sync: master=${BridgePrefs.isNotifMasterEnabled(context)}, android=${BridgePrefs.isAndroidNotifEnabled(context)}, mac=${BridgePrefs.isMacNotifEnabled(context)}"
+                    )
+                }
                 "notif_action" -> {
                     val req = NotificationActionRequest.fromJson(json) ?: return
                     BridgeNotificationListenerService.instance?.executeAction(req.id, req.actionId, req.replyText)
@@ -122,7 +239,9 @@ object BridgeNotificationManager {
                         BridgeNotificationListenerService.instance?.dismissNotification(req.id)
                     } else if (req.target == "mac") {
                         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                        nm.cancel(req.id.hashCode())
+                        val nId = req.id.hashCode()
+                        nm.cancel(nId)
+                        postedMacAlertIds.remove(nId)
                     }
                 }
                 "notif_post" -> {
@@ -139,7 +258,9 @@ object BridgeNotificationManager {
                     val id = json.optString("id")
                     if (id.isNotEmpty()) {
                         val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                        nm.cancel(id.hashCode())
+                        val nId = id.hashCode()
+                        nm.cancel(nId)
+                        postedMacAlertIds.remove(nId)
                     }
                 }
             }
@@ -149,7 +270,11 @@ object BridgeNotificationManager {
     }
 
     private fun showMacAlertNotification(context: Context, notif: BridgeNotification) {
+        if (!BridgePrefs.isMacAlertsEnabled(context)) return
+
         val notifId = notif.id.hashCode()
+        val vibrateEnabled = BridgePrefs.isPhoneVibrateEnabled(context)
+        val channelId = if (vibrateEnabled) CHANNEL_MAC_ALERTS else CHANNEL_MAC_ALERTS_SILENT
 
         val dismissIntent = Intent(context, MacAlertDismissReceiver::class.java).apply {
             action = MacAlertDismissReceiver.ACTION_DISMISS_MAC_ALERT
@@ -176,13 +301,14 @@ object BridgeNotificationManager {
             }
         }
 
-        val builder = NotificationCompat.Builder(context, CHANNEL_MAC_ALERTS)
+        val builder = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(displayTitle)
             .setContentText(notif.text)
             .setSubText(displaySubText)
             .setStyle(NotificationCompat.BigTextStyle().bigText(notif.text))
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setPriority(if (vibrateEnabled) NotificationCompat.PRIORITY_DEFAULT else NotificationCompat.PRIORITY_LOW)
+            .setSilent(!vibrateEnabled)
             .setAutoCancel(true)
             .setDeleteIntent(pDismiss)
             .addAction(0, "Dismiss on Mac", pDismiss)
@@ -194,6 +320,7 @@ object BridgeNotificationManager {
         try {
             val nm = NotificationManagerCompat.from(context)
             nm.notify(notifId, builder.build())
+            postedMacAlertIds.add(notifId)
             Log.d(TAG, "Displayed Mac alert on phone: [${notif.app}] $displayTitle")
         } catch (e: SecurityException) {
             Log.w(TAG, "POST_NOTIFICATIONS permission not granted: ${e.message}")

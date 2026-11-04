@@ -17,7 +17,6 @@ class BridgeModel: ObservableObject {
     @Published var lastSyncedOutgoing: Bool = false
     @Published var qrCodeImage: NSImage? = nil
     @Published var copiedNotice: Bool = false
-    @Published var dotBreathe: Bool = false
     enum BridgeTab: String, CaseIterable {
         case notifications = "Notifications"
         case settings = "Settings"
@@ -46,7 +45,6 @@ class BridgeModel: ObservableObject {
     var onSizeChangeRequested: (() -> Void)?
     
     let server = BridgeServer()
-    private var breatheTimer: Timer?
     private var updateTimer: Timer?
     private var cancellables = Set<AnyCancellable>()
 
@@ -78,10 +76,6 @@ class BridgeModel: ObservableObject {
         updateQrCode()
         setupServerCallbacks()
         server.start()
-        
-        breatheTimer = Timer.scheduledTimer(withTimeInterval: 1.2, repeats: true) { [weak self] _ in
-            self?.dotBreathe.toggle()
-        }
 
         BridgeNotificationManager.shared.$activeNotifications
             .receive(on: DispatchQueue.main)

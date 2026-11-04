@@ -193,9 +193,11 @@ class NetworkSyncClient(private val context: Context) {
                     writeRaw(ClipboardPayload(type = "ping"))
                 } catch (e: Exception) {
                     Log.w(TAG, "Heartbeat ping failed: ${e.message}")
+                    disconnectSocket()
+                    notifyConnectionStatusChanged(false, currentHost)
                 }
             }
-        }, 10, 10, TimeUnit.SECONDS)
+        }, 3, 3, TimeUnit.SECONDS)
     }
 
     private fun stopHeartbeat() {
@@ -231,7 +233,7 @@ class NetworkSyncClient(private val context: Context) {
                     s.connect(InetSocketAddress(host, currentPort), 3500)
                     s.tcpNoDelay = true
                     s.keepAlive = true
-                    s.soTimeout = 20000 // Detect dropped / sleeping host within 20s
+                    s.soTimeout = 7500 // Detect dropped / sleeping host within 7.5s
 
                     val out = PrintWriter(OutputStreamWriter(s.getOutputStream(), Charsets.UTF_8), true)
                     val reader = BufferedReader(InputStreamReader(s.getInputStream(), Charsets.UTF_8))
@@ -257,7 +259,7 @@ class NetworkSyncClient(private val context: Context) {
                             val trimmed = line.trim()
                             val jsonObj = try { JSONObject(trimmed) } catch (e: Exception) { null }
                             val type = jsonObj?.optString("type")
-                            if (type != null && type.startsWith("notif_")) {
+                            if (type != null && (type.startsWith("notif_") || type == "settings_sync")) {
                                 if (authenticated) {
                                     notifyNotificationPayloadReceived(trimmed)
                                 }

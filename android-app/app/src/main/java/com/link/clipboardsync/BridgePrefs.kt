@@ -13,8 +13,11 @@ object BridgePrefs {
     private const val KEY_CODE = "pair_code"
     private const val KEY_MAC_NAME = "mac_name"
     private const val KEY_PAIRED = "paired"
+    private const val KEY_NOTIF_MASTER_ENABLED = "notif_master_enabled"
     private const val KEY_NOTIF_SYNC_ENABLED = "notif_sync_enabled"
     private const val KEY_MAC_ALERTS_ENABLED = "mac_alerts_enabled"
+    private const val KEY_PHONE_VIBRATE_ENABLED = "phone_vibrate_mac_alerts"
+    private const val KEY_SETTINGS_UPDATED_AT = "settings_updated_at"
     private const val KEY_BLACKLISTED_PACKAGES = "notif_blacklisted_pkgs"
 
     private fun prefs(context: Context): SharedPreferences =
@@ -26,18 +29,71 @@ object BridgePrefs {
     fun macName(context: Context): String? = prefs(context).getString(KEY_MAC_NAME, null)
     fun isPaired(context: Context): Boolean = prefs(context).getBoolean(KEY_PAIRED, false) && code(context) != null
 
-    fun isNotificationSyncEnabled(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_NOTIF_SYNC_ENABLED, true)
+    // Master Notification Toggle
+    fun isNotifMasterEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_NOTIF_MASTER_ENABLED, true)
 
-    fun setNotificationSyncEnabled(context: Context, enabled: Boolean) {
-        prefs(context).edit().putBoolean(KEY_NOTIF_SYNC_ENABLED, enabled).apply()
+    fun setNotifMasterEnabled(context: Context, enabled: Boolean, updateTimestamp: Boolean = true) {
+        val editor = prefs(context).edit().putBoolean(KEY_NOTIF_MASTER_ENABLED, enabled)
+        if (updateTimestamp) {
+            editor.putLong(KEY_SETTINGS_UPDATED_AT, System.currentTimeMillis())
+        }
+        editor.apply()
     }
 
-    fun isMacAlertsEnabled(context: Context): Boolean =
+    // Sub-option 1: Android Notifications (Phone -> Mac)
+    fun isAndroidNotifEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_NOTIF_SYNC_ENABLED, true)
+
+    fun setAndroidNotifEnabled(context: Context, enabled: Boolean, updateTimestamp: Boolean = true) {
+        val editor = prefs(context).edit().putBoolean(KEY_NOTIF_SYNC_ENABLED, enabled)
+        if (updateTimestamp) {
+            editor.putLong(KEY_SETTINGS_UPDATED_AT, System.currentTimeMillis())
+        }
+        editor.apply()
+    }
+
+    // Effective check: Master ON && Android Sub-option ON
+    fun isNotificationSyncEnabled(context: Context): Boolean =
+        isNotifMasterEnabled(context) && isAndroidNotifEnabled(context)
+
+    fun setNotificationSyncEnabled(context: Context, enabled: Boolean) {
+        setAndroidNotifEnabled(context, enabled, updateTimestamp = true)
+    }
+
+    // Sub-option 2: Mac Notifications (Mac -> Phone)
+    fun isMacNotifEnabled(context: Context): Boolean =
         prefs(context).getBoolean(KEY_MAC_ALERTS_ENABLED, true)
 
+    fun setMacNotifEnabled(context: Context, enabled: Boolean, updateTimestamp: Boolean = true) {
+        val editor = prefs(context).edit().putBoolean(KEY_MAC_ALERTS_ENABLED, enabled)
+        if (updateTimestamp) {
+            editor.putLong(KEY_SETTINGS_UPDATED_AT, System.currentTimeMillis())
+        }
+        editor.apply()
+    }
+
+    // Effective check: Master ON && Mac Sub-option ON
+    fun isMacAlertsEnabled(context: Context): Boolean =
+        isNotifMasterEnabled(context) && isMacNotifEnabled(context)
+
     fun setMacAlertsEnabled(context: Context, enabled: Boolean) {
-        prefs(context).edit().putBoolean(KEY_MAC_ALERTS_ENABLED, enabled).apply()
+        setMacNotifEnabled(context, enabled, updateTimestamp = true)
+    }
+
+    // Phone-Only Setting: Vibrate on Mac Alerts
+    fun isPhoneVibrateEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_PHONE_VIBRATE_ENABLED, true)
+
+    fun setPhoneVibrateEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_PHONE_VIBRATE_ENABLED, enabled).apply()
+    }
+
+    fun getSettingsUpdatedAt(context: Context): Long =
+        prefs(context).getLong(KEY_SETTINGS_UPDATED_AT, 0L)
+
+    fun setSettingsUpdatedAt(context: Context, ts: Long) {
+        prefs(context).edit().putLong(KEY_SETTINGS_UPDATED_AT, ts).apply()
     }
 
     fun getBlacklistedPackages(context: Context): Set<String> =

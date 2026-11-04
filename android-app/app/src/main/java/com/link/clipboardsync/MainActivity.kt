@@ -1,6 +1,7 @@
 package com.link.clipboardsync
 
 import android.Manifest
+import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
 import android.content.Context
 import android.content.Intent
@@ -18,13 +19,17 @@ import android.text.Editable
 import android.text.TextWatcher
 import android.view.View
 import android.view.animation.AccelerateDecelerateInterpolator
+import android.view.animation.DecelerateInterpolator
+import android.view.animation.OvershootInterpolator
 import android.widget.Button
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.SwitchCompat
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.journeyapps.barcodescanner.ScanContract
@@ -32,7 +37,7 @@ import com.journeyapps.barcodescanner.ScanIntentResult
 import com.journeyapps.barcodescanner.ScanOptions
 import org.json.JSONObject
 
-class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, ClipboardSyncManager.HistoryListener, UpdateChecker.UpdateListener {
+class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, ClipboardSyncManager.HistoryListener, UpdateChecker.UpdateListener, BridgeNotificationManager.SettingsListener {
 
     // Header views
     private lateinit var dotStatus: View
@@ -54,8 +59,22 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
     private lateinit var layoutNotificationNotice: LinearLayout
     private lateinit var btnEnableNotificationAccess: Button
 
-    // Screen A: Connected
+    // Screen A: Connected + Bottom Nav Tabs
     private lateinit var layoutScreenConnected: LinearLayout
+    private lateinit var layoutTabBridge: LinearLayout
+    private lateinit var layoutTabSettings: LinearLayout
+    private lateinit var layoutBottomNav: FrameLayout
+    private lateinit var viewNavActiveIndicator: View
+    private lateinit var navTabHome: LinearLayout
+    private lateinit var ivNavHome: ImageView
+    private lateinit var tvNavHome: TextView
+    private lateinit var navTabSettings: LinearLayout
+    private lateinit var ivNavSettings: ImageView
+    private lateinit var tvNavSettings: TextView
+    private var isSettingsTabSelected = false
+    private var isUpdatingSettingsUi = false
+
+    // Tab 1: Home Overview
     private lateinit var heroCard: LinearLayout
     private lateinit var tvHeroTitle: TextView
     private lateinit var tvHeroSub: TextView
@@ -66,10 +85,21 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
     private lateinit var tvDevicePhoneName: TextView
     private lateinit var tvDeviceMacName: TextView
     private lateinit var tvLiveBadge: TextView
-    private lateinit var cardNotificationFeature: LinearLayout
-    private lateinit var tvNotificationStatus: TextView
     private lateinit var btnHeroConnect: Button
     private lateinit var btnHeroUnpair: Button
+
+    // Tab 2: Settings Page
+    private lateinit var switchNotifMaster: SwitchCompat
+    private lateinit var layoutNotifSubOptions: LinearLayout
+    private lateinit var viewNotifSubAccent: View
+    private lateinit var switchAndroidNotif: SwitchCompat
+    private lateinit var switchMacNotif: SwitchCompat
+    private lateinit var rowPhoneVibrate: LinearLayout
+    private lateinit var switchPhoneVibrate: SwitchCompat
+    private lateinit var rowSettingNotifAccess: LinearLayout
+    private lateinit var tvSettingNotifAccessStatus: TextView
+    private lateinit var rowSettingAccessibility: LinearLayout
+    private lateinit var tvSettingAccessibilityStatus: TextView
 
     // Failure / Retry tracking
     private var consecutiveFailures = 0
@@ -98,6 +128,7 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
     private val colorLime = Color.parseColor("#C8F135")
     private val colorCoral = Color.parseColor("#FF9A8A")
     private val colorMuted = Color.parseColor("#9BA3AD")
+    private val colorSoft = Color.parseColor("#C9CED4")
     private val colorText = Color.parseColor("#F4F5F2")
 
     // QR Code Scanner Launcher
@@ -125,6 +156,7 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         ClipboardSyncManager.init(this)
         ClipboardSyncManager.addHistoryListener(this)
         ClipboardSyncManager.networkClient?.addListener(this)
+        BridgeNotificationManager.addSettingsListener(this)
         UpdateChecker.addListener(this, this)
         UpdateChecker.checkForUpdates(this, forceNetwork = false)
 
@@ -140,6 +172,7 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         super.onPause()
         ClipboardSyncManager.networkClient?.removeListener(this)
         ClipboardSyncManager.removeHistoryListener(this)
+        BridgeNotificationManager.removeSettingsListener(this)
         UpdateChecker.removeListener(this)
     }
 
@@ -162,8 +195,20 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         layoutNotificationNotice = findViewById(R.id.layoutNotificationNotice)
         btnEnableNotificationAccess = findViewById(R.id.btnEnableNotificationAccess)
 
-        // Screen A
+        // Screen A & Bottom Nav Tabs
         layoutScreenConnected = findViewById(R.id.layoutScreenConnected)
+        layoutTabBridge = findViewById(R.id.layoutTabBridge)
+        layoutTabSettings = findViewById(R.id.layoutTabSettings)
+        layoutBottomNav = findViewById(R.id.layoutBottomNav)
+        viewNavActiveIndicator = findViewById(R.id.viewNavActiveIndicator)
+        navTabHome = findViewById(R.id.navTabHome)
+        ivNavHome = findViewById(R.id.ivNavHome)
+        tvNavHome = findViewById(R.id.tvNavHome)
+        navTabSettings = findViewById(R.id.navTabSettings)
+        ivNavSettings = findViewById(R.id.ivNavSettings)
+        tvNavSettings = findViewById(R.id.tvNavSettings)
+
+        // Tab 1: Home Overview
         heroCard = findViewById(R.id.heroCard)
         tvHeroTitle = findViewById(R.id.tvHeroTitle)
         tvHeroSub = findViewById(R.id.tvHeroSub)
@@ -174,10 +219,26 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         tvDevicePhoneName = findViewById(R.id.tvDevicePhoneName)
         tvDeviceMacName = findViewById(R.id.tvDeviceMacName)
         tvLiveBadge = findViewById(R.id.tvLiveBadge)
-        cardNotificationFeature = findViewById(R.id.cardNotificationFeature)
-        tvNotificationStatus = findViewById(R.id.tvNotificationStatus)
         btnHeroConnect = findViewById(R.id.btnHeroConnect)
         btnHeroUnpair = findViewById(R.id.btnHeroUnpair)
+
+        // Tab 2: Settings
+        switchNotifMaster = findViewById(R.id.switchNotifMaster)
+        layoutNotifSubOptions = findViewById(R.id.layoutNotifSubOptions)
+        viewNotifSubAccent = findViewById(R.id.viewNotifSubAccent)
+        switchAndroidNotif = findViewById(R.id.switchAndroidNotif)
+        switchMacNotif = findViewById(R.id.switchMacNotif)
+        rowPhoneVibrate = findViewById(R.id.rowPhoneVibrate)
+        switchPhoneVibrate = findViewById(R.id.switchPhoneVibrate)
+        rowSettingNotifAccess = findViewById(R.id.rowSettingNotifAccess)
+        tvSettingNotifAccessStatus = findViewById(R.id.tvSettingNotifAccessStatus)
+        rowSettingAccessibility = findViewById(R.id.rowSettingAccessibility)
+        tvSettingAccessibilityStatus = findViewById(R.id.tvSettingAccessibilityStatus)
+
+        styleBridgeSwitch(switchNotifMaster)
+        styleBridgeSwitch(switchAndroidNotif)
+        styleBridgeSwitch(switchMacNotif)
+        styleBridgeSwitch(switchPhoneVibrate)
 
         // Screen B
         layoutScreenPairing = findViewById(R.id.layoutScreenPairing)
@@ -217,7 +278,130 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         BridgePrefs.port(this).let { etServerPort.setText(it.toString()) }
     }
 
+    private fun styleBridgeSwitch(sw: SwitchCompat) {
+        val states = arrayOf(
+            intArrayOf(android.R.attr.state_checked),
+            intArrayOf(-android.R.attr.state_checked)
+        )
+        val thumbColors = intArrayOf(
+            colorLime,
+            colorMuted
+        )
+        val trackColors = intArrayOf(
+            Color.parseColor("#4D6114"),
+            Color.parseColor("#2B2F36")
+        )
+        sw.thumbTintList = ColorStateList(states, thumbColors)
+        sw.trackTintList = ColorStateList(states, trackColors)
+    }
+
+    private var navPillAnimator: AnimatorSet? = null
+
+    private fun selectTab(settingsTab: Boolean) {
+        isSettingsTabSelected = settingsTab
+
+        // 1. Update filled vs outlined icons and colors
+        if (settingsTab) {
+            ivNavSettings.setImageResource(R.drawable.ic_nav_settings_filled)
+            ivNavSettings.imageTintList = ColorStateList.valueOf(colorLime)
+            tvNavSettings.setTextColor(colorLime)
+
+            ivNavHome.setImageResource(R.drawable.ic_nav_home_outline)
+            ivNavHome.imageTintList = ColorStateList.valueOf(colorSoft)
+            tvNavHome.setTextColor(colorSoft)
+        } else {
+            ivNavHome.setImageResource(R.drawable.ic_nav_home_filled)
+            ivNavHome.imageTintList = ColorStateList.valueOf(colorLime)
+            tvNavHome.setTextColor(colorLime)
+
+            ivNavSettings.setImageResource(R.drawable.ic_nav_settings_outline)
+            ivNavSettings.imageTintList = ColorStateList.valueOf(colorSoft)
+            tvNavSettings.setTextColor(colorSoft)
+        }
+
+        // 2. Smooth & slight sticky pill indicator animation
+        val pillWidth = viewNavActiveIndicator.width.toFloat().let {
+            if (it > 0f) it else (102f * resources.displayMetrics.density)
+        }
+        val targetX = if (settingsTab) pillWidth else 0f
+
+        navPillAnimator?.cancel()
+        val slideAnim = ObjectAnimator.ofFloat(
+            viewNavActiveIndicator,
+            "translationX",
+            viewNavActiveIndicator.translationX,
+            targetX
+        ).apply {
+            duration = 320
+            interpolator = OvershootInterpolator(0.95f)
+        }
+        val stretchXAnim = ObjectAnimator.ofFloat(
+            viewNavActiveIndicator,
+            "scaleX",
+            1.0f, 1.15f, 0.97f, 1.0f
+        ).apply {
+            duration = 320
+            interpolator = AccelerateDecelerateInterpolator()
+        }
+        val squashYAnim = ObjectAnimator.ofFloat(
+            viewNavActiveIndicator,
+            "scaleY",
+            1.0f, 0.92f, 1.02f, 1.0f
+        ).apply {
+            duration = 320
+            interpolator = AccelerateDecelerateInterpolator()
+        }
+        navPillAnimator = AnimatorSet().apply {
+            playTogether(slideAnim, stretchXAnim, squashYAnim)
+            start()
+        }
+
+        // 3. Subtle spring pop on the newly selected tab icon
+        val activeIcon = if (settingsTab) ivNavSettings else ivNavHome
+        activeIcon.scaleX = 0.82f
+        activeIcon.scaleY = 0.82f
+        activeIcon.animate()
+            .scaleX(1.0f)
+            .scaleY(1.0f)
+            .setDuration(280)
+            .setInterpolator(OvershootInterpolator(1.6f))
+            .start()
+
+        updateAccessibilityNotice()
+        updateSettingsUI()
+        updateUI()
+
+        // 4. Smooth cross-fade & slight slide on the newly visible tab page
+        val targetPage = if (settingsTab) {
+            layoutTabSettings
+        } else if (BridgePrefs.isPaired(this)) {
+            layoutScreenConnected
+        } else {
+            layoutScreenPairing
+        }
+        targetPage.alpha = 0.35f
+        targetPage.translationY = 8f * resources.displayMetrics.density
+        targetPage.animate()
+            .alpha(1.0f)
+            .translationY(0f)
+            .setDuration(210)
+            .setInterpolator(DecelerateInterpolator())
+            .start()
+    }
+
     private fun setupListeners() {
+        navTabHome.setOnClickListener {
+            if (isSettingsTabSelected) {
+                selectTab(false)
+            }
+        }
+
+        navTabSettings.setOnClickListener {
+            if (!isSettingsTabSelected) {
+                selectTab(true)
+            }
+        }
+
         btnUpdateDownload.setOnClickListener {
             val url = currentUpdateUrl ?: "https://github.com/badruddin-tasnim/bridge/releases/latest"
             try {
@@ -238,8 +422,55 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
             startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
         }
 
-        cardNotificationFeature.setOnClickListener {
+        rowSettingNotifAccess.setOnClickListener {
             startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+        }
+
+        rowSettingAccessibility.setOnClickListener {
+            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        }
+
+        switchNotifMaster.setOnCheckedChangeListener { _, isChecked ->
+            if (isUpdatingSettingsUi) return@setOnCheckedChangeListener
+            BridgePrefs.setNotifMasterEnabled(this, isChecked, updateTimestamp = true)
+            if (!isChecked) {
+                BridgeNotificationManager.cancelAllMacAlerts(this)
+            } else if (BridgePrefs.isAndroidNotifEnabled(this)) {
+                BridgeNotificationListenerService.instance?.syncActiveNotifications()
+            }
+            BridgeNotificationManager.sendSettingsToMac(this)
+            updateAccessibilityNotice()
+            updateSettingsUI()
+            updateUI()
+        }
+
+        switchAndroidNotif.setOnCheckedChangeListener { _, isChecked ->
+            if (isUpdatingSettingsUi) return@setOnCheckedChangeListener
+            BridgePrefs.setAndroidNotifEnabled(this, isChecked, updateTimestamp = true)
+            if (isChecked && BridgePrefs.isNotifMasterEnabled(this)) {
+                BridgeNotificationListenerService.instance?.syncActiveNotifications()
+            }
+            BridgeNotificationManager.sendSettingsToMac(this)
+            updateAccessibilityNotice()
+            updateSettingsUI()
+            updateUI()
+        }
+
+        switchMacNotif.setOnCheckedChangeListener { _, isChecked ->
+            if (isUpdatingSettingsUi) return@setOnCheckedChangeListener
+            BridgePrefs.setMacNotifEnabled(this, isChecked, updateTimestamp = true)
+            if (!isChecked) {
+                BridgeNotificationManager.cancelAllMacAlerts(this)
+            }
+            BridgeNotificationManager.sendSettingsToMac(this)
+            updateSettingsUI()
+            updateUI()
+        }
+
+        switchPhoneVibrate.setOnCheckedChangeListener { _, isChecked ->
+            if (isUpdatingSettingsUi) return@setOnCheckedChangeListener
+            BridgePrefs.setPhoneVibrateEnabled(this, isChecked)
+            updateSettingsUI()
         }
 
         btnScanQr.setOnClickListener {
@@ -309,12 +540,13 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
             val port = etServerPort.text.toString().toIntOrNull() ?: NetworkSyncClient.DEFAULT_PORT
 
             setConnectingState(true)
-            val noteMsg = if (!localNet || userConnectAttempts >= 2 || consecutiveFailures >= 2) {
+            val isCaution = !localNet || userConnectAttempts >= 2 || consecutiveFailures >= 2
+            val noteMsg = if (isCaution) {
                 "Cannot reach your Mac. Check that your Mac and phone are connected to the same Wi-Fi."
             } else {
                 "Looking for your Mac on this Wi-Fi…"
             }
-            showPairingNote(noteMsg, BannerStyle.CONNECTING)
+            showPairingNote(noteMsg, if (isCaution) BannerStyle.ERROR else BannerStyle.CONNECTING)
 
             val hostParam = host.ifEmpty { null }
             ClipboardSyncManager.pair(this, hostParam, port, code)
@@ -325,6 +557,7 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
             etPairCode.setText("")
             consecutiveFailures = 0
             userConnectAttempts = 0
+            layoutNoteBanner.visibility = View.GONE
             setConnectingState(false)
             updateUI()
             Toast.makeText(this, "Unpaired successfully", Toast.LENGTH_SHORT).show()
@@ -350,6 +583,7 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
             etPairCode.setText("")
             consecutiveFailures = 0
             userConnectAttempts = 0
+            layoutNoteBanner.visibility = View.GONE
             setConnectingState(false)
             updateUI()
             Toast.makeText(this, "Unpaired successfully", Toast.LENGTH_SHORT).show()
@@ -469,17 +703,68 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
     }
 
     private fun updateAccessibilityNotice() {
-        if (isAccessibilityServiceEnabled()) {
+        if (isSettingsTabSelected || isAccessibilityServiceEnabled()) {
             layoutServiceNotice.visibility = View.GONE
         } else {
             layoutServiceNotice.visibility = View.VISIBLE
         }
 
-        if (isNotificationServiceEnabled()) {
+        if (isSettingsTabSelected || isNotificationServiceEnabled() || !BridgePrefs.isNotificationSyncEnabled(this)) {
             layoutNotificationNotice.visibility = View.GONE
         } else {
             layoutNotificationNotice.visibility = View.VISIBLE
         }
+    }
+
+    private fun updateSettingsUI() {
+        isUpdatingSettingsUi = true
+        try {
+            val masterEnabled = BridgePrefs.isNotifMasterEnabled(this)
+            val androidEnabled = BridgePrefs.isAndroidNotifEnabled(this)
+            val macEnabled = BridgePrefs.isMacNotifEnabled(this)
+            val vibrateEnabled = BridgePrefs.isPhoneVibrateEnabled(this)
+
+            switchNotifMaster.isChecked = masterEnabled
+            switchAndroidNotif.isChecked = androidEnabled
+            switchMacNotif.isChecked = macEnabled
+            switchPhoneVibrate.isChecked = vibrateEnabled
+
+            switchAndroidNotif.isEnabled = masterEnabled
+            switchMacNotif.isEnabled = masterEnabled
+            layoutNotifSubOptions.alpha = if (masterEnabled) 1.0f else 0.42f
+            viewNotifSubAccent.setBackgroundColor(
+                if (masterEnabled) colorLime else Color.parseColor("#2B2F36")
+            )
+
+            val macEffective = masterEnabled && macEnabled
+            switchPhoneVibrate.isEnabled = macEffective
+            rowPhoneVibrate.alpha = if (macEffective) 1.0f else 0.42f
+
+            if (isNotificationServiceEnabled()) {
+                tvSettingNotifAccessStatus.text = "Active"
+                tvSettingNotifAccessStatus.setTextColor(colorLime)
+            } else {
+                tvSettingNotifAccessStatus.text = "Enable"
+                tvSettingNotifAccessStatus.setTextColor(colorCoral)
+            }
+
+            if (isAccessibilityServiceEnabled()) {
+                tvSettingAccessibilityStatus.text = "Active"
+                tvSettingAccessibilityStatus.setTextColor(colorLime)
+            } else {
+                tvSettingAccessibilityStatus.text = "Enable"
+                tvSettingAccessibilityStatus.setTextColor(colorCoral)
+            }
+        } finally {
+            isUpdatingSettingsUi = false
+        }
+    }
+
+    override fun onSettingsChanged() {
+        updateAccessibilityNotice()
+        updateAccessibilityNotice()
+        updateSettingsUI()
+        updateUI()
     }
 
     private fun isNotificationServiceEnabled(): Boolean {
@@ -553,16 +838,11 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
 
         if (paired) {
             layoutScreenPairing.visibility = View.GONE
-            layoutScreenConnected.visibility = View.VISIBLE
+            layoutScreenConnected.visibility = if (isSettingsTabSelected) View.GONE else View.VISIBLE
+            layoutTabSettings.visibility = if (isSettingsTabSelected) View.VISIBLE else View.GONE
             tvDeviceMacName.text = macName
 
-            if (isNotificationServiceEnabled()) {
-                tvNotificationStatus.text = "Active"
-                tvNotificationStatus.setTextColor(colorLime)
-            } else {
-                tvNotificationStatus.text = "Tap to Enable"
-                tvNotificationStatus.setTextColor(colorCoral)
-            }
+            updateSettingsUI()
 
             if (connected) {
                 isConnectingState = false
@@ -655,7 +935,8 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         } else {
             // Not Paired (Screen B) - no Mac is paired, so hide Unpair button
             layoutScreenConnected.visibility = View.GONE
-            layoutScreenPairing.visibility = View.VISIBLE
+            layoutScreenPairing.visibility = if (isSettingsTabSelected) View.GONE else View.VISIBLE
+            layoutTabSettings.visibility = if (isSettingsTabSelected) View.VISIBLE else View.GONE
             btnUnpairPairing.visibility = View.GONE
 
             if (isConnectingState) {
@@ -700,6 +981,14 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
             this.consecutiveFailures = consecutiveFailures
             if (ClipboardSyncManager.networkClient?.isConnected() != true) {
                 isConnectingState = false
+                if (!BridgePrefs.isPaired(this)) {
+                    val noteMsg = if (consecutiveFailures >= 2 || userConnectAttempts >= 2) {
+                        "Cannot reach your Mac. Check that your Mac and phone are connected to the same Wi-Fi."
+                    } else {
+                        "Couldn't reach your Mac. Check that you're on the same Wi-Fi and Bridge is open."
+                    }
+                    showPairingNote(noteMsg, BannerStyle.ERROR)
+                }
                 updateUI()
             }
         }

@@ -85,6 +85,7 @@ class BridgeServer {
     private var connections = [UUID: NWConnection]()
     private var authenticatedConnections = Set<UUID>()
     private var clientDeviceNames = [UUID: String]()
+    private var connectionLastSeen = [UUID: TimeInterval]()
     private let networkQueue = DispatchQueue(label: "com.link.bridge.network")
     private let imageQueue = DispatchQueue(label: "com.link.bridge.image", qos: .userInitiated)
     private let pathMonitor = NWPathMonitor()
@@ -235,7 +236,13 @@ class BridgeServer {
             listener = nil
         }
         do {
-            let parameters = NWParameters.tcp
+            let tcpOptions = NWProtocolTCP.Options()
+            tcpOptions.enableKeepalive = true
+            tcpOptions.keepaliveIdle = 3
+            tcpOptions.keepaliveInterval = 2
+            tcpOptions.keepaliveCount = 2
+            tcpOptions.connectionDropTime = 6
+            let parameters = NWParameters(tls: nil, tcp: tcpOptions)
             parameters.allowLocalEndpointReuse = true
             listener = try NWListener(using: parameters, on: port)
             
@@ -276,17 +283,17 @@ class BridgeServer {
         networkQueue.async { [weak self, conn] in
             guard let self = self else { return }
             self.connections[connectionId] = conn
+            self.connectionLastSeen[connectionId] = Date().timeIntervalSince1970
             
             conn.stateUpdateHandler = { [weak self, weak conn] state in
-                guard let self = self, let _ = conn else { return }
+                guard let self = self, let conn = conn else { return }
                 switch state {
                 case .ready:
-                    self.readNextMessage(from: conn!, id: connectionId, buffer: Data())
-                case .failed(_), .cancelled:
-                    self.connections.removeValue(forKey: connectionId)
-                    self.authenticatedConnections.remove(connectionId)
-                    self.clientDeviceNames.removeValue(forKey: connectionId)
-                    self.notifyUiStatus()
+                    self.connectionLastSeen[connectionId] = Date().timeIntervalSince1970
+                    self.readNextMessage(from: conn, id: connectionId, buffer: Data())
+                case .waiting(_), .failed(_), .cancelled:
+                    conn.cancel()
+                    self.removeConnection(id: connectionId)
                 default:
                     break
                 }
@@ -295,19 +302,27 @@ class BridgeServer {
         }
     }
     
+    private func removeConnection(id: UUID) {
+        connections.removeValue(forKey: id)
+        let wasAuthenticated = authenticatedConnections.remove(id) != nil
+        clientDeviceNames.removeValue(forKey: id)
+        connectionLastSeen.removeValue(forKey: id)
+        if wasAuthenticated {
+            notifyUiStatus()
+        }
+    }
+    
     private func readNextMessage(from conn: NWConnection, id: UUID, buffer: Data) {
         conn.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self, weak conn] content, _, isComplete, error in
             guard let self = self, let conn = conn else { return }
             var currentBuffer = buffer
             if let data = content, !data.isEmpty {
+                self.connectionLastSeen[id] = Date().timeIntervalSince1970
                 currentBuffer.append(data)
                 let maxAllowed = self.authenticatedConnections.contains(id) ? Self.maxAuthBufferBytes : Self.maxUnauthBufferBytes
                 if currentBuffer.count > maxAllowed {
                     conn.cancel()
-                    self.connections.removeValue(forKey: id)
-                    self.authenticatedConnections.remove(id)
-                    self.clientDeviceNames.removeValue(forKey: id)
-                    self.notifyUiStatus()
+                    self.removeConnection(id: id)
                     return
                 }
                 while let newlineIndex = currentBuffer.firstIndex(of: UInt8(ascii: "\n")) {
@@ -319,10 +334,8 @@ class BridgeServer {
                 }
             }
             if isComplete || error != nil {
-                self.connections.removeValue(forKey: id)
-                self.authenticatedConnections.remove(id)
-                self.clientDeviceNames.removeValue(forKey: id)
-                self.notifyUiStatus()
+                conn.cancel()
+                self.removeConnection(id: id)
             } else {
                 self.readNextMessage(from: conn, id: id, buffer: currentBuffer)
             }
@@ -351,6 +364,11 @@ class BridgeServer {
                 let macName = Host.current().localizedName ?? "Mac"
                 let welcome = ClipboardPayload(type: "welcome", name: macName)
                 self.sendDirect(payload: welcome, to: conn)
+                if let settingsStr = BridgeNotificationManager.shared.buildSettingsSyncJson(),
+                   var settingsData = settingsStr.data(using: .utf8) {
+                    settingsData.append(UInt8(ascii: "\n"))
+                    conn.send(content: settingsData, completion: .contentProcessed({ _ in }))
+                }
                 self.notifyUiStatus()
             } else {
                 let denied = ClipboardPayload(type: "denied")
@@ -361,8 +379,8 @@ class BridgeServer {
         
         guard self.authenticatedConnections.contains(id) else { return }
 
-        if type.hasPrefix("notif_") {
-            NSLog("[BridgeServer] Routing notif payload of type '%@' to BridgeNotificationManager", type)
+        if type.hasPrefix("notif_") || type == "settings_sync" {
+            NSLog("[BridgeServer] Routing payload of type '%@' to BridgeNotificationManager", type)
             BridgeNotificationManager.shared.handleIncomingPayload(data: data)
             return
         }
@@ -372,13 +390,14 @@ class BridgeServer {
             self.sendDirect(payload: pong, to: conn)
             return
         }
+
+        if type == "pong" {
+            return
+        }
         
         if type == "unpair" {
-            self.connections.removeValue(forKey: id)
-            self.authenticatedConnections.remove(id)
-            self.clientDeviceNames.removeValue(forKey: id)
             conn.cancel()
-            self.notifyUiStatus()
+            self.removeConnection(id: id)
             return
         }
         
@@ -600,9 +619,42 @@ class BridgeServer {
     
     private func startHeartbeat() {
         heartbeatTimer?.invalidate()
-        heartbeatTimer = Timer.scheduledTimer(withTimeInterval: 12.0, repeats: true) { [weak self] _ in
-            let ping = ClipboardPayload(type: "ping")
-            self?.broadcastPayload(ping)
+        heartbeatTimer = Timer.scheduledTimer(withTimeInterval: 2.5, repeats: true) { [weak self] _ in
+            self?.checkConnectionsAndSendPing()
+        }
+    }
+    
+    private func checkConnectionsAndSendPing() {
+        let ping = ClipboardPayload(type: "ping")
+        guard let data = try? JSONEncoder().encode(ping) else { return }
+        var line = data
+        line.append(UInt8(ascii: "\n"))
+        
+        networkQueue.async { [weak self] in
+            guard let self = self else { return }
+            let now = Date().timeIntervalSince1970
+            var staleIds = [UUID]()
+            
+            for id in self.authenticatedConnections {
+                let lastSeen = self.connectionLastSeen[id] ?? 0
+                if now - lastSeen > 6.5 {
+                    staleIds.append(id)
+                } else if let conn = self.connections[id] {
+                    conn.send(content: line, completion: .contentProcessed({ [weak self, weak conn] error in
+                        if error != nil {
+                            conn?.cancel()
+                            self?.removeConnection(id: id)
+                        }
+                    }))
+                } else {
+                    staleIds.append(id)
+                }
+            }
+            
+            for id in staleIds {
+                self.connections[id]?.cancel()
+                self.removeConnection(id: id)
+            }
         }
     }
     
@@ -611,6 +663,7 @@ class BridgeServer {
         connections.removeAll()
         authenticatedConnections.removeAll()
         clientDeviceNames.removeAll()
+        connectionLastSeen.removeAll()
         notifyUiStatus()
     }
     

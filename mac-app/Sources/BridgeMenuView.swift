@@ -242,6 +242,67 @@ struct NotificationCardView: View {
     }
 }
 
+// MARK: - Isolated Status Dot View
+
+final class StatusDotTicker: ObservableObject {
+    static let shared = StatusDotTicker()
+    @Published var breathe: Bool = false
+    private var timer: Timer?
+
+    private init() {
+        timer = Timer.scheduledTimer(withTimeInterval: 1.2, repeats: true) { [weak self] _ in
+            self?.breathe.toggle()
+        }
+    }
+
+    func stop() {
+        timer?.invalidate()
+        timer = nil
+        breathe = false
+    }
+}
+
+struct StatusDotView: View {
+    let isConnected: Bool
+    @ObservedObject private var ticker = StatusDotTicker.shared
+
+    var body: some View {
+        Circle()
+            .fill(isConnected ? BridgeColors.lime : BridgeColors.muted)
+            .frame(width: 7, height: 7)
+            .scaleEffect(ticker.breathe && isConnected ? 0.8 : 1.0)
+            .opacity(ticker.breathe && isConnected ? 0.35 : 1.0)
+            .animation(
+                isConnected ? Animation.easeInOut(duration: 1.2) : .default,
+                value: ticker.breathe
+            )
+    }
+}
+
+struct BridgeSwitchToggleStyle: ToggleStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        Button(action: {
+            withAnimation(.easeInOut(duration: 0.16)) {
+                configuration.isOn.toggle()
+            }
+        }) {
+            ZStack(alignment: configuration.isOn ? .trailing : .leading) {
+                Capsule()
+                    .fill(configuration.isOn ? BridgeColors.lime : BridgeColors.line2)
+                    .frame(width: 38, height: 22)
+
+                Circle()
+                    .fill(Color.white)
+                    .shadow(color: Color.black.opacity(0.22), radius: 1.5, x: 0, y: 1)
+                    .frame(width: 18, height: 18)
+                    .padding(2)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 // MARK: - Main Menu Bar View
 
 struct BridgeMenuView: View {
@@ -264,17 +325,7 @@ struct BridgeMenuView: View {
 
                 // Status indicator
                 HStack(spacing: 6) {
-                    Circle()
-                        .fill(model.isConnected ? BridgeColors.lime : BridgeColors.muted)
-                        .frame(width: 7, height: 7)
-                        .scaleEffect(model.dotBreathe && model.isConnected ? 0.8 : 1.0)
-                        .opacity(model.dotBreathe && model.isConnected ? 0.35 : 1.0)
-                        .animation(
-                            model.isConnected
-                                ? Animation.easeInOut(duration: 1.2)
-                                : .default,
-                            value: model.dotBreathe
-                        )
+                    StatusDotView(isConnected: model.isConnected)
 
                     Text(model.isConnected ? "ONLINE" : "WAITING")
                         .font(.custom("DMMono-Regular", size: 11))
@@ -283,6 +334,7 @@ struct BridgeMenuView: View {
                 }
             }
             .padding(.top, 4)
+            .fixedSize(horizontal: false, vertical: true)
 
             // Update Notification Banner
             if let updateVer = model.availableUpdateVersion {
@@ -355,17 +407,17 @@ struct BridgeMenuView: View {
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text(model.connectedDevice ?? "Galaxy A52s")
-                            .font(.custom("PlusJakartaSans-Medium", size: 15.5))
+                            .font(.custom("PlusJakartaSans-Medium", size: 14))
                             .foregroundColor(BridgeColors.text)
                             .kerning(-0.15)
                             .lineLimit(1)
-                            .minimumScaleFactor(0.85)
+                            .fixedSize(horizontal: false, vertical: true)
 
                         Text("Linked to this Mac, same Wi-Fi")
-                            .font(.custom("PlusJakartaSans-Regular", size: 12.5))
+                            .font(.custom("PlusJakartaSans-Regular", size: 11.5))
                             .foregroundColor(BridgeColors.muted)
                             .lineLimit(1)
-                            .minimumScaleFactor(0.9)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     .layoutPriority(1)
 
@@ -390,12 +442,15 @@ struct BridgeMenuView: View {
                                 )
                                 .frame(width: 15, height: 15)
                         }
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .help("Unpair device")
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 13)
+                .frame(maxWidth: .infinity)
+                .fixedSize(horizontal: false, vertical: true)
                 .background(
                     RoundedRectangle(cornerRadius: 18)
                         .fill(BridgeColors.panel)
@@ -404,7 +459,9 @@ struct BridgeMenuView: View {
                 // Tab Switcher: [Notifications (count)]  [Settings]
                 HStack(spacing: 6) {
                     Button(action: {
-                        model.selectedTab = .notifications
+                        if model.selectedTab != .notifications {
+                            model.selectedTab = .notifications
+                        }
                     }) {
                         HStack(spacing: 6) {
                             Image(systemName: "bell.fill")
@@ -431,11 +488,14 @@ struct BridgeMenuView: View {
                             RoundedRectangle(cornerRadius: 10)
                                 .fill(model.selectedTab == .notifications ? BridgeColors.panel : Color.clear)
                         )
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
 
                     Button(action: {
-                        model.selectedTab = .settings
+                        if model.selectedTab != .settings {
+                            model.selectedTab = .settings
+                        }
                     }) {
                         HStack(spacing: 6) {
                             Image(systemName: "gearshape.fill")
@@ -450,10 +510,12 @@ struct BridgeMenuView: View {
                             RoundedRectangle(cornerRadius: 10)
                                 .fill(model.selectedTab == .settings ? BridgeColors.panel : Color.clear)
                         )
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                 }
                 .padding(4)
+                .fixedSize(horizontal: false, vertical: true)
                 .background(
                     RoundedRectangle(cornerRadius: 12)
                         .fill(BridgeColors.bg)
@@ -465,7 +527,7 @@ struct BridgeMenuView: View {
 
                 // Tab 1: Notifications
                 if model.selectedTab == .notifications {
-                    if !notifManager.isSystemNotificationAllowed {
+                    if !notifManager.isSystemNotificationAllowed && notifManager.isEffectiveAndroidReceiveEnabled {
                         Button(action: {
                             notifManager.openNotificationSettings()
                         }) {
@@ -475,10 +537,10 @@ struct BridgeMenuView: View {
                                     .foregroundColor(BridgeColors.coral)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text("Mac Banners Disabled")
-                                        .font(.custom("PlusJakartaSans-SemiBold", size: 12.5))
+                                        .font(.custom("PlusJakartaSans-Medium", size: 13))
                                         .foregroundColor(BridgeColors.text)
                                     Text("Click to allow Bridge in System Settings > Notifications")
-                                        .font(.custom("PlusJakartaSans-Regular", size: 11))
+                                        .font(.custom("PlusJakartaSans-Regular", size: 11.5))
                                         .foregroundColor(BridgeColors.muted)
                                 }
                                 Spacer()
@@ -495,11 +557,12 @@ struct BridgeMenuView: View {
                                 RoundedRectangle(cornerRadius: 10)
                                     .stroke(BridgeColors.coral.opacity(0.35), lineWidth: 1)
                             )
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                     }
 
-                    if !axObserver.isAccessibilityTrusted && notifManager.isMacAlertsForwardingEnabled {
+                    if !axObserver.isAccessibilityTrusted && notifManager.isEffectiveMacForwardEnabled {
                         Button(action: {
                             axObserver.promptAccessibilityPermissions()
                         }) {
@@ -509,10 +572,10 @@ struct BridgeMenuView: View {
                                     .foregroundColor(BridgeColors.lime)
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text("Mac Alert Forwarding Paused")
-                                        .font(.custom("PlusJakartaSans-SemiBold", size: 12.5))
+                                        .font(.custom("PlusJakartaSans-Medium", size: 13))
                                         .foregroundColor(BridgeColors.text)
                                     Text("Click to grant Accessibility permission in System Settings")
-                                        .font(.custom("PlusJakartaSans-Regular", size: 11))
+                                        .font(.custom("PlusJakartaSans-Regular", size: 11.5))
                                         .foregroundColor(BridgeColors.muted)
                                 }
                                 Spacer()
@@ -529,6 +592,7 @@ struct BridgeMenuView: View {
                                 RoundedRectangle(cornerRadius: 10)
                                     .stroke(BridgeColors.lime.opacity(0.35), lineWidth: 1)
                             )
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                     }
@@ -540,12 +604,16 @@ struct BridgeMenuView: View {
                                 .foregroundColor(BridgeColors.muted.opacity(0.6))
                                 .padding(.top, 4)
 
-                            Text("No new notifications")
-                                .font(.custom("PlusJakartaSans-Medium", size: 13.5))
+                            Text(notifManager.isEffectiveAndroidReceiveEnabled ? "No new notifications" : "Notifications paused")
+                                .font(.custom("PlusJakartaSans-Medium", size: 13))
                                 .foregroundColor(BridgeColors.soft)
 
-                            Text("Notifications from your phone will appear here in real time.")
-                                .font(.custom("PlusJakartaSans-Regular", size: 12))
+                            Text(
+                                notifManager.isEffectiveAndroidReceiveEnabled
+                                    ? "Notifications from your phone will appear here in real time."
+                                    : "Android notifications are turned off in Settings."
+                            )
+                                .font(.custom("PlusJakartaSans-Regular", size: 11.5))
                                 .foregroundColor(BridgeColors.muted)
                                 .multilineTextAlignment(.center)
                                 .padding(.horizontal, 16)
@@ -573,20 +641,29 @@ struct BridgeMenuView: View {
                                     Text("Clear All")
                                         .font(.custom("PlusJakartaSans-Medium", size: 11.5))
                                         .foregroundColor(BridgeColors.coral)
+                                        .contentShape(Rectangle())
                                 }
                                 .buttonStyle(.plain)
                             }
                             .padding(.horizontal, 4)
 
-                            ScrollView(.vertical, showsIndicators: true) {
+                            if notifManager.activeNotifications.count <= 2 {
                                 VStack(spacing: 8) {
                                     ForEach(notifManager.activeNotifications) { notif in
                                         NotificationCardView(notification: notif, manager: notifManager)
                                     }
                                 }
-                                .padding(.trailing, 2)
+                            } else {
+                                ScrollView(.vertical, showsIndicators: true) {
+                                    VStack(spacing: 8) {
+                                        ForEach(notifManager.activeNotifications) { notif in
+                                            NotificationCardView(notification: notif, manager: notifManager)
+                                        }
+                                    }
+                                    .padding(.trailing, 2)
+                                }
+                                .frame(height: 280)
                             }
-                            .frame(maxHeight: 280)
                         }
                     }
                 }
@@ -594,71 +671,98 @@ struct BridgeMenuView: View {
                 // Tab 2: Settings
                 if model.selectedTab == .settings {
                     VStack(alignment: .leading, spacing: 12) {
-                        Toggle(isOn: $notifManager.isMirroringEnabled) {
+                        Text("SYNCED SETTINGS")
+                            .font(.custom("DMMono-Regular", size: 10.5))
+                            .foregroundColor(BridgeColors.muted)
+                            .kerning(1.0)
+
+                        // Main Master Notification Option
+                        HStack {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text("Mirror Phone Notifications")
+                                Text("Notifications")
                                     .font(.custom("PlusJakartaSans-Medium", size: 13))
                                     .foregroundColor(BridgeColors.text)
-                                Text("Display incoming phone alerts on Mac")
-                                    .font(.custom("PlusJakartaSans-Regular", size: 11))
+                                Text("Sync notifications between Mac and phone")
+                                    .font(.custom("PlusJakartaSans-Regular", size: 11.5))
                                     .foregroundColor(BridgeColors.muted)
                             }
+                            Spacer()
+                            Toggle("", isOn: $notifManager.isMasterNotificationsEnabled)
+                                .labelsHidden()
+                                .toggleStyle(BridgeSwitchToggleStyle())
                         }
-                        .toggleStyle(SwitchToggleStyle(tint: BridgeColors.lime))
+
+                        // Sub-options for Android and Mac notifications
+                        HStack(alignment: .top, spacing: 10) {
+                            Rectangle()
+                                .fill(notifManager.isMasterNotificationsEnabled ? BridgeColors.lime.opacity(0.45) : BridgeColors.line)
+                                .frame(width: 2)
+                                .cornerRadius(1)
+                                .padding(.vertical, 2)
+                                .padding(.leading, 4)
+
+                            VStack(alignment: .leading, spacing: 10) {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Android Notifications")
+                                            .font(.custom("PlusJakartaSans-Medium", size: 13))
+                                            .foregroundColor(BridgeColors.text)
+                                        Text("Show phone notifications on this Mac")
+                                            .font(.custom("PlusJakartaSans-Regular", size: 11.5))
+                                            .foregroundColor(BridgeColors.muted)
+                                    }
+                                    Spacer()
+                                    Toggle("", isOn: $notifManager.isMirroringEnabled)
+                                        .labelsHidden()
+                                        .toggleStyle(BridgeSwitchToggleStyle())
+                                        .disabled(!notifManager.isMasterNotificationsEnabled)
+                                }
+
+                                Divider().background(BridgeColors.line.opacity(0.6))
+
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Mac Notifications")
+                                            .font(.custom("PlusJakartaSans-Medium", size: 13))
+                                            .foregroundColor(BridgeColors.text)
+                                        Text("Show Mac notifications on your phone")
+                                            .font(.custom("PlusJakartaSans-Regular", size: 11.5))
+                                            .foregroundColor(BridgeColors.muted)
+                                    }
+                                    Spacer()
+                                    Toggle("", isOn: $notifManager.isMacAlertsForwardingEnabled)
+                                        .labelsHidden()
+                                        .toggleStyle(BridgeSwitchToggleStyle())
+                                        .disabled(!notifManager.isMasterNotificationsEnabled)
+                                }
+                            }
+                        }
+                        .opacity(notifManager.isMasterNotificationsEnabled ? 1.0 : 0.45)
 
                         Divider().background(BridgeColors.line)
 
-                        Toggle(isOn: $notifManager.isSoundEnabled) {
+                        // Mac-Only Settings Section
+                        Text("MAC ONLY")
+                            .font(.custom("DMMono-Regular", size: 10.5))
+                            .foregroundColor(BridgeColors.muted)
+                            .kerning(1.0)
+
+                        HStack {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Play Notification Sounds")
                                     .font(.custom("PlusJakartaSans-Medium", size: 13))
                                     .foregroundColor(BridgeColors.text)
-                                Text("Chime when a new phone alert arrives")
-                                    .font(.custom("PlusJakartaSans-Regular", size: 11))
+                                Text("Chime on Mac when a phone alert arrives")
+                                    .font(.custom("PlusJakartaSans-Regular", size: 11.5))
                                     .foregroundColor(BridgeColors.muted)
                             }
+                            Spacer()
+                            Toggle("", isOn: $notifManager.isSoundEnabled)
+                                .labelsHidden()
+                                .toggleStyle(BridgeSwitchToggleStyle())
+                                .disabled(!notifManager.isEffectiveAndroidReceiveEnabled)
                         }
-                        .toggleStyle(SwitchToggleStyle(tint: BridgeColors.lime))
-
-                        Divider().background(BridgeColors.line)
-
-                        Toggle(isOn: $notifManager.isMacAlertsForwardingEnabled) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Forward Mac Alerts to Phone")
-                                    .font(.custom("PlusJakartaSans-Medium", size: 13))
-                                    .foregroundColor(BridgeColors.text)
-                                Text("Push Mac system notifications to Android")
-                                    .font(.custom("PlusJakartaSans-Regular", size: 11))
-                                    .foregroundColor(BridgeColors.muted)
-                            }
-                        }
-                        .toggleStyle(SwitchToggleStyle(tint: BridgeColors.lime))
-
-                        if notifManager.isMacAlertsForwardingEnabled {
-                            Button(action: {
-                                let testNotif = BridgeNotification(
-                                    id: "mac_test_\(Int(Date().timeIntervalSince1970))",
-                                    source: "mac",
-                                    pkg: "com.apple",
-                                    app: "Bridge Test",
-                                    title: "Bridge on Mac",
-                                    text: "Mac alerts are now syncing to your phone!",
-                                    timestamp: Int64(Date().timeIntervalSince1970 * 1000)
-                                )
-                                notifManager.sendNotificationToPhone(testNotif)
-                            }) {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "paperplane.fill")
-                                        .font(.system(size: 11))
-                                        .foregroundColor(BridgeColors.lime)
-                                    Text("Send Test Alert to Phone")
-                                        .font(.custom("PlusJakartaSans-Medium", size: 11.5))
-                                        .foregroundColor(BridgeColors.lime)
-                                }
-                                .padding(.top, 2)
-                            }
-                            .buttonStyle(.plain)
-                        }
+                        .opacity(notifManager.isEffectiveAndroidReceiveEnabled ? 1.0 : 0.45)
 
                         if !notifManager.isSystemNotificationAllowed {
                             Divider().background(BridgeColors.line)
@@ -672,10 +776,10 @@ struct BridgeMenuView: View {
                                         .foregroundColor(BridgeColors.coral)
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text("Allow Mac Banners")
-                                            .font(.custom("PlusJakartaSans-SemiBold", size: 12.5))
+                                            .font(.custom("PlusJakartaSans-Medium", size: 13))
                                             .foregroundColor(BridgeColors.text)
                                         Text("Enable in System Settings > Notifications")
-                                            .font(.custom("PlusJakartaSans-Regular", size: 11))
+                                            .font(.custom("PlusJakartaSans-Regular", size: 11.5))
                                             .foregroundColor(BridgeColors.muted)
                                     }
                                     Spacer()
@@ -684,6 +788,7 @@ struct BridgeMenuView: View {
                                         .foregroundColor(BridgeColors.muted)
                                 }
                                 .padding(.top, 2)
+                                .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
                         }
@@ -700,10 +805,10 @@ struct BridgeMenuView: View {
                                         .foregroundColor(BridgeColors.lime)
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text("Mac Accessibility Permission")
-                                            .font(.custom("PlusJakartaSans-SemiBold", size: 12.5))
+                                            .font(.custom("PlusJakartaSans-Medium", size: 13))
                                             .foregroundColor(BridgeColors.text)
                                         Text("Required to capture Mac alerts. Click to open System Settings.")
-                                            .font(.custom("PlusJakartaSans-Regular", size: 11))
+                                            .font(.custom("PlusJakartaSans-Regular", size: 11.5))
                                             .foregroundColor(BridgeColors.muted)
                                     }
                                     Spacer()
@@ -720,6 +825,7 @@ struct BridgeMenuView: View {
                                     RoundedRectangle(cornerRadius: 10)
                                         .stroke(BridgeColors.lime.opacity(0.35), lineWidth: 1)
                                 )
+                                .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
                         }
@@ -750,8 +856,10 @@ struct BridgeMenuView: View {
                         RoundedRectangle(cornerRadius: 12)
                             .stroke(BridgeColors.line2, lineWidth: 1)
                     )
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .fixedSize(horizontal: false, vertical: true)
             }
 
             // Pairing Card (Visible when NOT connected, OR when user clicks "Pair another phone")
@@ -812,6 +920,7 @@ struct BridgeMenuView: View {
                                     RoundedRectangle(cornerRadius: 12)
                                         .stroke(model.copiedNotice ? BridgeColors.lime : BridgeColors.line2, lineWidth: 1)
                                 )
+                                .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                     }
@@ -839,15 +948,23 @@ struct BridgeMenuView: View {
                     Text("Quit Bridge")
                         .font(.custom("PlusJakartaSans-Regular", size: 12))
                         .foregroundColor(BridgeColors.muted)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
             .padding(.horizontal, 4)
             .padding(.top, 2)
+            .fixedSize(horizontal: false, vertical: true)
         }
         .padding(20)
+        .fixedSize(horizontal: false, vertical: true)
         .frame(width: 380)
-        .background(BridgeColors.bg)
+        .background(
+            BridgeColors.bg
+                .padding(.top, -80)
+                .padding(.bottom, -40)
+                .ignoresSafeArea()
+        )
         .onAppear {
             axObserver.checkTrustNow()
         }

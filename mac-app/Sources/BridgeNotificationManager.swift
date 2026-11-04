@@ -10,27 +10,66 @@ public class BridgeNotificationManager: NSObject, ObservableObject, UNUserNotifi
     @Published public var replyDrafts: [String: String] = [:]
     @Published public var isSystemNotificationAllowed: Bool = true
 
-    // Settings
+    // Shared Synced Notification Settings (Master + Sub-options)
+    private var isApplyingRemoteSettings: Bool = false
+
+    @Published public var isMasterNotificationsEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(isMasterNotificationsEnabled, forKey: "bridge_notif_master_enabled")
+            updateMacObserverState()
+            if !isEffectiveAndroidReceiveEnabled {
+                clearLocalNotificationsOnly()
+            }
+            if !isApplyingRemoteSettings {
+                recordLocalSettingsChangeAndSync()
+            }
+        }
+    }
+
     @Published public var isMirroringEnabled: Bool {
-        didSet { UserDefaults.standard.set(isMirroringEnabled, forKey: "bridge_notif_mirroring_enabled") }
+        didSet {
+            UserDefaults.standard.set(isMirroringEnabled, forKey: "bridge_notif_mirroring_enabled")
+            if !isEffectiveAndroidReceiveEnabled {
+                clearLocalNotificationsOnly()
+            }
+            if !isApplyingRemoteSettings {
+                recordLocalSettingsChangeAndSync()
+            }
+        }
     }
-    @Published public var isSoundEnabled: Bool {
-        didSet { UserDefaults.standard.set(isSoundEnabled, forKey: "bridge_notif_sound_enabled") }
-    }
+
     @Published public var isMacAlertsForwardingEnabled: Bool {
         didSet {
             UserDefaults.standard.set(isMacAlertsForwardingEnabled, forKey: "bridge_mac_alerts_forwarding")
-            if isMacAlertsForwardingEnabled {
-                AXNotificationObserver.shared.start()
-            } else {
-                AXNotificationObserver.shared.stop()
+            updateMacObserverState()
+            if !isApplyingRemoteSettings {
+                recordLocalSettingsChangeAndSync()
             }
         }
+    }
+
+    // Mac-Only Settings
+    @Published public var isSoundEnabled: Bool {
+        didSet { UserDefaults.standard.set(isSoundEnabled, forKey: "bridge_notif_sound_enabled") }
+    }
+
+    public var settingsUpdatedAt: Int64 {
+        get { Int64(UserDefaults.standard.integer(forKey: "bridge_settings_updated_at")) }
+        set { UserDefaults.standard.set(Int(newValue), forKey: "bridge_settings_updated_at") }
+    }
+
+    public var isEffectiveAndroidReceiveEnabled: Bool {
+        isMasterNotificationsEnabled && isMirroringEnabled
+    }
+
+    public var isEffectiveMacForwardEnabled: Bool {
+        isMasterNotificationsEnabled && isMacAlertsForwardingEnabled
     }
 
     public var sendPayload: ((_ jsonString: String) -> Void)?
 
     private override init() {
+        self.isMasterNotificationsEnabled = UserDefaults.standard.object(forKey: "bridge_notif_master_enabled") as? Bool ?? true
         self.isMirroringEnabled = UserDefaults.standard.object(forKey: "bridge_notif_mirroring_enabled") as? Bool ?? true
         self.isSoundEnabled = UserDefaults.standard.object(forKey: "bridge_notif_sound_enabled") as? Bool ?? true
         self.isMacAlertsForwardingEnabled = UserDefaults.standard.object(forKey: "bridge_mac_alerts_forwarding") as? Bool ?? true
@@ -39,6 +78,41 @@ public class BridgeNotificationManager: NSObject, ObservableObject, UNUserNotifi
 
         setupUNNotificationCenter()
         setupMacNotificationObserver()
+    }
+
+    private func updateMacObserverState() {
+        if isEffectiveMacForwardEnabled {
+            AXNotificationObserver.shared.start()
+        } else {
+            AXNotificationObserver.shared.stop()
+        }
+    }
+
+    private func recordLocalSettingsChangeAndSync() {
+        settingsUpdatedAt = Int64(Date().timeIntervalSince1970 * 1000)
+        broadcastSettingsSync()
+    }
+
+    public func buildSettingsSyncJson() -> String? {
+        let payload: [String: Any] = [
+            "type": "settings_sync",
+            "notifMasterEnabled": isMasterNotificationsEnabled,
+            "androidNotifEnabled": isMirroringEnabled,
+            "macNotifEnabled": isMacAlertsForwardingEnabled,
+            "updatedAt": settingsUpdatedAt
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload),
+              let str = String(data: data, encoding: .utf8) else {
+            return nil
+        }
+        return str
+    }
+
+    public func broadcastSettingsSync() {
+        if let str = buildSettingsSyncJson() {
+            sendPayload?(str)
+            NSLog("[BridgeNotif] Broadcasted settings_sync: master=\(isMasterNotificationsEnabled), android=\(isMirroringEnabled), mac=\(isMacAlertsForwardingEnabled)")
+        }
     }
 
     private func setupUNNotificationCenter() {
@@ -80,10 +154,10 @@ public class BridgeNotificationManager: NSObject, ObservableObject, UNUserNotifi
 
     private func setupMacNotificationObserver() {
         AXNotificationObserver.shared.onNotificationCaptured = { [weak self] notif in
-            guard let self = self, self.isMacAlertsForwardingEnabled else { return }
+            guard let self = self, self.isEffectiveMacForwardEnabled else { return }
             self.sendNotificationToPhone(notif)
         }
-        if isMacAlertsForwardingEnabled {
+        if isEffectiveMacForwardEnabled {
             AXNotificationObserver.shared.start()
         }
     }
@@ -99,7 +173,14 @@ public class BridgeNotificationManager: NSObject, ObservableObject, UNUserNotifi
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             switch type {
+            case "settings_sync":
+                self.handleIncomingSettingsSync(json: json)
+
             case "notif_post":
+                guard self.isEffectiveAndroidReceiveEnabled else {
+                    NSLog("[BridgeNotif] Ignoring incoming phone notification (Android notifications disabled)")
+                    return
+                }
                 if let notif = try? JSONDecoder().decode(BridgeNotification.self, from: data) {
                     self.processIncomingNotification(notif)
                 }
@@ -122,7 +203,34 @@ public class BridgeNotificationManager: NSObject, ObservableObject, UNUserNotifi
         }
     }
 
+    private func handleIncomingSettingsSync(json: [String: Any]) {
+        let remoteUpdatedAt = (json["updatedAt"] as? NSNumber)?.int64Value ?? 0
+        if remoteUpdatedAt > 0 && self.settingsUpdatedAt > remoteUpdatedAt {
+            // Our local settings are newer than the remote handshake; push ours back
+            broadcastSettingsSync()
+            return
+        }
+
+        isApplyingRemoteSettings = true
+        if remoteUpdatedAt > 0 {
+            self.settingsUpdatedAt = remoteUpdatedAt
+        }
+        if let master = json["notifMasterEnabled"] as? Bool {
+            self.isMasterNotificationsEnabled = master
+        }
+        if let androidEnabled = json["androidNotifEnabled"] as? Bool {
+            self.isMirroringEnabled = androidEnabled
+        }
+        if let macEnabled = json["macNotifEnabled"] as? Bool {
+            self.isMacAlertsForwardingEnabled = macEnabled
+        }
+        isApplyingRemoteSettings = false
+        NSLog("[BridgeNotif] Applied remote settings_sync: master=\(isMasterNotificationsEnabled), android=\(isMirroringEnabled), mac=\(isMacAlertsForwardingEnabled)")
+    }
+
     private func processIncomingNotification(_ notif: BridgeNotification) {
+        guard isEffectiveAndroidReceiveEnabled else { return }
+
         // Prevent duplicate cards if notification has same ID, or same app+title within 4s, or identical (app, title, text)
         if let existingIdx = activeNotifications.firstIndex(where: {
             $0.id == notif.id ||
@@ -148,8 +256,6 @@ public class BridgeNotificationManager: NSObject, ObservableObject, UNUserNotifi
         if activeNotifications.count > 40 {
             activeNotifications.removeLast()
         }
-
-        guard isMirroringEnabled else { return }
 
         // Deliver native banner
         deliverNativeBanner(notif)
@@ -265,14 +371,7 @@ public class BridgeNotificationManager: NSObject, ObservableObject, UNUserNotifi
         }
     }
 
-    public func clearAll() {
-        for notif in activeNotifications {
-            let req = NotificationDismissRequest(id: notif.id, target: "android")
-            if let data = try? JSONEncoder().encode(req),
-               let str = String(data: data, encoding: .utf8) {
-                sendPayload?(str)
-            }
-        }
+    public func clearLocalNotificationsOnly() {
         let ids = activeNotifications.map { $0.id }
         activeNotifications.removeAll()
         replyDrafts.removeAll()
@@ -281,7 +380,19 @@ public class BridgeNotificationManager: NSObject, ObservableObject, UNUserNotifi
         UNUserNotificationCenter.current().setNotificationCategories([])
     }
 
+    public func clearAll() {
+        for notif in activeNotifications {
+            let req = NotificationDismissRequest(id: notif.id, target: "android")
+            if let data = try? JSONEncoder().encode(req),
+               let str = String(data: data, encoding: .utf8) {
+                sendPayload?(str)
+            }
+        }
+        clearLocalNotificationsOnly()
+    }
+
     public func sendNotificationToPhone(_ notif: BridgeNotification) {
+        guard isEffectiveMacForwardEnabled else { return }
         guard let data = try? JSONEncoder().encode(notif),
               var json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return
