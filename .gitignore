@@ -18,5 +18,6 @@ mac-app/Bridge.app/
 
 # Local release staging artifacts (uploaded to GitHub Releases)
 releases/
+dist/
 *.apk
 *.zip
