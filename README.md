@@ -9,7 +9,7 @@
 A lightweight, native open-source bridge linking your **Android phone** and your **Mac** over your local Wi-Fi network—with zero cloud accounts, zero telemetry, and zero latency.
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-v1.2.0-C8F135?style=for-the-badge&labelColor=0E0F12" alt="Version 1.2.0" />
+  <img src="https://img.shields.io/badge/Version-v1.2-C8F135?style=for-the-badge&labelColor=0E0F12" alt="Version 1.2" />
   <img src="https://img.shields.io/badge/Android-Kotlin-C8F135?style=for-the-badge&logo=android&logoColor=C8F135&labelColor=0E0F12" alt="Android Kotlin" />
   <img src="https://img.shields.io/badge/macOS-Swift_%26_SwiftUI-C8F135?style=for-the-badge&logo=apple&logoColor=C8F135&labelColor=0E0F12" alt="macOS Swift" />
   <img src="https://img.shields.io/badge/Network-100%25_Local_LAN-181B20?style=for-the-badge&labelColor=0E0F12&color=C8F135" alt="100% Local LAN" />
@@ -48,7 +48,7 @@ A lightweight, native open-source bridge linking your **Android phone** and your
 
 ## ⚡ What's New in v1.2
 
-Bridge **v1.2.0** introduces interactive bidirectional notifications, multi-device connectivity, end-to-end security hardening, and a ground-up UI refresh:
+Bridge **v1.2** introduces interactive bidirectional notifications, multi-device connectivity, end-to-end security hardening, and a ground-up UI refresh:
 
 1. **Interactive Notification Mirroring & Quick Reply:**
    - Real-time notification mirroring from Android to macOS.
@@ -105,15 +105,15 @@ You can install Bridge by downloading the pre-built binaries from [**GitHub Rele
 
 ### Option 1: Direct Download
 
-1. Download the latest **`v1.2.0`** release assets from [**Releases**](../../releases):
-   - 💻 **`Bridge-v1.2.0-macOS.zip`** — Native macOS Menu Bar App (`macOS 11.0+`)
-   - 📱 **`Bridge-v1.2.0-Android.apk`** — Native Android App (`Android 8.0+`)
+1. Download the latest **`v1.2`** release assets from [**Releases**](../../releases):
+   - 💻 **`Bridge-v1.2-macOS.zip`** — Native macOS Menu Bar App (`macOS 11.0+`)
+   - 📱 **`Bridge-v1.2-Android.apk`** — Native Android App (`Android 8.0+`)
 2. **Install on macOS:**
-   - Unzip `Bridge-v1.2.0-macOS.zip` and move **`Bridge.app`** into `/Applications`.
+   - Unzip `Bridge-v1.2-macOS.zip` and move **`Bridge.app`** into `/Applications`.
    - Launch **`Bridge.app`**. *(If macOS Gatekeeper prompts on first launch, right-click `Bridge.app` → **Open**, or run `xattr -cr /Applications/Bridge.app && open /Applications/Bridge.app` in Terminal).*
    - The Bridge icon will appear in your top menu bar.
 3. **Install on Android:**
-   - Open **`Bridge-v1.2.0-Android.apk`** on your Android phone to install the app.
+   - Open **`Bridge-v1.2-Android.apk`** on your Android phone to install the app.
 
 ---
 
@@ -121,13 +121,13 @@ You can install Bridge by downloading the pre-built binaries from [**GitHub Rele
 
 ```bash
 # 1. Download & launch the macOS Menu Bar app
-curl -L -o /tmp/Bridge-macOS.zip "https://github.com/badruddin-tasnim/bridge/releases/download/v1.2.0/Bridge-v1.2.0-macOS.zip"
+curl -L -o /tmp/Bridge-macOS.zip "https://github.com/badruddin-tasnim/bridge/releases/download/v1.2/Bridge-v1.2-macOS.zip"
 unzip -q -o /tmp/Bridge-macOS.zip -d /Applications
 xattr -cr /Applications/Bridge.app
 open /Applications/Bridge.app
 
 # 2. Download & install the Android APK over ADB
-curl -L -o /tmp/Bridge-Android.apk "https://github.com/badruddin-tasnim/bridge/releases/download/v1.2.0/Bridge-v1.2.0-Android.apk"
+curl -L -o /tmp/Bridge-Android.apk "https://github.com/badruddin-tasnim/bridge/releases/download/v1.2/Bridge-v1.2-Android.apk"
 adb install -r /tmp/Bridge-Android.apk
 ```
 
