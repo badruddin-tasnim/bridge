@@ -75,15 +75,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if fitting.height > 150 {
             targetHeight = ceil(fitting.height)
         } else {
+            let isPaired = model.isConnected || model.pairedDevice != nil
             let notifCount = BridgeNotificationManager.shared.activeNotifications.count
-            if !model.isConnected {
-                targetHeight = 510
-            } else if model.showPairingSection {
-                targetHeight = 680
+            if !isPaired {
+                targetHeight = 494
+            } else if model.selectedTab == .notifications && model.showPairingSection {
+                targetHeight = 658
             } else if model.selectedTab == .settings {
-                targetHeight = 460
+                targetHeight = 665
             } else {
-                targetHeight = notifCount == 0 ? 410 : min(410 + CGFloat(notifCount) * 80.0, 600.0)
+                targetHeight = notifCount == 0 ? 444 : min(444 + CGFloat(notifCount) * 85.0, 620.0)
             }
         }
         

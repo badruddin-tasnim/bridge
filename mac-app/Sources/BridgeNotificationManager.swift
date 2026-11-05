@@ -52,6 +52,7 @@ public class BridgeNotificationManager: NSObject, ObservableObject, UNUserNotifi
     @Published public var isSoundEnabled: Bool {
         didSet { UserDefaults.standard.set(isSoundEnabled, forKey: "bridge_notif_sound_enabled") }
     }
+    @Published public var replyErrors: [String: String] = [:]
 
     public var settingsUpdatedAt: Int64 {
         get { Int64(UserDefaults.standard.integer(forKey: "bridge_settings_updated_at")) }
@@ -186,9 +187,11 @@ public class BridgeNotificationManager: NSObject, ObservableObject, UNUserNotifi
                 }
 
             case "notif_remove":
-                if let id = json["id"] as? String {
-                    NSLog("[BridgeNotif] Received notif_remove for id: \(id)")
-                    self.removeNotification(id: id)
+                self.handleIncomingRemove(json: json)
+
+            case "notif_sync":
+                if let activeIds = json["activeIds"] as? [String] {
+                    self.reconcileActiveIds(activeIds)
                 }
 
             case "notif_dismiss":
@@ -228,12 +231,35 @@ public class BridgeNotificationManager: NSObject, ObservableObject, UNUserNotifi
         NSLog("[BridgeNotif] Applied remote settings_sync: master=\(isMasterNotificationsEnabled), android=\(isMirroringEnabled), mac=\(isMacAlertsForwardingEnabled)")
     }
 
-    private func processIncomingNotification(_ notif: BridgeNotification) {
+    private func normalizeNotifId(_ raw: String) -> String {
+        return raw
+            .replacingOccurrences(of: "\r", with: "")
+            .replacingOccurrences(of: "\n", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func processIncomingNotification(_ rawNotif: BridgeNotification) {
         guard isEffectiveAndroidReceiveEnabled else { return }
+        let normalizedId = normalizeNotifId(rawNotif.id)
+        guard !normalizedId.isEmpty && normalizedId.count <= 256 else { return }
+
+        let safeIcon = (rawNotif.icon?.count ?? 0) <= 524_288 ? rawNotif.icon : nil
+        let safeActions = rawNotif.actions.map { Array($0.prefix(5)) }
+        let notif = BridgeNotification(
+            id: normalizedId,
+            source: rawNotif.source ?? "android",
+            pkg: rawNotif.pkg.map { String($0.prefix(128)) },
+            app: rawNotif.app.map { String($0.prefix(128)) },
+            title: rawNotif.title.map { String($0.prefix(256)) },
+            text: rawNotif.text.map { String($0.prefix(2000)) },
+            icon: safeIcon,
+            timestamp: rawNotif.timestamp,
+            actions: safeActions
+        )
 
         // Prevent duplicate cards if notification has same ID, or same app+title within 4s, or identical (app, title, text)
         if let existingIdx = activeNotifications.firstIndex(where: {
-            $0.id == notif.id ||
+            normalizeNotifId($0.id) == normalizedId ||
             ($0.app?.lowercased() == notif.app?.lowercased() && $0.title == notif.title && $0.text == notif.text) ||
             ($0.app?.lowercased() == notif.app?.lowercased() && $0.title == notif.title && abs(($0.timestamp ?? 0) - (notif.timestamp ?? 0)) < 4000)
         }) {
@@ -322,21 +348,86 @@ public class BridgeNotificationManager: NSObject, ObservableObject, UNUserNotifi
         }
     }
 
+    private func handleIncomingRemove(json: [String: Any]) {
+        let rawId = (json["id"] as? String) ?? ""
+        let cleanId = normalizeNotifId(rawId)
+        let pkg = (json["pkg"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let title = (json["title"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let text = (json["text"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        // 1. Remove by ID first
+        var removedIds = Set<String>()
+        if !cleanId.isEmpty {
+            removedIds.insert(cleanId)
+        }
+
+        // 2. Also match by (pkg, title, text) or group summary prefix (<userId>|<pkg>|<notifId>|)
+        let idParts = cleanId.split(separator: "|", omittingEmptySubsequences: false).map(String.init)
+        let isSummaryOrNullTag = idParts.count >= 4 && idParts[3] == "null"
+        let prefixUserPkgId = idParts.count >= 3 ? "\(idParts[0])|\(idParts[1])|\(idParts[2])|" : ""
+
+        for existing in activeNotifications {
+            let existingNorm = normalizeNotifId(existing.id)
+            if existingNorm == cleanId {
+                removedIds.insert(existing.id)
+                continue
+            }
+            if isSummaryOrNullTag && !prefixUserPkgId.isEmpty && existingNorm.hasPrefix(prefixUserPkgId) {
+                removedIds.insert(existing.id)
+                continue
+            }
+            if !pkg.isEmpty && existing.pkg == pkg {
+                let existingTitle = (existing.title ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                let existingText = (existing.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                if !title.isEmpty && existingTitle == title && (text.isEmpty || existingText == text) {
+                    removedIds.insert(existing.id)
+                }
+            }
+        }
+
+        for rId in removedIds {
+            removeNotification(id: rId)
+        }
+
+        // 3. Reconcile against authoritative activeIds snapshot from phone if provided
+        if let activeIds = json["activeIds"] as? [String] {
+            reconcileActiveIds(activeIds)
+        }
+    }
+
+    public func reconcileActiveIds(_ rawActiveIds: [String]) {
+        let activeSet = Set(rawActiveIds.map { normalizeNotifId($0) })
+        let staleIds = activeNotifications
+            .filter { ($0.source == nil || $0.source == "android") && !activeSet.contains(normalizeNotifId($0.id)) }
+            .map { $0.id }
+
+        for staleId in staleIds {
+            NSLog("[BridgeNotif] Reconciling & removing cleared phone notification: '\(staleId)'")
+            removeNotification(id: staleId)
+        }
+    }
+
     public func removeNotification(id: String) {
-        let cleanId = id.trimmingCharacters(in: .whitespacesAndNewlines)
+        let cleanId = normalizeNotifId(id)
         NSLog("[BridgeNotif] Removing notification: '\(cleanId)'. Active before: \(activeNotifications.count)")
+        let matchingIds = activeNotifications
+            .filter { $0.id == id || normalizeNotifId($0.id) == cleanId }
+            .map { $0.id }
         activeNotifications.removeAll(where: {
-            $0.id == cleanId || $0.id.trimmingCharacters(in: .whitespacesAndNewlines) == cleanId
+            $0.id == id || normalizeNotifId($0.id) == cleanId
         })
-        replyDrafts.removeValue(forKey: cleanId)
+        let allIdsToClean = Array(Set(matchingIds + [id, cleanId]))
+        for key in allIdsToClean {
+            replyDrafts.removeValue(forKey: key)
+            replyErrors.removeValue(forKey: key)
+        }
         NSLog("[BridgeNotif] Active after: \(activeNotifications.count)")
 
-        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: [cleanId])
-        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [cleanId])
-        let categoryId = "cat_\(cleanId)"
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: allIdsToClean)
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: allIdsToClean)
+        let categoryIds = Set(allIdsToClean.map { "cat_\($0)" })
         UNUserNotificationCenter.current().getNotificationCategories { existing in
-            var updated = existing
-            updated = updated.filter { $0.identifier != categoryId }
+            let updated = existing.filter { !categoryIds.contains($0.identifier) }
             UNUserNotificationCenter.current().setNotificationCategories(updated)
         }
     }
@@ -344,11 +435,18 @@ public class BridgeNotificationManager: NSObject, ObservableObject, UNUserNotifi
     // MARK: - Actions From Mac (Popover & Banners)
 
     public func sendReply(id: String, actionId: Int, replyText: String) {
+        guard let sendPayload = sendPayload else {
+            replyErrors[id] = "Failed to send. Phone is disconnected."
+            return
+        }
         let req = NotificationActionRequest(id: id, actionId: actionId, replyText: replyText)
         if let data = try? JSONEncoder().encode(req),
            let str = String(data: data, encoding: .utf8) {
-            sendPayload?(str)
+            sendPayload(str)
+            replyErrors.removeValue(forKey: id)
             NSLog("[BridgeNotif] Sent reply for \(id) (action \(actionId)): \(replyText)")
+        } else {
+            replyErrors[id] = "Could not encode reply."
         }
     }
 

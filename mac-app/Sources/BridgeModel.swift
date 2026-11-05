@@ -13,6 +13,7 @@ class BridgeModel: ObservableObject {
     @Published var deviceName: String = "Mac"
     @Published var isConnected: Bool = false
     @Published var connectedDevice: String? = nil
+    @Published var pairedDevice: String? = nil
     @Published var lastSyncedText: String? = nil
     @Published var lastSyncedOutgoing: Bool = false
     @Published var qrCodeImage: NSImage? = nil
@@ -23,6 +24,9 @@ class BridgeModel: ObservableObject {
     }
     @Published var selectedTab: BridgeTab = .notifications {
         didSet {
+            if selectedTab == .settings && showPairingSection {
+                showPairingSection = false
+            }
             onSizeChangeRequested?()
         }
     }
@@ -31,6 +35,11 @@ class BridgeModel: ObservableObject {
     }
 
     @Published var showPairingSection: Bool = false {
+        didSet {
+            onSizeChangeRequested?()
+        }
+    }
+    @Published var showUnpairConfirmation: Bool = false {
         didSet {
             onSizeChangeRequested?()
         }
@@ -60,6 +69,7 @@ class BridgeModel: ObservableObject {
     private static let keyLastNotifiedVersion = "bridge_update_last_notified_version"
     private static let keyLastNotifiedAt = "bridge_update_last_notified_at"
     private static let keyLastCheckAt = "bridge_update_last_check_at"
+    private static let keyPairedDevice = "bridge_paired_device_name"
     
     init() {
         self.rawCode = server.pairingCode
@@ -72,6 +82,7 @@ class BridgeModel: ObservableObject {
         self.deviceName = Host.current().localizedName ?? "Mac"
         self.port = Int(server.port.rawValue)
         self.localIp = getPrimaryIPv4Address() ?? "127.0.0.1"
+        self.pairedDevice = UserDefaults.standard.string(forKey: BridgeModel.keyPairedDevice)
         
         updateQrCode()
         setupServerCallbacks()
@@ -94,6 +105,10 @@ class BridgeModel: ObservableObject {
                 self.isConnected = connected
                 self.connectedDevice = device
                 if connected {
+                    if let dev = device, !dev.isEmpty {
+                        self.pairedDevice = dev
+                        UserDefaults.standard.set(dev, forKey: BridgeModel.keyPairedDevice)
+                    }
                     self.showPairingSection = false
                 }
                 self.onSizeChangeRequested?()
@@ -156,6 +171,8 @@ class BridgeModel: ObservableObject {
     }
     
     func unpair() {
+        pairedDevice = nil
+        UserDefaults.standard.removeObject(forKey: BridgeModel.keyPairedDevice)
         server.unpairAllDevices()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
             guard let self = self else { return }
@@ -168,8 +185,26 @@ class BridgeModel: ObservableObject {
             self.updateQrCode()
             self.isConnected = false
             self.connectedDevice = nil
-            self.showPairingSection = true
+            self.showPairingSection = false
             self.onSizeChangeRequested?()
+        }
+    }
+
+    var statusText: String {
+        if isConnected {
+            return "CONNECTED"
+        } else if pairedDevice != nil {
+            return "DISCONNECTED"
+        } else {
+            return "WAITING"
+        }
+    }
+
+    func openReleaseNotes() {
+        if let urlStr = availableUpdateUrl, let url = URL(string: urlStr) {
+            NSWorkspace.shared.open(url)
+        } else if let fallback = URL(string: BridgeModel.fallbackReleasesUrl) {
+            NSWorkspace.shared.open(fallback)
         }
     }
 

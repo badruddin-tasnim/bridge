@@ -3,17 +3,7 @@ import AppKit
 import ApplicationServices
 
 func logDebugAX(_ msg: String) {
-    let line = "[\(Date())] \(msg)\n"
-    if let data = line.data(using: .utf8) {
-        let logUrl = URL(fileURLWithPath: "/tmp/bridge_debug.log")
-        if let handle = try? FileHandle(forWritingTo: logUrl) {
-            handle.seekToEndOfFile()
-            handle.write(data)
-            handle.closeFile()
-        } else {
-            try? data.write(to: logUrl)
-        }
-    }
+    // Do not write notification contents to world-readable /tmp files
 }
 
 public class AXNotificationObserver: ObservableObject {
@@ -35,6 +25,7 @@ public class AXNotificationObserver: ObservableObject {
 
     private init() {
         self.isAccessibilityTrusted = AXIsProcessTrusted()
+        try? FileManager.default.removeItem(atPath: "/tmp/bridge_debug.log")
     }
 
     public func promptAccessibilityPermissions() {

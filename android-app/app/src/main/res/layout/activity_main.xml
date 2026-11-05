@@ -9,6 +9,7 @@
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:fillViewport="true"
+        android:clipToPadding="false"
         android:scrollbars="none">
 
         <LinearLayout
@@ -20,7 +21,7 @@
             android:paddingStart="20dp"
             android:paddingTop="36dp"
             android:paddingEnd="20dp"
-            android:paddingBottom="112dp">
+            android:paddingBottom="120dp">
 
         <!-- Header: Logo, Wordmark, Status Pill -->
         <LinearLayout
@@ -66,14 +67,14 @@
                     android:layout_width="6dp"
                     android:layout_height="6dp"
                     android:background="@drawable/bg_pill"
-                    android:backgroundTint="@color/bridge_lime" />
+                    android:backgroundTint="@color/bridge_muted" />
 
                 <TextView
                     android:id="@+id/tvStatusPill"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginStart="6dp"
-                    android:text="Not linked"
+                    android:text="Disconnected"
                     android:textColor="@color/bridge_muted"
                     android:fontFamily="@font/plus_jakarta_sans_regular"
                     android:textSize="11.5sp" />
@@ -105,7 +106,7 @@
                     android:id="@+id/tvUpdateTitle"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Bridge v1.1.0 is available"
+                    android:text="Bridge v1.2.0 is available"
                     android:textColor="@color/bridge_text"
                     android:fontFamily="@font/plus_jakarta_sans_semibold"
                     android:textSize="14.5sp" />
@@ -153,7 +154,54 @@
                 android:contentDescription="Dismiss update notification" />
         </LinearLayout>
 
-        <!-- Optional Accessibility Notice Card (styled seamlessly in dark theme) -->
+        <!-- Compact Setup Progress Indicator -->
+        <LinearLayout
+            android:id="@+id/layoutSetupProgress"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:background="@drawable/bg_card_panel"
+            android:orientation="vertical"
+            android:padding="16dp"
+            android:visibility="gone">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="Complete your setup"
+                    android:textColor="@color/bridge_text"
+                    android:fontFamily="@font/plus_jakarta_sans_semibold"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:id="@+id/tvSetupProgressStatus"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="2 of 3 completed · 67%"
+                    android:textColor="@color/bridge_lime"
+                    android:fontFamily="@font/dm_mono"
+                    android:textSize="11.5sp" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/tvSetupProgressDetail"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="Enable permissions below to keep clipboard and notifications in sync."
+                android:textColor="@color/bridge_muted"
+                android:fontFamily="@font/plus_jakarta_sans_regular"
+                android:textSize="12.5sp" />
+        </LinearLayout>
+
+        <!-- Optional Accessibility Notice Card -->
         <LinearLayout
             android:id="@+id/layoutServiceNotice"
             android:layout_width="match_parent"
@@ -161,13 +209,13 @@
             android:orientation="vertical"
             android:background="@drawable/bg_card_panel"
             android:padding="16dp"
-            android:layout_marginTop="20dp"
+            android:layout_marginTop="16dp"
             android:visibility="gone">
 
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Bridge Background Service"
+                android:text="Background Clipboard Service"
                 android:textColor="@color/bridge_text"
                 android:fontFamily="@font/plus_jakarta_sans_medium"
                 android:textSize="15sp" />
@@ -176,7 +224,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
-                android:text="Enable Bridge in Accessibility Settings to keep your devices in sync."
+                android:text="Enable Bridge in Accessibility Settings to keep your clipboard synced in the background. Synced purely over your local network."
                 android:textColor="@color/bridge_muted"
                 android:fontFamily="@font/plus_jakarta_sans_regular"
                 android:textSize="13sp" />
@@ -204,13 +252,13 @@
             android:orientation="vertical"
             android:background="@drawable/bg_card_panel"
             android:padding="16dp"
-            android:layout_marginTop="16dp"
+            android:layout_marginTop="14dp"
             android:visibility="gone">
 
             <TextView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Notification Sync"
+                android:text="Notification Access"
                 android:textColor="@color/bridge_text"
                 android:fontFamily="@font/plus_jakarta_sans_medium"
                 android:textSize="15sp" />
@@ -219,7 +267,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
-                android:text="Grant Notification Access to mirror notifications and quick actions to your Mac."
+                android:text="Bridge needs Notification Access to mirror incoming notifications and quick actions to your Mac over your local network. Your notifications are never sent to a cloud server."
                 android:textColor="@color/bridge_muted"
                 android:fontFamily="@font/plus_jakarta_sans_regular"
                 android:textSize="13sp" />
@@ -277,7 +325,7 @@
                         android:layout_height="wrap_content"
                         android:gravity="center_horizontal"
                         android:textAlignment="center"
-                        android:text="Phone and Mac connected!"
+                        android:text="Your devices are in sync."
                         android:maxLines="1"
                         app:autoSizeTextType="uniform"
                         app:autoSizeMinTextSize="17sp"
@@ -292,51 +340,115 @@
                         android:id="@+id/tvHeroSub"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="12dp"
+                        android:layout_marginTop="6dp"
+                        android:gravity="center_horizontal"
+                        android:textAlignment="center"
+                        android:text="Connected and ready to go."
                         android:textColor="@color/bridge_muted"
                         android:fontFamily="@font/plus_jakarta_sans_regular"
-                        android:textSize="15sp"
-                        android:lineSpacingMultiplier="1.4"
-                        android:visibility="gone" />
+                        android:textSize="14sp"
+                        android:lineSpacingMultiplier="1.3" />
 
                     <!-- Native link animation view -->
                     <com.link.clipboardsync.BridgeLinkView
                         android:id="@+id/linkViewHero"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="18dp" />
+                        android:layout_marginTop="16dp" />
                 </LinearLayout>
 
-                <!-- Wi-Fi Caution Banner (Visible when multiple connection attempts fail) -->
+                <!-- Actionable Connection Troubleshooting Card (Shown on failure) -->
                 <LinearLayout
                     android:id="@+id/layoutHeroCautionBanner"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="14dp"
                     android:background="@drawable/bg_note_error"
-                    android:gravity="center_vertical"
-                    android:orientation="horizontal"
-                    android:padding="14dp"
+                    android:orientation="vertical"
+                    android:padding="16dp"
                     android:visibility="gone">
 
-                    <View
-                        android:id="@+id/dotHeroCaution"
-                        android:layout_width="8dp"
-                        android:layout_height="8dp"
-                        android:background="@drawable/bg_pill"
-                        android:backgroundTint="@color/bridge_coral" />
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:gravity="center_vertical"
+                        android:orientation="horizontal">
+
+                        <View
+                            android:id="@+id/dotHeroCaution"
+                            android:layout_width="8dp"
+                            android:layout_height="8dp"
+                            android:background="@drawable/bg_pill"
+                            android:backgroundTint="@color/bridge_coral" />
+
+                        <TextView
+                            android:id="@+id/tvHeroCautionTitle"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:layout_marginStart="10dp"
+                            android:text="Couldn't connect to your Mac"
+                            android:textColor="@color/bridge_coral"
+                            android:fontFamily="@font/plus_jakarta_sans_semibold"
+                            android:textSize="14sp" />
+
+                        <TextView
+                            android:id="@+id/btnTroubleshootToggle"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:padding="4dp"
+                            android:text="Details"
+                            android:textColor="@color/bridge_muted"
+                            android:fontFamily="@font/plus_jakarta_sans_medium"
+                            android:textSize="12sp" />
+                    </LinearLayout>
 
                     <TextView
                         android:id="@+id/tvHeroCautionText"
-                        android:layout_width="0dp"
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:layout_weight="1"
-                        android:layout_marginStart="10dp"
-                        android:text="Cannot reach your Mac. Check that your Mac and phone are connected to the same Wi-Fi."
+                        android:layout_marginTop="6dp"
+                        android:text="Bridge couldn't reach your Mac. Please verify the following:"
                         android:textColor="@color/bridge_coral"
                         android:fontFamily="@font/plus_jakarta_sans_regular"
-                        android:textSize="13.5sp"
-                        android:lineSpacingMultiplier="1.35" />
+                        android:textSize="13sp"
+                        android:lineSpacingMultiplier="1.3" />
+
+                    <!-- Expandable Checklist -->
+                    <LinearLayout
+                        android:id="@+id/layoutTroubleshootDetails"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:orientation="vertical"
+                        android:visibility="gone">
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:text="• Make sure Bridge is running on your Mac."
+                            android:textColor="@color/bridge_soft"
+                            android:fontFamily="@font/plus_jakarta_sans_regular"
+                            android:textSize="12.5sp" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="3dp"
+                            android:text="• Connect both devices to the same Wi-Fi or mobile hotspot."
+                            android:textColor="@color/bridge_soft"
+                            android:fontFamily="@font/plus_jakarta_sans_regular"
+                            android:textSize="12.5sp" />
+
+                        <TextView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="3dp"
+                            android:text="• Check whether a VPN, client isolation, or firewall is blocking the connection."
+                            android:textColor="@color/bridge_soft"
+                            android:fontFamily="@font/plus_jakarta_sans_regular"
+                            android:textSize="12.5sp" />
+                    </LinearLayout>
                 </LinearLayout>
 
                 <!-- Devices Card -->
@@ -427,7 +539,7 @@
                             android:id="@+id/tvLiveBadge"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="Live"
+                            android:text="Connected"
                             android:textColor="@color/bridge_lime"
                             android:fontFamily="@font/dm_mono"
                             android:textSize="12sp" />
@@ -440,7 +552,7 @@
                     android:layout_weight="1"
                     android:minHeight="24dp" />
 
-                <!-- Connect to Mac Button (Visible when offline/idle or reconnecting) -->
+                <!-- Connect to Mac / Try Again Button (Visible when offline/idle or reconnecting) -->
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnHeroConnect"
                     android:layout_width="match_parent"
@@ -459,7 +571,7 @@
                     android:textSize="16sp"
                     android:visibility="gone" />
 
-                <!-- Unpair this Mac Button (ALWAYS present so user can unpair even when offline) -->
+                <!-- Unpair button moved to Settings per UI/UX Guidelines -->
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnHeroUnpair"
                     android:layout_width="match_parent"
@@ -475,7 +587,8 @@
                     android:letterSpacing="0"
                     android:textColor="@color/bridge_coral"
                     android:fontFamily="@font/plus_jakarta_sans_medium"
-                    android:textSize="16sp" />
+                    android:textSize="16sp"
+                    android:visibility="gone" />
             </LinearLayout>
         </LinearLayout>
 
@@ -493,347 +606,432 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="22dp"
                 android:text="SYNCED SETTINGS"
-                    android:textColor="@color/bridge_muted"
-                    android:fontFamily="@font/dm_mono"
-                    android:textSize="11sp"
-                    android:letterSpacing="0.14" />
+                android:textColor="@color/bridge_muted"
+                android:fontFamily="@font/dm_mono"
+                android:textSize="11sp"
+                android:letterSpacing="0.14" />
 
-                <!-- Synced Notification Settings Card -->
+            <!-- Synced Notification Settings Card -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/bg_card_devices"
+                android:orientation="vertical"
+                android:paddingStart="18dp"
+                android:paddingTop="16dp"
+                android:paddingEnd="18dp"
+                android:paddingBottom="16dp">
+
+                <!-- Master Option: Notifications -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="10dp"
-                    android:background="@drawable/bg_card_devices"
-                    android:orientation="vertical"
-                    android:paddingStart="18dp"
-                    android:paddingTop="16dp"
-                    android:paddingEnd="18dp"
-                    android:paddingBottom="16dp">
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
 
-                    <!-- Master Option: Notifications -->
                     <LinearLayout
-                        android:layout_width="match_parent"
+                        android:layout_width="0dp"
                         android:layout_height="wrap_content"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal">
+                        android:layout_weight="1"
+                        android:layout_marginEnd="12dp"
+                        android:orientation="vertical">
 
-                        <LinearLayout
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:layout_marginEnd="12dp"
-                            android:orientation="vertical">
-
-                            <TextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="Notifications"
-                                android:textColor="@color/bridge_text"
-                                android:fontFamily="@font/plus_jakarta_sans_semibold"
-                                android:textSize="16sp" />
-
-                            <TextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:layout_marginTop="2dp"
-                                android:text="Sync notifications between phone and Mac"
-                                android:textColor="@color/bridge_muted"
-                                android:fontFamily="@font/plus_jakarta_sans_regular"
-                                android:textSize="13sp" />
-                        </LinearLayout>
-
-                        <androidx.appcompat.widget.SwitchCompat
-                            android:id="@+id/switchNotifMaster"
+                        <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:checked="true" />
+                            android:text="Notifications"
+                            android:textColor="@color/bridge_text"
+                            android:fontFamily="@font/plus_jakarta_sans_semibold"
+                            android:textSize="16sp" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:text="Sync notifications between phone and Mac"
+                            android:textColor="@color/bridge_muted"
+                            android:fontFamily="@font/plus_jakarta_sans_regular"
+                            android:textSize="13sp" />
+
+                        <!-- Status explanation when master toggle is off -->
+                        <TextView
+                            android:id="@+id/tvNotifMasterPausedNotice"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="3dp"
+                            android:text="Paused while notification sync is off."
+                            android:textColor="@color/bridge_coral"
+                            android:fontFamily="@font/plus_jakarta_sans_regular"
+                            android:textSize="12sp"
+                            android:visibility="gone" />
                     </LinearLayout>
 
-                    <!-- Sub-options under Notifications (Indented with vertical accent bar) -->
-                    <LinearLayout
-                        android:id="@+id/layoutNotifSubOptions"
-                        android:layout_width="match_parent"
+                    <androidx.appcompat.widget.SwitchCompat
+                        android:id="@+id/switchNotifMaster"
+                        android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="14dp"
-                        android:orientation="horizontal">
+                        android:checked="true" />
+                </LinearLayout>
 
-                        <!-- Left Vertical Guide Line -->
+                <!-- Sub-options under Notifications (Indented with vertical accent bar) -->
+                <LinearLayout
+                    android:id="@+id/layoutNotifSubOptions"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="14dp"
+                    android:orientation="horizontal">
+
+                    <!-- Left Vertical Guide Line -->
+                    <View
+                        android:id="@+id/viewNotifSubAccent"
+                        android:layout_width="2dp"
+                        android:layout_height="match_parent"
+                        android:layout_marginStart="4dp"
+                        android:layout_marginTop="4dp"
+                        android:layout_marginBottom="4dp"
+                        android:background="@color/bridge_lime" />
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginStart="14dp"
+                        android:orientation="vertical">
+
+                        <!-- Sub-option 1: Android Notifications -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal"
+                            android:paddingTop="4dp"
+                            android:paddingBottom="10dp">
+
+                            <LinearLayout
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:layout_marginEnd="12dp"
+                                android:orientation="vertical">
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Android Notifications"
+                                    android:textColor="@color/bridge_text"
+                                    android:fontFamily="@font/plus_jakarta_sans_medium"
+                                    android:textSize="15sp" />
+
+                                <TextView
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="2dp"
+                                    android:text="Show phone notifications on your Mac"
+                                    android:textColor="@color/bridge_muted"
+                                    android:fontFamily="@font/plus_jakarta_sans_regular"
+                                    android:textSize="12.5sp" />
+                            </LinearLayout>
+
+                            <androidx.appcompat.widget.SwitchCompat
+                                android:id="@+id/switchAndroidNotif"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:checked="true" />
+                        </LinearLayout>
+
+                        <!-- Divider -->
                         <View
-                            android:id="@+id/viewNotifSubAccent"
-                            android:layout_width="2dp"
-                            android:layout_height="match_parent"
-                            android:layout_marginStart="4dp"
-                            android:layout_marginTop="4dp"
-                            android:layout_marginBottom="4dp"
-                            android:background="@color/bridge_lime" />
+                            android:layout_width="match_parent"
+                            android:layout_height="1dp"
+                            android:background="@color/bridge_line" />
 
+                        <!-- Sub-option 2: Mac Notifications -->
                         <LinearLayout
-                            android:layout_width="0dp"
+                            android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:layout_marginStart="14dp"
-                            android:orientation="vertical">
+                            android:gravity="center_vertical"
+                            android:orientation="horizontal"
+                            android:paddingTop="10dp"
+                            android:paddingBottom="4dp">
 
-                            <!-- Sub-option 1: Android Notifications -->
                             <LinearLayout
-                                android:layout_width="match_parent"
+                                android:layout_width="0dp"
                                 android:layout_height="wrap_content"
-                                android:gravity="center_vertical"
-                                android:orientation="horizontal"
-                                android:paddingTop="4dp"
-                                android:paddingBottom="10dp">
+                                android:layout_weight="1"
+                                android:layout_marginEnd="12dp"
+                                android:orientation="vertical">
 
-                                <LinearLayout
-                                    android:layout_width="0dp"
-                                    android:layout_height="wrap_content"
-                                    android:layout_weight="1"
-                                    android:layout_marginEnd="12dp"
-                                    android:orientation="vertical">
-
-                                    <TextView
-                                        android:layout_width="wrap_content"
-                                        android:layout_height="wrap_content"
-                                        android:text="Android Notifications"
-                                        android:textColor="@color/bridge_text"
-                                        android:fontFamily="@font/plus_jakarta_sans_medium"
-                                        android:textSize="15sp" />
-
-                                    <TextView
-                                        android:layout_width="wrap_content"
-                                        android:layout_height="wrap_content"
-                                        android:layout_marginTop="2dp"
-                                        android:text="Show phone notifications on your Mac"
-                                        android:textColor="@color/bridge_muted"
-                                        android:fontFamily="@font/plus_jakarta_sans_regular"
-                                        android:textSize="12.5sp" />
-                                </LinearLayout>
-
-                                <androidx.appcompat.widget.SwitchCompat
-                                    android:id="@+id/switchAndroidNotif"
+                                <TextView
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:checked="true" />
-                            </LinearLayout>
+                                    android:text="Mac Notifications"
+                                    android:textColor="@color/bridge_text"
+                                    android:fontFamily="@font/plus_jakarta_sans_medium"
+                                    android:textSize="15sp" />
 
-                            <!-- Divider -->
-                            <View
-                                android:layout_width="match_parent"
-                                android:layout_height="1dp"
-                                android:background="@color/bridge_line" />
-
-                            <!-- Sub-option 2: Mac Notifications -->
-                            <LinearLayout
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:gravity="center_vertical"
-                                android:orientation="horizontal"
-                                android:paddingTop="10dp"
-                                android:paddingBottom="4dp">
-
-                                <LinearLayout
-                                    android:layout_width="0dp"
-                                    android:layout_height="wrap_content"
-                                    android:layout_weight="1"
-                                    android:layout_marginEnd="12dp"
-                                    android:orientation="vertical">
-
-                                    <TextView
-                                        android:layout_width="wrap_content"
-                                        android:layout_height="wrap_content"
-                                        android:text="Mac Notifications"
-                                        android:textColor="@color/bridge_text"
-                                        android:fontFamily="@font/plus_jakarta_sans_medium"
-                                        android:textSize="15sp" />
-
-                                    <TextView
-                                        android:layout_width="wrap_content"
-                                        android:layout_height="wrap_content"
-                                        android:layout_marginTop="2dp"
-                                        android:text="Show Mac notifications on this phone"
-                                        android:textColor="@color/bridge_muted"
-                                        android:fontFamily="@font/plus_jakarta_sans_regular"
-                                        android:textSize="12.5sp" />
-                                </LinearLayout>
-
-                                <androidx.appcompat.widget.SwitchCompat
-                                    android:id="@+id/switchMacNotif"
+                                <TextView
                                     android:layout_width="wrap_content"
                                     android:layout_height="wrap_content"
-                                    android:checked="true" />
+                                    android:layout_marginTop="2dp"
+                                    android:text="Show Mac notifications on this phone"
+                                    android:textColor="@color/bridge_muted"
+                                    android:fontFamily="@font/plus_jakarta_sans_regular"
+                                    android:textSize="12.5sp" />
                             </LinearLayout>
+
+                            <androidx.appcompat.widget.SwitchCompat
+                                android:id="@+id/switchMacNotif"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:checked="true" />
                         </LinearLayout>
                     </LinearLayout>
                 </LinearLayout>
+            </LinearLayout>
 
-                <!-- PHONE ONLY SETTINGS Section Header -->
-                <TextView
+            <!-- PHONE ONLY SETTINGS Section Header -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:text="PHONE ONLY"
+                android:textColor="@color/bridge_muted"
+                android:fontFamily="@font/dm_mono"
+                android:textSize="11sp"
+                android:letterSpacing="0.14" />
+
+            <!-- Phone-Only Settings Card -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/bg_card_devices"
+                android:orientation="vertical"
+                android:paddingStart="18dp"
+                android:paddingTop="8dp"
+                android:paddingEnd="18dp"
+                android:paddingBottom="8dp">
+
+                <!-- Vibrate for Mac Notifications -->
+                <LinearLayout
+                    android:id="@+id/rowPhoneVibrate"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="20dp"
-                    android:text="PHONE ONLY"
-                    android:textColor="@color/bridge_muted"
-                    android:fontFamily="@font/dm_mono"
-                    android:textSize="11sp"
-                    android:letterSpacing="0.14" />
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingTop="10dp"
+                    android:paddingBottom="10dp">
 
-                <!-- Phone-Only Settings Card -->
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginEnd="12dp"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Vibrate for Mac Notifications"
+                            android:textColor="@color/bridge_text"
+                            android:fontFamily="@font/plus_jakarta_sans_medium"
+                            android:textSize="15sp" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:text="Vibrate your phone when a Mac notification arrives"
+                            android:textColor="@color/bridge_muted"
+                            android:fontFamily="@font/plus_jakarta_sans_regular"
+                            android:textSize="12.5sp" />
+                    </LinearLayout>
+
+                    <androidx.appcompat.widget.SwitchCompat
+                        android:id="@+id/switchPhoneVibrate"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:checked="true" />
+                </LinearLayout>
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:background="@color/bridge_line" />
+
+                <!-- Notification Listener Permission Row -->
+                <LinearLayout
+                    android:id="@+id/rowSettingNotifAccess"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="?attr/selectableItemBackground"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingTop="12dp"
+                    android:paddingBottom="12dp">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginEnd="12dp"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Notification Access"
+                            android:textColor="@color/bridge_text"
+                            android:fontFamily="@font/plus_jakarta_sans_medium"
+                            android:textSize="15sp" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:text="System permission to read phone alerts. Processed locally only."
+                            android:textColor="@color/bridge_muted"
+                            android:fontFamily="@font/plus_jakarta_sans_regular"
+                            android:textSize="12.5sp" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/tvSettingNotifAccessStatus"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="@font/dm_mono"
+                        android:text="Active"
+                        android:textColor="@color/bridge_lime"
+                        android:textSize="12sp" />
+                </LinearLayout>
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:background="@color/bridge_line" />
+
+                <!-- Background Accessibility Service Row -->
+                <LinearLayout
+                    android:id="@+id/rowSettingAccessibility"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="?attr/selectableItemBackground"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingTop="12dp"
+                    android:paddingBottom="12dp">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginEnd="12dp"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Background Clipboard Service"
+                            android:textColor="@color/bridge_text"
+                            android:fontFamily="@font/plus_jakarta_sans_medium"
+                            android:textSize="15sp" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:text="Keeps clipboard sync running in background"
+                            android:textColor="@color/bridge_muted"
+                            android:fontFamily="@font/plus_jakarta_sans_regular"
+                            android:textSize="12.5sp" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/tvSettingAccessibilityStatus"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="@font/dm_mono"
+                        android:text="Active"
+                        android:textColor="@color/bridge_lime"
+                        android:textSize="12sp" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- DEVICE MANAGEMENT Section Header -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="20dp"
+                android:text="DEVICE MANAGEMENT"
+                android:textColor="@color/bridge_muted"
+                android:fontFamily="@font/dm_mono"
+                android:textSize="11sp"
+                android:letterSpacing="0.14" />
+
+            <!-- Device Management Card -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:background="@drawable/bg_card_devices"
+                android:orientation="vertical"
+                android:padding="16dp">
+
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="10dp"
-                    android:background="@drawable/bg_card_devices"
-                    android:orientation="vertical"
-                    android:paddingStart="18dp"
-                    android:paddingTop="8dp"
-                    android:paddingEnd="18dp"
-                    android:paddingBottom="8dp">
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
 
-                    <!-- Vibrate on Mac Alerts -->
                     <LinearLayout
-                        android:id="@+id/rowPhoneVibrate"
-                        android:layout_width="match_parent"
+                        android:layout_width="0dp"
                         android:layout_height="wrap_content"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal"
-                        android:paddingTop="10dp"
-                        android:paddingBottom="10dp">
-
-                        <LinearLayout
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:layout_marginEnd="12dp"
-                            android:orientation="vertical">
-
-                            <TextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="Vibrate on Mac Alerts"
-                                android:textColor="@color/bridge_text"
-                                android:fontFamily="@font/plus_jakarta_sans_medium"
-                                android:textSize="15sp" />
-
-                            <TextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:layout_marginTop="2dp"
-                                android:text="Vibrate phone when a Mac notification arrives"
-                                android:textColor="@color/bridge_muted"
-                                android:fontFamily="@font/plus_jakarta_sans_regular"
-                                android:textSize="12.5sp" />
-                        </LinearLayout>
-
-                        <androidx.appcompat.widget.SwitchCompat
-                            android:id="@+id/switchPhoneVibrate"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:checked="true" />
-                    </LinearLayout>
-
-                    <View
-                        android:layout_width="match_parent"
-                        android:layout_height="1dp"
-                        android:background="@color/bridge_line" />
-
-                    <!-- Notification Listener Permission Row -->
-                    <LinearLayout
-                        android:id="@+id/rowSettingNotifAccess"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:clickable="true"
-                        android:focusable="true"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal"
-                        android:paddingTop="12dp"
-                        android:paddingBottom="12dp">
-
-                        <LinearLayout
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:layout_marginEnd="12dp"
-                            android:orientation="vertical">
-
-                            <TextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="Notification Access"
-                                android:textColor="@color/bridge_text"
-                                android:fontFamily="@font/plus_jakarta_sans_medium"
-                                android:textSize="15sp" />
-
-                            <TextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:layout_marginTop="2dp"
-                                android:text="System permission to read phone alerts"
-                                android:textColor="@color/bridge_muted"
-                                android:fontFamily="@font/plus_jakarta_sans_regular"
-                                android:textSize="12.5sp" />
-                        </LinearLayout>
+                        android:layout_weight="1"
+                        android:orientation="vertical">
 
                         <TextView
-                            android:id="@+id/tvSettingNotifAccessStatus"
+                            android:id="@+id/tvSettingsDeviceMacName"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:fontFamily="@font/dm_mono"
-                            android:text="Active"
-                            android:textColor="@color/bridge_lime"
-                            android:textSize="12sp" />
-                    </LinearLayout>
-
-                    <View
-                        android:layout_width="match_parent"
-                        android:layout_height="1dp"
-                        android:background="@color/bridge_line" />
-
-                    <!-- Background Accessibility Service Row -->
-                    <LinearLayout
-                        android:id="@+id/rowSettingAccessibility"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:clickable="true"
-                        android:focusable="true"
-                        android:gravity="center_vertical"
-                        android:orientation="horizontal"
-                        android:paddingTop="12dp"
-                        android:paddingBottom="12dp">
-
-                        <LinearLayout
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:layout_marginEnd="12dp"
-                            android:orientation="vertical">
-
-                            <TextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="Background Clipboard Service"
-                                android:textColor="@color/bridge_text"
-                                android:fontFamily="@font/plus_jakarta_sans_medium"
-                                android:textSize="15sp" />
-
-                            <TextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:layout_marginTop="2dp"
-                                android:text="Keeps clipboard sync running in background"
-                                android:textColor="@color/bridge_muted"
-                                android:fontFamily="@font/plus_jakarta_sans_regular"
-                                android:textSize="12.5sp" />
-                        </LinearLayout>
+                            android:text="MacBook Air"
+                            android:textColor="@color/bridge_text"
+                            android:fontFamily="@font/plus_jakarta_sans_medium"
+                            android:textSize="16sp" />
 
                         <TextView
-                            android:id="@+id/tvSettingAccessibilityStatus"
+                            android:id="@+id/tvSettingsDeviceStatus"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:fontFamily="@font/dm_mono"
-                            android:text="Active"
-                            android:textColor="@color/bridge_lime"
-                            android:textSize="12sp" />
+                            android:layout_marginTop="2dp"
+                            android:text="Paired device"
+                            android:textColor="@color/bridge_muted"
+                            android:fontFamily="@font/plus_jakarta_sans_regular"
+                            android:textSize="12.5sp" />
                     </LinearLayout>
                 </LinearLayout>
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnUnpairMacSettings"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:layout_marginTop="14dp"
+                    android:background="@drawable/bg_button_outline"
+                    app:backgroundTint="@null"
+                    app:cornerRadius="24dp"
+                    android:insetTop="0dp"
+                    android:insetBottom="0dp"
+                    android:text="Unpair this Mac"
+                    android:textAllCaps="false"
+                    android:letterSpacing="0"
+                    android:textColor="@color/bridge_coral"
+                    android:fontFamily="@font/plus_jakarta_sans_medium"
+                    android:textSize="15sp" />
+            </LinearLayout>
         </LinearLayout>
 
         <!-- SCREEN B: NOT PAIRED / PAIRING STATE -->
@@ -853,13 +1051,13 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="32dp" />
 
-            <!-- Headline on a single line with reduced font size -->
+            <!-- Headline on a single line with left alignment per guidelines -->
             <TextView
                 android:id="@+id/tvPairingTitle"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="26dp"
-                android:text="Let's link up with your Mac."
+                android:text="Connect your Mac"
                 android:maxLines="1"
                 app:autoSizeTextType="uniform"
                 app:autoSizeMinTextSize="17sp"
@@ -874,11 +1072,11 @@
                 android:id="@+id/tvPairingSub"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="12dp"
-                android:text="Open Bridge in your Mac's menu bar, then scan the code it shows."
+                android:layout_marginTop="10dp"
+                android:text="Open Bridge from your Mac\'s menu bar. Scan the QR code displayed on your Mac or enter its pairing code below."
                 android:textColor="@color/bridge_muted"
                 android:fontFamily="@font/plus_jakarta_sans_regular"
-                android:textSize="15sp"
+                android:textSize="14.5sp"
                 android:lineSpacingMultiplier="1.45" />
 
             <!-- Error / Status Note Banner -->
@@ -1102,6 +1300,24 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
+                    android:text="Manual connection"
+                    android:textColor="@color/bridge_text"
+                    android:fontFamily="@font/plus_jakarta_sans_semibold"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="2dp"
+                    android:text="Use this if automatic discovery isn't working."
+                    android:textColor="@color/bridge_muted"
+                    android:fontFamily="@font/plus_jakarta_sans_regular"
+                    android:textSize="12.5sp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
                     android:text="MAC IP ADDRESS"
                     android:textColor="@color/bridge_muted"
                     android:fontFamily="@font/dm_mono"
@@ -1119,7 +1335,7 @@
                     android:textColor="@color/bridge_text"
                     android:fontFamily="@font/dm_mono"
                     android:textSize="14sp"
-                    android:hint="192.168.0.102"
+                    android:hint="e.g. 192.168.1.100"
                     android:textColorHint="@color/bridge_muted"
                     android:inputType="textUri" />
 
@@ -1174,23 +1390,11 @@
                 android:fontFamily="@font/plus_jakarta_sans_medium"
                 android:textSize="16sp" />
 
-            <!-- Bottom Outlined Unpair Button (Hidden when not paired) -->
+            <!-- Hidden legacy button (now handled in Settings) -->
             <com.google.android.material.button.MaterialButton
                 android:id="@+id/btnUnpairPairing"
                 android:layout_width="match_parent"
                 android:layout_height="54dp"
-                android:layout_marginTop="12dp"
-                android:background="@drawable/bg_button_outline"
-                app:backgroundTint="@null"
-                app:cornerRadius="27dp"
-                android:insetTop="0dp"
-                android:insetBottom="0dp"
-                android:text="Unpair this Mac"
-                android:textAllCaps="false"
-                android:letterSpacing="0"
-                android:textColor="@color/bridge_coral"
-                android:fontFamily="@font/plus_jakarta_sans_medium"
-                android:textSize="16sp"
                 android:visibility="gone" />
         </LinearLayout>
 

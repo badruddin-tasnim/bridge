@@ -50,6 +50,66 @@ func computeSHA256(_ string: String) -> String {
     return computeSHA256(Data(string.utf8))
 }
 
+func constantTimeEquals(_ a: String, _ b: String) -> Bool {
+    let aBytes = Array(a.utf8)
+    let bBytes = Array(b.utf8)
+    guard aBytes.count == bBytes.count && !aBytes.isEmpty else {
+        return false
+    }
+    var diff: UInt8 = 0
+    for i in 0..<aBytes.count {
+        diff |= (aBytes[i] ^ bBytes[i])
+    }
+    return diff == 0
+}
+
+func generateSecureSixDigitCode() -> String {
+    var randomValue: UInt32 = 0
+    let status = SecRandomCopyBytes(kSecRandomDefault, MemoryLayout<UInt32>.size, &randomValue)
+    if status == errSecSuccess {
+        let code = (randomValue % 900000) + 100000
+        return String(format: "%06d", code)
+    }
+    var rng = SystemRandomNumberGenerator()
+    let fallback = UInt32.random(in: 100000...999999, using: &rng)
+    return String(format: "%06d", fallback)
+}
+
+func isLocalOrPrivateIp(_ rawHost: String) -> Bool {
+    let clean = rawHost
+        .components(separatedBy: "%").first?
+        .trimmingCharacters(in: CharacterSet(charactersIn: "[] \t\n"))
+        .lowercased() ?? ""
+    if clean.isEmpty { return false }
+    if clean == "localhost" || clean == "::1" || clean == "127.0.0.1" {
+        return true
+    }
+    if clean.hasPrefix("fe80:") || clean.hasPrefix("fc") || clean.hasPrefix("fd") {
+        return true
+    }
+    let ipv4Part = clean.hasPrefix("::ffff:") ? String(clean.dropFirst(7)) : clean
+    let octets = ipv4Part.split(separator: ".").compactMap { Int($0) }
+    guard octets.count == 4, octets.allSatisfy({ (0...255).contains($0) }) else {
+        return false
+    }
+    switch octets[0] {
+    case 10:
+        return true
+    case 127:
+        return true
+    case 192:
+        return octets[1] == 168
+    case 172:
+        return (16...31).contains(octets[1])
+    case 169:
+        return octets[1] == 254
+    case 100:
+        return (64...127).contains(octets[1])
+    default:
+        return false
+    }
+}
+
 func getPrimaryIPv4Address() -> String? {
     var ifaddr: UnsafeMutablePointer<ifaddrs>?
     guard getifaddrs(&ifaddr) == 0, let firstAddr = ifaddr else { return nil }
@@ -86,15 +146,33 @@ class BridgeServer {
     private var authenticatedConnections = Set<UUID>()
     private var clientDeviceNames = [UUID: String]()
     private var connectionLastSeen = [UUID: TimeInterval]()
+    private var connectionCreatedAt = [UUID: TimeInterval]()
+    private var connectionRemoteIp = [UUID: String]()
     private let networkQueue = DispatchQueue(label: "com.link.bridge.network")
     private let imageQueue = DispatchQueue(label: "com.link.bridge.image", qos: .userInitiated)
     private let pathMonitor = NWPathMonitor()
     private static let maxImageDimension = 2560
     private static let maxUnauthBufferBytes = 8 * 1024
     private static let maxAuthBufferBytes = 25 * 1024 * 1024
+    private static let maxConcurrentConnections = 8
+    private static let maxUnauthConnections = 4
+    private static let unauthHandshakeTimeoutSeconds: TimeInterval = 8.0
+    private static let maxFailedAttemptsPerIp = 5
+    private static let attemptWindowSeconds: TimeInterval = 60.0
+    private static let baseLockoutSeconds: TimeInterval = 60.0
+    private static let maxGlobalFailedAttempts = 10
     private static let supportedImageExtensions: Set<String> = [
         "png", "jpg", "jpeg", "webp", "heic", "tiff", "tif", "bmp", "gif"
     ]
+
+    // Brute-force & replay protection state (accessed on networkQueue)
+    private var failedHelloTimestampsByIp = [String: [TimeInterval]]()
+    private var ipLockoutUntil = [String: TimeInterval]()
+    private var ipLockoutCount = [String: Int]()
+    private var globalFailedHelloTimestamps = [TimeInterval]()
+    private var globalLockoutUntil: TimeInterval = 0
+    private var usedHelloNonces = Set<String>()
+    private var usedHelloNonceOrder = [String]()
     
     // Pairing state
     private(set) var pairingCode: String = ""
@@ -129,13 +207,19 @@ class BridgeServer {
             let cleaned = existing.trimmingCharacters(in: .whitespacesAndNewlines)
             if cleaned.count == 6 && CharacterSet.decimalDigits.isSuperset(of: CharacterSet(charactersIn: cleaned)) {
                 self.pairingCode = cleaned
+                try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: codeFile.path)
                 return
             }
         }
         
-        let newCode = String(format: "%06d", arc4random_uniform(900000) + 100000)
-        try? newCode.write(to: codeFile, atomically: true, encoding: .utf8)
+        let newCode = generateSecureSixDigitCode()
+        writeSecurePairingCodeFile(newCode, to: codeFile)
         self.pairingCode = newCode
+    }
+
+    private func writeSecurePairingCodeFile(_ code: String, to codeFile: URL) {
+        try? code.write(to: codeFile, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: codeFile.path)
     }
     
     func start() {
@@ -278,12 +362,82 @@ class BridgeServer {
         }
     }
     
+    private func extractRemoteIp(from conn: NWConnection) -> String {
+        switch conn.endpoint {
+        case .hostPort(let host, _):
+            let raw = "\(host)"
+            return raw.components(separatedBy: "%").first?
+                .trimmingCharacters(in: CharacterSet(charactersIn: "[] \t\n"))
+                .lowercased() ?? "unknown"
+        default:
+            return "local"
+        }
+    }
+
+    private func isIpLockedOut(_ ip: String, now: TimeInterval) -> Bool {
+        if let until = ipLockoutUntil[ip], now < until {
+            return true
+        }
+        return false
+    }
+
+    private func recordFailedHelloAttempt(for ip: String, now: TimeInterval) {
+        let cutoff = now - Self.attemptWindowSeconds
+        var attempts = (failedHelloTimestampsByIp[ip] ?? []).filter { $0 >= cutoff }
+        attempts.append(now)
+        failedHelloTimestampsByIp[ip] = attempts
+
+        if attempts.count >= Self.maxFailedAttemptsPerIp {
+            let lockCount = (ipLockoutCount[ip] ?? 0) + 1
+            ipLockoutCount[ip] = lockCount
+            let multiplier = min(16.0, pow(2.0, Double(lockCount - 1)))
+            let lockoutDuration = Self.baseLockoutSeconds * multiplier
+            ipLockoutUntil[ip] = now + lockoutDuration
+            failedHelloTimestampsByIp.removeValue(forKey: ip)
+            NSLog("[BridgeSecurity] Locked out IP %@ for %.0fs after %d failed pairing attempts", ip, lockoutDuration, attempts.count)
+        }
+
+        globalFailedHelloTimestamps = globalFailedHelloTimestamps.filter { $0 >= cutoff }
+        globalFailedHelloTimestamps.append(now)
+        if globalFailedHelloTimestamps.count >= Self.maxGlobalFailedAttempts {
+            globalLockoutUntil = now + 30.0
+            globalFailedHelloTimestamps.removeAll()
+            NSLog("[BridgeSecurity] Global handshake rate-limit triggered for 30s")
+        }
+    }
+
+    private func clearFailedAttempts(for ip: String) {
+        failedHelloTimestampsByIp.removeValue(forKey: ip)
+        ipLockoutUntil.removeValue(forKey: ip)
+        ipLockoutCount.removeValue(forKey: ip)
+    }
+
     private func handleNewConnection(_ conn: NWConnection) {
         let connectionId = UUID()
         networkQueue.async { [weak self, conn] in
             guard let self = self else { return }
+            let now = Date().timeIntervalSince1970
+            let remoteIp = self.extractRemoteIp(from: conn)
+
+            // 1. Reject non-private / non-local network connections
+            if remoteIp != "local" && !isLocalOrPrivateIp(remoteIp) {
+                NSLog("[BridgeSecurity] Rejected connection from non-private IP: %@", remoteIp)
+                conn.cancel()
+                return
+            }
+
+            // 2. Enforce connection limits to prevent socket exhaustion DoS
+            let unauthCount = self.connections.count - self.authenticatedConnections.count
+            if self.connections.count >= Self.maxConcurrentConnections || unauthCount >= Self.maxUnauthConnections {
+                NSLog("[BridgeSecurity] Rejected connection from %@ (concurrent limit reached)", remoteIp)
+                conn.cancel()
+                return
+            }
+
             self.connections[connectionId] = conn
-            self.connectionLastSeen[connectionId] = Date().timeIntervalSince1970
+            self.connectionLastSeen[connectionId] = now
+            self.connectionCreatedAt[connectionId] = now
+            self.connectionRemoteIp[connectionId] = remoteIp
             
             conn.stateUpdateHandler = { [weak self, weak conn] state in
                 guard let self = self, let conn = conn else { return }
@@ -307,6 +461,8 @@ class BridgeServer {
         let wasAuthenticated = authenticatedConnections.remove(id) != nil
         clientDeviceNames.removeValue(forKey: id)
         connectionLastSeen.removeValue(forKey: id)
+        connectionCreatedAt.removeValue(forKey: id)
+        connectionRemoteIp.removeValue(forKey: id)
         if wasAuthenticated {
             notifyUiStatus()
         }
@@ -321,6 +477,7 @@ class BridgeServer {
                 currentBuffer.append(data)
                 let maxAllowed = self.authenticatedConnections.contains(id) ? Self.maxAuthBufferBytes : Self.maxUnauthBufferBytes
                 if currentBuffer.count > maxAllowed {
+                    NSLog("[BridgeSecurity] Disconnecting client Exceeded max buffer (%d bytes)", currentBuffer.count)
                     conn.cancel()
                     self.removeConnection(id: id)
                     return
@@ -336,33 +493,100 @@ class BridgeServer {
             if isComplete || error != nil {
                 conn.cancel()
                 self.removeConnection(id: id)
-            } else {
+            } else if self.connections[id] != nil {
                 self.readNextMessage(from: conn, id: id, buffer: currentBuffer)
             }
         }
     }
+
+    private func denyAndDisconnect(_ conn: NWConnection, id: UUID) {
+        let denied = ClipboardPayload(type: "denied")
+        if let data = try? JSONEncoder().encode(denied) {
+            var line = data
+            line.append(UInt8(ascii: "\n"))
+            conn.send(content: line, completion: .contentProcessed({ [weak self, weak conn] _ in
+                conn?.cancel()
+                self?.removeConnection(id: id)
+            }))
+        } else {
+            conn.cancel()
+            self.removeConnection(id: id)
+        }
+    }
     
     private func processPayload(_ data: Data, from conn: NWConnection, id: UUID) {
+        let isAuth = self.authenticatedConnections.contains(id)
+
         // Fast inspect message type from JSON structure
         guard let jsonObject = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let type = jsonObject["type"] as? String else {
+            if !isAuth {
+                NSLog("[BridgeSecurity] Disconnecting unauthenticated client due to malformed JSON")
+                conn.cancel()
+                self.removeConnection(id: id)
+            }
             return
         }
         
         if type == "hello" {
-            let code = jsonObject["code"] as? String
-            let incomingCode = code?.replacingOccurrences(of: " ", with: "")
+            let now = Date().timeIntervalSince1970
+            let remoteIp = self.connectionRemoteIp[id] ?? self.extractRemoteIp(from: conn)
+
+            if self.isIpLockedOut(remoteIp, now: now) {
+                NSLog("[BridgeSecurity] Denied 'hello' from rate-limited IP: %@", remoteIp)
+                self.denyAndDisconnect(conn, id: id)
+                return
+            }
+
+            let targetCode = self.pairingCode.replacingOccurrences(of: " ", with: "")
+            let incomingHash = (jsonObject["hash"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+            let clientNonce = (jsonObject["text"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let rawCode = (jsonObject["code"] as? String)?
+                .replacingOccurrences(of: " ", with: "")
                 .replacingOccurrences(of: "-", with: "")
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let targetCode = self.pairingCode.replacingOccurrences(of: " ", with: "")
+
+            var isAuthenticated = false
+
+            if !incomingHash.isEmpty && clientNonce.count >= 16 && clientNonce.count <= 128 {
+                // Anti-replay check on clientNonce
+                if self.usedHelloNonces.contains(clientNonce) {
+                    NSLog("[BridgeSecurity] Rejected replayed hello nonce from %@", remoteIp)
+                    self.recordFailedHelloAttempt(for: remoteIp, now: now)
+                    self.denyAndDisconnect(conn, id: id)
+                    return
+                }
+                let expectedHash = computeSHA256("bridge-hello:\(targetCode):\(clientNonce)")
+                if constantTimeEquals(incomingHash, expectedHash) {
+                    isAuthenticated = true
+                    self.usedHelloNonces.insert(clientNonce)
+                    self.usedHelloNonceOrder.append(clientNonce)
+                    if self.usedHelloNonceOrder.count > 256 {
+                        let oldest = self.usedHelloNonceOrder.removeFirst()
+                        self.usedHelloNonces.remove(oldest)
+                    }
+                }
+            } else if incomingHash.isEmpty && !rawCode.isEmpty {
+                isAuthenticated = constantTimeEquals(rawCode, targetCode)
+            }
             
-            if incomingCode == targetCode {
+            if isAuthenticated {
+                self.clearFailedAttempts(for: remoteIp)
                 self.authenticatedConnections.insert(id)
-                let device = (jsonObject["device"] as? String) ?? "Android Device"
-                self.clientDeviceNames[id] = device
+                let rawDevice = (jsonObject["device"] as? String) ?? "Android Device"
+                let sanitizedDevice = String(
+                    rawDevice
+                        .components(separatedBy: .controlCharacters).joined()
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                        .prefix(64)
+                )
+                self.clientDeviceNames[id] = sanitizedDevice.isEmpty ? "Android Device" : sanitizedDevice
                 
                 let macName = Host.current().localizedName ?? "Mac"
-                let welcome = ClipboardPayload(type: "welcome", name: macName)
+                let welcomeProof = clientNonce.isEmpty
+                    ? computeSHA256("bridge-welcome:\(targetCode)")
+                    : computeSHA256("bridge-welcome:\(targetCode):\(clientNonce)")
+                let welcome = ClipboardPayload(type: "welcome", hash: welcomeProof, name: macName)
                 self.sendDirect(payload: welcome, to: conn)
                 if let settingsStr = BridgeNotificationManager.shared.buildSettingsSyncJson(),
                    var settingsData = settingsStr.data(using: .utf8) {
@@ -371,13 +595,19 @@ class BridgeServer {
                 }
                 self.notifyUiStatus()
             } else {
-                let denied = ClipboardPayload(type: "denied")
-                self.sendDirect(payload: denied, to: conn)
+                self.recordFailedHelloAttempt(for: remoteIp, now: now)
+                NSLog("[BridgeSecurity] Invalid pairing attempt from %@", remoteIp)
+                self.denyAndDisconnect(conn, id: id)
             }
             return
         }
         
-        guard self.authenticatedConnections.contains(id) else { return }
+        guard isAuth else {
+            NSLog("[BridgeSecurity] Rejected unauthenticated message of type '%@' — disconnecting", type)
+            conn.cancel()
+            self.removeConnection(id: id)
+            return
+        }
 
         if type.hasPrefix("notif_") || type == "settings_sync" {
             NSLog("[BridgeServer] Routing payload of type '%@' to BridgeNotificationManager", type)
@@ -403,12 +633,13 @@ class BridgeServer {
         
         guard let payload = try? JSONDecoder().decode(ClipboardPayload.self, from: data) else { return }
         
-        if payload.type == "clip", let text = payload.text, let hash = payload.hash {
-            if hash == self.lastSentHash || hash == self.lastReceivedHash { return }
+        if payload.type == "clip", let text = payload.text, !text.isEmpty {
+            let verifiedHash = computeSHA256(text)
+            if verifiedHash == self.lastSentHash || verifiedHash == self.lastReceivedHash { return }
             
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
-                self.lastReceivedHash = hash
+                self.lastReceivedHash = verifiedHash
                 self.pasteboard.clearContents()
                 self.pasteboard.setString(text, forType: .string)
                 self.lastChangeCount = self.pasteboard.changeCount
@@ -417,14 +648,16 @@ class BridgeServer {
             return
         }
 
-        if payload.type == "image", let base64Data = payload.data, let hash = payload.hash {
-            if hash == self.lastSentHash || hash == self.lastReceivedHash { return }
+        if payload.type == "image", let base64Data = payload.data {
             guard let imageData = Data(base64Encoded: base64Data, options: .ignoreUnknownCharacters),
+                  !imageData.isEmpty,
                   let image = NSImage(data: imageData) else { return }
+            let verifiedHash = (payload.hash?.isEmpty == false) ? payload.hash! : computeSHA256(imageData)
+            if verifiedHash == self.lastSentHash || verifiedHash == self.lastReceivedHash { return }
 
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
-                self.lastReceivedHash = hash
+                self.lastReceivedHash = verifiedHash
                 self.pasteboard.clearContents()
                 self.pasteboard.writeObjects([image])
                 self.lastChangeCount = self.pasteboard.changeCount
@@ -635,6 +868,16 @@ class BridgeServer {
             let now = Date().timeIntervalSince1970
             var staleIds = [UUID]()
             
+            // 1. Kick unauthenticated connections that exceed handshake timeout
+            for id in self.connections.keys where !self.authenticatedConnections.contains(id) {
+                let createdAt = self.connectionCreatedAt[id] ?? 0
+                if now - createdAt > Self.unauthHandshakeTimeoutSeconds {
+                    NSLog("[BridgeSecurity] Closing timed-out unauthenticated connection")
+                    staleIds.append(id)
+                }
+            }
+
+            // 2. Heartbeat authenticated connections
             for id in self.authenticatedConnections {
                 let lastSeen = self.connectionLastSeen[id] ?? 0
                 if now - lastSeen > 6.5 {
@@ -664,6 +907,8 @@ class BridgeServer {
         authenticatedConnections.removeAll()
         clientDeviceNames.removeAll()
         connectionLastSeen.removeAll()
+        connectionCreatedAt.removeAll()
+        connectionRemoteIp.removeAll()
         notifyUiStatus()
     }
     
@@ -674,6 +919,11 @@ class BridgeServer {
         networkQueue.asyncAfter(deadline: .now() + 0.15) { [weak self] in
             guard let self = self else { return }
             self.closeAllConnections()
+            self.failedHelloTimestampsByIp.removeAll()
+            self.ipLockoutUntil.removeAll()
+            self.ipLockoutCount.removeAll()
+            self.usedHelloNonces.removeAll()
+            self.usedHelloNonceOrder.removeAll()
             DispatchQueue.main.async {
                 self.generateNewPairingCode()
             }
@@ -683,8 +933,8 @@ class BridgeServer {
     func generateNewPairingCode() {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let codeFile = home.appendingPathComponent(".bridge_pairing_code")
-        let newCode = String(format: "%06d", arc4random_uniform(900000) + 100000)
-        try? newCode.write(to: codeFile, atomically: true, encoding: .utf8)
+        let newCode = generateSecureSixDigitCode()
+        writeSecurePairingCodeFile(newCode, to: codeFile)
         self.pairingCode = newCode
     }
 }

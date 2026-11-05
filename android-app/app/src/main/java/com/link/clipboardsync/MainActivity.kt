@@ -3,6 +3,7 @@ package com.link.clipboardsync
 import android.Manifest
 import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
+import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -51,6 +52,11 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
     private lateinit var btnDismissUpdate: ImageView
     private var currentUpdateUrl: String? = null
 
+    // Setup Progress Indicator
+    private lateinit var layoutSetupProgress: LinearLayout
+    private lateinit var tvSetupProgressStatus: TextView
+    private lateinit var tvSetupProgressDetail: TextView
+
     // Service notice (Accessibility)
     private lateinit var layoutServiceNotice: LinearLayout
     private lateinit var btnEnableAccessibility: Button
@@ -81,15 +87,18 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
     private lateinit var linkViewHero: BridgeLinkView
     private lateinit var layoutHeroCautionBanner: LinearLayout
     private lateinit var dotHeroCaution: View
+    private lateinit var tvHeroCautionTitle: TextView
+    private lateinit var btnTroubleshootToggle: TextView
     private lateinit var tvHeroCautionText: TextView
+    private lateinit var layoutTroubleshootDetails: LinearLayout
     private lateinit var tvDevicePhoneName: TextView
     private lateinit var tvDeviceMacName: TextView
     private lateinit var tvLiveBadge: TextView
     private lateinit var btnHeroConnect: Button
-    private lateinit var btnHeroUnpair: Button
 
     // Tab 2: Settings Page
     private lateinit var switchNotifMaster: SwitchCompat
+    private lateinit var tvNotifMasterPausedNotice: TextView
     private lateinit var layoutNotifSubOptions: LinearLayout
     private lateinit var viewNotifSubAccent: View
     private lateinit var switchAndroidNotif: SwitchCompat
@@ -100,10 +109,14 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
     private lateinit var tvSettingNotifAccessStatus: TextView
     private lateinit var rowSettingAccessibility: LinearLayout
     private lateinit var tvSettingAccessibilityStatus: TextView
+    private lateinit var tvSettingsDeviceMacName: TextView
+    private lateinit var tvSettingsDeviceStatus: TextView
+    private lateinit var btnUnpairMacSettings: Button
 
     // Failure / Retry tracking
     private var consecutiveFailures = 0
     private var userConnectAttempts = 0
+    private var wasConnectedBefore = false
 
     // Screen B: Pairing
     private lateinit var layoutScreenPairing: LinearLayout
@@ -121,7 +134,6 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
     private lateinit var etServerIp: EditText
     private lateinit var etServerPort: EditText
     private lateinit var btnPair: Button
-    private lateinit var btnUnpairPairing: Button
 
     // Colors
     private val colorInk = Color.parseColor("#0E0F12")
@@ -161,6 +173,7 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         UpdateChecker.checkForUpdates(this, forceNetwork = false)
 
         updateAccessibilityNotice()
+        updateSetupProgress()
         updateUI()
 
         if (!BridgePrefs.isPaired(this)) {
@@ -186,6 +199,11 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         tvUpdateTitle = findViewById(R.id.tvUpdateTitle)
         btnUpdateDownload = findViewById(R.id.btnUpdateDownload)
         btnDismissUpdate = findViewById(R.id.btnDismissUpdate)
+
+        // Setup Progress
+        layoutSetupProgress = findViewById(R.id.layoutSetupProgress)
+        tvSetupProgressStatus = findViewById(R.id.tvSetupProgressStatus)
+        tvSetupProgressDetail = findViewById(R.id.tvSetupProgressDetail)
 
         // Accessibility service notice
         layoutServiceNotice = findViewById(R.id.layoutServiceNotice)
@@ -215,15 +233,18 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         linkViewHero = findViewById(R.id.linkViewHero)
         layoutHeroCautionBanner = findViewById(R.id.layoutHeroCautionBanner)
         dotHeroCaution = findViewById(R.id.dotHeroCaution)
+        tvHeroCautionTitle = findViewById(R.id.tvHeroCautionTitle)
+        btnTroubleshootToggle = findViewById(R.id.btnTroubleshootToggle)
         tvHeroCautionText = findViewById(R.id.tvHeroCautionText)
+        layoutTroubleshootDetails = findViewById(R.id.layoutTroubleshootDetails)
         tvDevicePhoneName = findViewById(R.id.tvDevicePhoneName)
         tvDeviceMacName = findViewById(R.id.tvDeviceMacName)
         tvLiveBadge = findViewById(R.id.tvLiveBadge)
         btnHeroConnect = findViewById(R.id.btnHeroConnect)
-        btnHeroUnpair = findViewById(R.id.btnHeroUnpair)
 
         // Tab 2: Settings
         switchNotifMaster = findViewById(R.id.switchNotifMaster)
+        tvNotifMasterPausedNotice = findViewById(R.id.tvNotifMasterPausedNotice)
         layoutNotifSubOptions = findViewById(R.id.layoutNotifSubOptions)
         viewNotifSubAccent = findViewById(R.id.viewNotifSubAccent)
         switchAndroidNotif = findViewById(R.id.switchAndroidNotif)
@@ -234,6 +255,9 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         tvSettingNotifAccessStatus = findViewById(R.id.tvSettingNotifAccessStatus)
         rowSettingAccessibility = findViewById(R.id.rowSettingAccessibility)
         tvSettingAccessibilityStatus = findViewById(R.id.tvSettingAccessibilityStatus)
+        tvSettingsDeviceMacName = findViewById(R.id.tvSettingsDeviceMacName)
+        tvSettingsDeviceStatus = findViewById(R.id.tvSettingsDeviceStatus)
+        btnUnpairMacSettings = findViewById(R.id.btnUnpairMacSettings)
 
         styleBridgeSwitch(switchNotifMaster)
         styleBridgeSwitch(switchAndroidNotif)
@@ -264,7 +288,6 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         etServerIp = findViewById(R.id.etServerIp)
         etServerPort = findViewById(R.id.etServerPort)
         btnPair = findViewById(R.id.btnPair)
-        btnUnpairPairing = findViewById(R.id.btnUnpairPairing)
 
         // Real Phone Model Name (e.g., Galaxy A52s)
         val phoneModel = Build.MODEL.let {
@@ -298,34 +321,37 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
     private var navPillAnimator: AnimatorSet? = null
 
     private fun selectTab(settingsTab: Boolean) {
+        if (isSettingsTabSelected == settingsTab) return
         isSettingsTabSelected = settingsTab
 
-        // 1. Update filled vs outlined icons and colors
+        // 1. Update tab icon and label styles
         if (settingsTab) {
-            ivNavSettings.setImageResource(R.drawable.ic_nav_settings_filled)
-            ivNavSettings.imageTintList = ColorStateList.valueOf(colorLime)
-            tvNavSettings.setTextColor(colorLime)
-
             ivNavHome.setImageResource(R.drawable.ic_nav_home_outline)
             ivNavHome.imageTintList = ColorStateList.valueOf(colorSoft)
             tvNavHome.setTextColor(colorSoft)
+            tvNavHome.typeface = ivNavSettings.context.resources.getFont(R.font.plus_jakarta_sans_medium)
+
+            ivNavSettings.setImageResource(R.drawable.ic_nav_settings_filled)
+            ivNavSettings.imageTintList = ColorStateList.valueOf(colorLime)
+            tvNavSettings.setTextColor(colorLime)
+            tvNavSettings.typeface = ivNavSettings.context.resources.getFont(R.font.plus_jakarta_sans_semibold)
         } else {
             ivNavHome.setImageResource(R.drawable.ic_nav_home_filled)
             ivNavHome.imageTintList = ColorStateList.valueOf(colorLime)
             tvNavHome.setTextColor(colorLime)
+            tvNavHome.typeface = ivNavHome.context.resources.getFont(R.font.plus_jakarta_sans_semibold)
 
             ivNavSettings.setImageResource(R.drawable.ic_nav_settings_outline)
             ivNavSettings.imageTintList = ColorStateList.valueOf(colorSoft)
             tvNavSettings.setTextColor(colorSoft)
+            tvNavSettings.typeface = ivNavSettings.context.resources.getFont(R.font.plus_jakarta_sans_medium)
         }
 
-        // 2. Smooth & slight sticky pill indicator animation
-        val pillWidth = viewNavActiveIndicator.width.toFloat().let {
-            if (it > 0f) it else (102f * resources.displayMetrics.density)
-        }
+        // 2. Animate the sliding indicator pill
+        navPillAnimator?.cancel()
+        val pillWidth = viewNavActiveIndicator.width.toFloat().coerceAtLeast(102f * resources.displayMetrics.density)
         val targetX = if (settingsTab) pillWidth else 0f
 
-        navPillAnimator?.cancel()
         val slideAnim = ObjectAnimator.ofFloat(
             viewNavActiveIndicator,
             "translationX",
@@ -368,6 +394,7 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
             .start()
 
         updateAccessibilityNotice()
+        updateSetupProgress()
         updateSettingsUI()
         updateUI()
 
@@ -430,6 +457,16 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }
 
+        btnTroubleshootToggle.setOnClickListener {
+            if (layoutTroubleshootDetails.visibility == View.VISIBLE) {
+                layoutTroubleshootDetails.visibility = View.GONE
+                btnTroubleshootToggle.text = "Details"
+            } else {
+                layoutTroubleshootDetails.visibility = View.VISIBLE
+                btnTroubleshootToggle.text = "Hide"
+            }
+        }
+
         switchNotifMaster.setOnCheckedChangeListener { _, isChecked ->
             if (isUpdatingSettingsUi) return@setOnCheckedChangeListener
             BridgePrefs.setNotifMasterEnabled(this, isChecked, updateTimestamp = true)
@@ -440,6 +477,7 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
             }
             BridgeNotificationManager.sendSettingsToMac(this)
             updateAccessibilityNotice()
+            updateSetupProgress()
             updateSettingsUI()
             updateUI()
         }
@@ -452,6 +490,7 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
             }
             BridgeNotificationManager.sendSettingsToMac(this)
             updateAccessibilityNotice()
+            updateSetupProgress()
             updateSettingsUI()
             updateUI()
         }
@@ -552,22 +591,12 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
             ClipboardSyncManager.pair(this, hostParam, port, code)
         }
 
-        btnUnpairPairing.setOnClickListener {
-            ClipboardSyncManager.unpair(this)
-            etPairCode.setText("")
-            consecutiveFailures = 0
-            userConnectAttempts = 0
-            layoutNoteBanner.visibility = View.GONE
-            setConnectingState(false)
-            updateUI()
-            Toast.makeText(this, "Unpaired successfully", Toast.LENGTH_SHORT).show()
-        }
-
         btnHeroConnect.setOnClickListener {
             userConnectAttempts++
             if (!isLocalNetworkAvailable(this)) {
                 layoutHeroCautionBanner.visibility = View.VISIBLE
-                tvHeroCautionText.text = "Cannot reach your Mac. Check that your Mac and phone are connected to the same Wi-Fi."
+                tvHeroCautionTitle.text = "Couldn't connect to your Mac"
+                tvHeroCautionText.text = "Bridge couldn't reach your Mac. Please verify the following:"
             }
 
             setConnectingState(true)
@@ -578,16 +607,29 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
             )
         }
 
-        btnHeroUnpair.setOnClickListener {
-            ClipboardSyncManager.unpair(this)
-            etPairCode.setText("")
-            consecutiveFailures = 0
-            userConnectAttempts = 0
-            layoutNoteBanner.visibility = View.GONE
-            setConnectingState(false)
-            updateUI()
-            Toast.makeText(this, "Unpaired successfully", Toast.LENGTH_SHORT).show()
+        btnUnpairMacSettings.setOnClickListener {
+            showUnpairConfirmationDialog()
         }
+    }
+
+    private fun showUnpairConfirmationDialog() {
+        AlertDialog.Builder(this)
+            .setTitle(R.string.dialog_unpair_title)
+            .setMessage(R.string.dialog_unpair_message)
+            .setPositiveButton(R.string.dialog_unpair) { _, _ ->
+                ClipboardSyncManager.unpair(this)
+                etPairCode.setText("")
+                consecutiveFailures = 0
+                userConnectAttempts = 0
+                wasConnectedBefore = false
+                layoutNoteBanner.visibility = View.GONE
+                setConnectingState(false)
+                selectTab(false)
+                updateUI()
+                Toast.makeText(this, "Unpaired successfully", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton(R.string.dialog_cancel, null)
+            .show()
     }
 
     private var isConnectingState = false
@@ -613,12 +655,13 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         try {
             if (qrData.trim().startsWith("{")) {
                 val json = JSONObject(qrData)
-                val code = json.optString("code")
-                val ip = json.optString("ip").ifEmpty { null }
-                val port = json.optInt("port", NetworkSyncClient.DEFAULT_PORT)
-                val name = json.optString("name", "Mac")
+                val code = json.optString("code").replace(" ", "").replace("-", "").trim()
+                val rawIp = json.optString("ip").trim()
+                val ip = if (rawIp.isNotEmpty() && NetworkSyncClient.isPrivateLocalAddress(rawIp)) rawIp else null
+                val rawPort = json.optInt("port", NetworkSyncClient.DEFAULT_PORT)
+                val port = if (rawPort in 1024..65535) rawPort else NetworkSyncClient.DEFAULT_PORT
 
-                if (code.isNotEmpty()) {
+                if (code.length == 6 && code.all { it.isDigit() }) {
                     etPairCode.setText(code)
                     setConnectingState(true)
                     showPairingNote("Looking for your Mac on this Wi-Fi…", BannerStyle.CONNECTING)
@@ -643,7 +686,7 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
     private fun setConnectingState(connecting: Boolean) {
         isConnectingState = connecting
         if (connecting) {
-            tvStatusPill.text = "Linking…"
+            tvStatusPill.text = "Connecting..."
             tvStatusPill.setTextColor(colorLime)
             dotStatus.backgroundTintList = ColorStateList.valueOf(colorLime)
             startDotBlink()
@@ -658,6 +701,8 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
             stopDotBlink()
             btnPair.text = "Connect"
             btnPair.isEnabled = etPairCode.text.toString().replace(" ", "").length == 6
+            btnHeroConnect.isEnabled = true
+            btnHeroConnect.text = if (wasConnectedBefore) "Try again" else "Connect to Mac"
         }
     }
 
@@ -702,6 +747,35 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         }
     }
 
+    private fun updateSetupProgress() {
+        if (isSettingsTabSelected || !BridgePrefs.isPaired(this)) {
+            layoutSetupProgress.visibility = View.GONE
+            return
+        }
+
+        var completed = 1 // 1 for Pairing completed
+        val total = 3
+        val acc = isAccessibilityServiceEnabled()
+        val notif = isNotificationServiceEnabled()
+
+        if (acc) completed++
+        if (notif) completed++
+
+        if (completed == total) {
+            layoutSetupProgress.visibility = View.GONE
+        } else {
+            val percent = (completed * 100) / total
+            tvSetupProgressStatus.text = "$completed of $total completed · $percent%"
+            val missing = when {
+                !acc && !notif -> "Enable Notification Access and Background Clipboard Service for full sync."
+                !acc -> "Enable Background Clipboard Service to keep clipboard synced automatically."
+                else -> "Enable Notification Access to mirror notifications to your Mac."
+            }
+            tvSetupProgressDetail.text = missing
+            layoutSetupProgress.visibility = View.VISIBLE
+        }
+    }
+
     private fun updateAccessibilityNotice() {
         if (isSettingsTabSelected || isAccessibilityServiceEnabled()) {
             layoutServiceNotice.visibility = View.GONE
@@ -735,6 +809,7 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
             viewNotifSubAccent.setBackgroundColor(
                 if (masterEnabled) colorLime else Color.parseColor("#2B2F36")
             )
+            tvNotifMasterPausedNotice.visibility = if (masterEnabled) View.GONE else View.VISIBLE
 
             val macEffective = masterEnabled && macEnabled
             switchPhoneVibrate.isEnabled = macEffective
@@ -744,7 +819,7 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
                 tvSettingNotifAccessStatus.text = "Active"
                 tvSettingNotifAccessStatus.setTextColor(colorLime)
             } else {
-                tvSettingNotifAccessStatus.text = "Enable"
+                tvSettingNotifAccessStatus.text = "Required"
                 tvSettingNotifAccessStatus.setTextColor(colorCoral)
             }
 
@@ -752,9 +827,15 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
                 tvSettingAccessibilityStatus.text = "Active"
                 tvSettingAccessibilityStatus.setTextColor(colorLime)
             } else {
-                tvSettingAccessibilityStatus.text = "Enable"
+                tvSettingAccessibilityStatus.text = "Required"
                 tvSettingAccessibilityStatus.setTextColor(colorCoral)
             }
+
+            val pairedMac = BridgePrefs.macName(this) ?: "Mac"
+            tvSettingsDeviceMacName.text = pairedMac
+            val isLive = ClipboardSyncManager.networkClient?.isConnected() == true
+            tvSettingsDeviceStatus.text = if (isLive) "Connected · Live" else "Paired device · Disconnected"
+            tvSettingsDeviceStatus.setTextColor(if (isLive) colorLime else colorMuted)
         } finally {
             isUpdatingSettingsUi = false
         }
@@ -762,7 +843,7 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
 
     override fun onSettingsChanged() {
         updateAccessibilityNotice()
-        updateAccessibilityNotice()
+        updateSetupProgress()
         updateSettingsUI()
         updateUI()
     }
@@ -843,57 +924,60 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
             tvDeviceMacName.text = macName
 
             updateSettingsUI()
+            updateSetupProgress()
 
             if (connected) {
+                wasConnectedBefore = true
                 isConnectingState = false
                 stopDotBlink()
                 consecutiveFailures = 0
                 userConnectAttempts = 0
 
-                // Hide Wi-Fi caution banner
+                // Hide troubleshooting banner
                 layoutHeroCautionBanner.visibility = View.GONE
 
                 // Header status pill
-                tvStatusPill.text = "Linked"
+                tvStatusPill.text = "Connected"
                 tvStatusPill.setTextColor(colorLime)
                 dotStatus.backgroundTintList = ColorStateList.valueOf(colorLime)
 
                 // Hero card (Lime)
                 heroCard.setBackgroundResource(R.drawable.bg_card_lime)
-                tvHeroTitle.text = "Phone and Mac connected!"
+                tvHeroTitle.text = "Your devices are in sync."
                 tvHeroTitle.setTextColor(colorInk)
-                tvHeroSub.visibility = View.GONE
+                tvHeroSub.text = "Connected and ready to go."
+                tvHeroSub.setTextColor(Color.parseColor("#425010"))
+                tvHeroSub.visibility = View.VISIBLE
                 linkViewHero.setMode(BridgeLinkView.LinkMode.HERO_CONNECTED)
 
                 // Devices card
-                tvLiveBadge.text = "Live"
+                tvLiveBadge.text = "Connected"
                 tvLiveBadge.setTextColor(colorLime)
 
                 // Bottom CTAs
                 btnHeroConnect.visibility = View.GONE
-                btnHeroUnpair.visibility = View.VISIBLE
-                btnHeroUnpair.isEnabled = true
             } else {
                 // Paired but not connected (Idle or Reconnecting)
                 val showCaution = !localNetAvailable || isMultipleFailures
                 if (showCaution) {
                     layoutHeroCautionBanner.visibility = View.VISIBLE
-                    tvHeroCautionText.text = "Cannot reach your Mac. Check that your Mac and phone are connected to the same Wi-Fi."
+                    tvHeroCautionTitle.text = "Couldn't connect to your Mac"
+                    tvHeroCautionText.text = "Bridge couldn't reach your Mac. Please verify the following:"
                 } else {
                     layoutHeroCautionBanner.visibility = View.GONE
                 }
 
-                // Device badge is blank when not connected per instruction 5
-                tvLiveBadge.text = ""
+                tvLiveBadge.text = if (wasConnectedBefore) "Connection lost" else "Disconnected"
+                tvLiveBadge.setTextColor(colorMuted)
 
                 if (isConnectingState) {
-                    tvStatusPill.text = "Linking…"
+                    tvStatusPill.text = "Connecting..."
                     tvStatusPill.setTextColor(colorLime)
                     dotStatus.backgroundTintList = ColorStateList.valueOf(colorLime)
                     startDotBlink()
 
                     heroCard.setBackgroundResource(R.drawable.bg_card_panel)
-                    tvHeroTitle.text = "Finding your Mac…"
+                    tvHeroTitle.text = "Connecting..."
                     tvHeroTitle.setTextColor(colorText)
                     tvHeroSub.text = "Looking on your Wi-Fi. This only takes a moment."
                     tvHeroSub.setTextColor(colorMuted)
@@ -905,42 +989,40 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
                     btnHeroConnect.text = "Connecting…"
                     btnHeroConnect.setTextColor(colorMuted)
                     btnHeroConnect.setBackgroundResource(R.drawable.bg_button_outline)
-
-                    btnHeroUnpair.visibility = View.VISIBLE
-                    btnHeroUnpair.isEnabled = true
                 } else {
                     stopDotBlink()
-                    tvStatusPill.text = "Not linked"
+                    tvStatusPill.text = if (wasConnectedBefore) "Connection lost" else "Disconnected"
                     tvStatusPill.setTextColor(colorMuted)
                     dotStatus.backgroundTintList = ColorStateList.valueOf(colorMuted)
 
                     heroCard.setBackgroundResource(R.drawable.bg_card_panel)
-                    tvHeroTitle.text = "Not connected."
+                    tvHeroTitle.text = if (wasConnectedBefore) "Connection lost" else "Disconnected"
                     tvHeroTitle.setTextColor(colorText)
-                    tvHeroSub.text = "Your Mac isn't paired right now. Reconnect to pick up where you left off."
+                    tvHeroSub.text = if (wasConnectedBefore) {
+                        "Your Mac dropped offline or moved to another network."
+                    } else {
+                        "Your Mac is paired. Tap below to reconnect."
+                    }
                     tvHeroSub.setTextColor(colorMuted)
                     tvHeroSub.visibility = View.VISIBLE
                     linkViewHero.setMode(BridgeLinkView.LinkMode.HERO_IDLE)
 
                     btnHeroConnect.visibility = View.VISIBLE
                     btnHeroConnect.isEnabled = true
-                    btnHeroConnect.text = "Connect to Mac"
+                    btnHeroConnect.text = if (wasConnectedBefore) "Try again" else "Connect to Mac"
                     btnHeroConnect.setTextColor(colorInk)
                     btnHeroConnect.setBackgroundResource(R.drawable.bg_button_lime)
-
-                    btnHeroUnpair.visibility = View.VISIBLE
-                    btnHeroUnpair.isEnabled = true
                 }
             }
         } else {
-            // Not Paired (Screen B) - no Mac is paired, so hide Unpair button
+            // Not Paired (Screen B)
             layoutScreenConnected.visibility = View.GONE
             layoutScreenPairing.visibility = if (isSettingsTabSelected) View.GONE else View.VISIBLE
             layoutTabSettings.visibility = if (isSettingsTabSelected) View.VISIBLE else View.GONE
-            btnUnpairPairing.visibility = View.GONE
+            layoutSetupProgress.visibility = View.GONE
 
             if (isConnectingState) {
-                tvStatusPill.text = "Linking…"
+                tvStatusPill.text = "Connecting..."
                 tvStatusPill.setTextColor(colorLime)
                 dotStatus.backgroundTintList = ColorStateList.valueOf(colorLime)
                 startDotBlink()
@@ -950,7 +1032,7 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
                 btnPair.text = "Connecting…"
             } else {
                 stopDotBlink()
-                tvStatusPill.text = "Not linked"
+                tvStatusPill.text = "Disconnected"
                 tvStatusPill.setTextColor(colorMuted)
                 dotStatus.backgroundTintList = ColorStateList.valueOf(colorMuted)
 
@@ -971,6 +1053,7 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
             if (isConnected) {
                 consecutiveFailures = 0
                 userConnectAttempts = 0
+                wasConnectedBefore = true
             }
             updateUI()
         }
@@ -1000,6 +1083,7 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
             if (accepted) {
                 consecutiveFailures = 0
                 userConnectAttempts = 0
+                wasConnectedBefore = true
                 showPairingNote("Connected. You're all set.", BannerStyle.CONNECTED)
                 updateUI()
             } else {
@@ -1021,6 +1105,7 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
             etPairCode.setText("")
             consecutiveFailures = 0
             userConnectAttempts = 0
+            wasConnectedBefore = false
             layoutNoteBanner.visibility = View.GONE
             updateUI()
             Toast.makeText(this, "Unpaired from Mac", Toast.LENGTH_SHORT).show()

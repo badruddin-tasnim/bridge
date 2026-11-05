@@ -2,4 +2,10 @@
     <string name="app_name">Bridge</string>
     <string name="accessibility_service_label">Bridge Auto-Sync</string>
     <string name="accessibility_service_description">Automatically synchronizes copied text between your Android device and Mac seamlessly in real time.</string>
+
+    <!-- Dialog Strings -->
+    <string name="dialog_unpair_title">Unpair this Mac?</string>
+    <string name="dialog_unpair_message">This will remove the pairing between your phone and Mac. You\'ll need to pair them again to reconnect.</string>
+    <string name="dialog_cancel">Cancel</string>
+    <string name="dialog_unpair">Unpair</string>
 </resources>

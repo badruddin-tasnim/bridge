@@ -11,6 +11,7 @@ import android.provider.OpenableColumns
 import android.util.Log
 import java.io.File
 import java.io.FileNotFoundException
+import java.security.SecureRandom
 
 /**
  * Read-only [ContentProvider] that serves the active synced clipboard image
@@ -25,7 +26,14 @@ class ClipboardImageProvider : ContentProvider() {
         const val AUTHORITY = "com.link.clipboardsync.clipboardprovider"
         private const val DIR_NAME = "shared_clipboard"
         private const val MAX_CACHED_IMAGES = 3
-        private val SAFE_FILENAME_REGEX = Regex("^clip_\\d+\\.(png|jpg)$")
+        private val SAFE_FILENAME_REGEX = Regex("^clip_[0-9a-f]{32}\\.(png|jpg)$")
+        private val secureRandom = SecureRandom()
+
+        private fun generateRandomTokenHex(): String {
+            val bytes = ByteArray(16)
+            secureRandom.nextBytes(bytes)
+            return bytes.joinToString("") { "%02x".format(it) }
+        }
 
         fun saveImageAndGetUri(context: Context, bytes: ByteArray, mimeType: String): Uri? {
             return try {
@@ -35,7 +43,7 @@ class ClipboardImageProvider : ContentProvider() {
                 }
 
                 val ext = if (mimeType.contains("png", ignoreCase = true)) "png" else "jpg"
-                val fileName = "clip_${System.currentTimeMillis()}.$ext"
+                val fileName = "clip_${generateRandomTokenHex()}.$ext"
                 val targetFile = File(dir, fileName)
                 targetFile.writeBytes(bytes)
 
@@ -82,6 +90,7 @@ class ClipboardImageProvider : ContentProvider() {
 
     override fun getType(uri: Uri): String? {
         val name = uri.lastPathSegment?.lowercase() ?: return null
+        if (!SAFE_FILENAME_REGEX.matches(name)) return null
         return when {
             name.endsWith(".png") -> "image/png"
             name.endsWith(".jpg") || name.endsWith(".jpeg") -> "image/jpeg"

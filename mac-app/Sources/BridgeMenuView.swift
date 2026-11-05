@@ -145,19 +145,20 @@ struct NotificationCardView: View {
                 .help("Dismiss notification")
             }
 
-            // Title
+            // Title (Sender name)
             if let title = notification.title, !title.isEmpty {
                 Text(title)
-                    .font(.custom("PlusJakartaSans-Medium", size: 13))
+                    .font(.custom("PlusJakartaSans-SemiBold", size: 13.5))
                     .foregroundColor(BridgeColors.text)
                     .lineLimit(2)
             }
 
-            // Body Text
+            // Body Text (Notification content)
             if let text = notification.text, !text.isEmpty {
                 Text(text)
                     .font(.custom("PlusJakartaSans-Regular", size: 12))
                     .foregroundColor(BridgeColors.soft)
+                    .lineSpacing(2.5)
                     .lineLimit(4)
             }
 
@@ -197,6 +198,34 @@ struct NotificationCardView: View {
                     .disabled(isReplyEmpty)
                 }
                 .padding(.top, 2)
+            }
+
+            // Reply failure error state
+            if let errorMsg = manager.replyErrors[notification.id] {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundColor(BridgeColors.coral)
+
+                    Text(errorMsg)
+                        .font(.custom("PlusJakartaSans-Regular", size: 11))
+                        .foregroundColor(BridgeColors.coral)
+
+                    Spacer()
+
+                    if let replyAction = notification.actions?.first(where: { $0.hasInput }) {
+                        Button(action: {
+                            submitReply(actionId: replyAction.id)
+                        }) {
+                            Text("Retry")
+                                .font(.custom("PlusJakartaSans-SemiBold", size: 11))
+                                .foregroundColor(BridgeColors.coral)
+                                .underline()
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.top, 1)
             }
 
             // Standard Action Buttons (e.g. "Mark as read", "Archive")
@@ -310,6 +339,10 @@ struct BridgeMenuView: View {
     @ObservedObject var notifManager: BridgeNotificationManager = BridgeNotificationManager.shared
     @ObservedObject var axObserver: AXNotificationObserver = AXNotificationObserver.shared
 
+    private var isPairedOrConnected: Bool {
+        model.isConnected || model.pairedDevice != nil
+    }
+
     var body: some View {
         VStack(spacing: 12) {
             // Header Bar
@@ -327,7 +360,7 @@ struct BridgeMenuView: View {
                 HStack(spacing: 6) {
                     StatusDotView(isConnected: model.isConnected)
 
-                    Text(model.isConnected ? "ONLINE" : "WAITING")
+                    Text(model.statusText)
                         .font(.custom("DMMono-Regular", size: 11))
                         .foregroundColor(model.isConnected ? BridgeColors.lime : BridgeColors.muted)
                         .kerning(0.88)
@@ -340,15 +373,27 @@ struct BridgeMenuView: View {
             if let updateVer = model.availableUpdateVersion {
                 HStack(spacing: 10) {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Bridge v\(updateVer) is available")
+                        Text("Bridge update available")
                             .font(.custom("PlusJakartaSans-SemiBold", size: 13.5))
                             .foregroundColor(BridgeColors.text)
                             .lineLimit(1)
 
-                        Text("New release ready on GitHub")
-                            .font(.custom("PlusJakartaSans-Regular", size: 11.5))
-                            .foregroundColor(BridgeColors.muted)
-                            .lineLimit(1)
+                        HStack(spacing: 4) {
+                            Text("Version \(updateVer) ·")
+                                .font(.custom("PlusJakartaSans-Regular", size: 11.5))
+                                .foregroundColor(BridgeColors.muted)
+
+                            Button(action: {
+                                model.openReleaseNotes()
+                            }) {
+                                Text("View release notes")
+                                    .font(.custom("PlusJakartaSans-Regular", size: 11.5))
+                                    .foregroundColor(BridgeColors.lime)
+                                    .underline()
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .lineLimit(1)
                     }
 
                     Spacer(minLength: 4)
@@ -392,28 +437,28 @@ struct BridgeMenuView: View {
                 )
             }
 
-            // Device Card (Visible while connected)
-            if model.isConnected {
+            // Device Card (Visible while paired or connected)
+            if isPairedOrConnected {
                 HStack(spacing: 12) {
                     ZStack {
                         RoundedRectangle(cornerRadius: 12)
-                            .fill(BridgeColors.lime)
+                            .fill(model.isConnected ? BridgeColors.lime : BridgeColors.line)
                             .frame(width: 40, height: 40)
 
                         Image(systemName: "iphone")
                             .font(.system(size: 18, weight: .semibold))
-                            .foregroundColor(BridgeColors.ink)
+                            .foregroundColor(model.isConnected ? BridgeColors.ink : BridgeColors.soft)
                     }
 
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(model.connectedDevice ?? "Galaxy A52s")
+                        Text(model.connectedDevice ?? model.pairedDevice ?? "Phone")
                             .font(.custom("PlusJakartaSans-Medium", size: 14))
                             .foregroundColor(BridgeColors.text)
                             .kerning(-0.15)
                             .lineLimit(1)
                             .fixedSize(horizontal: false, vertical: true)
 
-                        Text("Linked to this Mac, same Wi-Fi")
+                        Text(model.isConnected ? "Connected · Same Wi-Fi" : "Disconnected · Check Wi-Fi")
                             .font(.custom("PlusJakartaSans-Regular", size: 11.5))
                             .foregroundColor(BridgeColors.muted)
                             .lineLimit(1)
@@ -424,7 +469,7 @@ struct BridgeMenuView: View {
                     Spacer(minLength: 6)
 
                     Button(action: {
-                        model.unpair()
+                        model.showUnpairConfirmation.toggle()
                     }) {
                         ZStack {
                             RoundedRectangle(cornerRadius: 10)
@@ -445,7 +490,7 @@ struct BridgeMenuView: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .help("Unpair device")
+                    .help("Unpair this phone")
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 13)
@@ -456,7 +501,71 @@ struct BridgeMenuView: View {
                         .fill(BridgeColors.panel)
                 )
 
-                // Tab Switcher: [Notifications (count)]  [Settings]
+                if model.showUnpairConfirmation {
+                    // Unpair Confirmation Dialog
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 13))
+                                .foregroundColor(BridgeColors.coral)
+
+                            Text("Unpair this phone?")
+                                .font(.custom("PlusJakartaSans-SemiBold", size: 13))
+                                .foregroundColor(BridgeColors.text)
+                        }
+
+                        Text("This will remove the pairing between your phone and Mac. You'll need to pair them again to reconnect.")
+                            .font(.custom("PlusJakartaSans-Regular", size: 11.5))
+                            .foregroundColor(BridgeColors.muted)
+                            .lineSpacing(2)
+
+                        HStack(spacing: 8) {
+                            Spacer()
+
+                            Button(action: {
+                                model.showUnpairConfirmation = false
+                            }) {
+                                Text("Cancel")
+                                    .font(.custom("PlusJakartaSans-Medium", size: 12))
+                                    .foregroundColor(BridgeColors.soft)
+                                    .padding(.horizontal, 12)
+                                    .frame(height: 28)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .stroke(BridgeColors.line2, lineWidth: 1)
+                                    )
+                            }
+                            .buttonStyle(.plain)
+
+                            Button(action: {
+                                model.showUnpairConfirmation = false
+                                model.unpair()
+                            }) {
+                                Text("Unpair")
+                                    .font(.custom("PlusJakartaSans-SemiBold", size: 12))
+                                    .foregroundColor(BridgeColors.ink)
+                                    .padding(.horizontal, 14)
+                                    .frame(height: 28)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .fill(BridgeColors.coral)
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .padding(.top, 4)
+                    }
+                    .padding(12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14)
+                            .fill(BridgeColors.panel)
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(BridgeColors.coral.opacity(0.4), lineWidth: 1)
+                    )
+                } else {
+                    // Tab Switcher: [Notifications (count)]  [Settings]
                 HStack(spacing: 6) {
                     Button(action: {
                         if model.selectedTab != .notifications {
@@ -527,169 +636,211 @@ struct BridgeMenuView: View {
 
                 // Tab 1: Notifications
                 if model.selectedTab == .notifications {
-                    if !notifManager.isSystemNotificationAllowed && notifManager.isEffectiveAndroidReceiveEnabled {
-                        Button(action: {
-                            notifManager.openNotificationSettings()
-                        }) {
-                            HStack(spacing: 8) {
-                                Image(systemName: "bell.badge.fill")
-                                    .font(.system(size: 13))
-                                    .foregroundColor(BridgeColors.coral)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Mac Banners Disabled")
-                                        .font(.custom("PlusJakartaSans-Medium", size: 13))
-                                        .foregroundColor(BridgeColors.text)
-                                    Text("Click to allow Bridge in System Settings > Notifications")
-                                        .font(.custom("PlusJakartaSans-Regular", size: 11.5))
-                                        .foregroundColor(BridgeColors.muted)
-                                }
-                                Spacer()
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .foregroundColor(BridgeColors.muted)
-                            }
-                            .padding(10)
-                            .background(
-                                RoundedRectangle(cornerRadius: 10)
-                                    .fill(BridgeColors.coral.opacity(0.12))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 10)
-                                    .stroke(BridgeColors.coral.opacity(0.35), lineWidth: 1)
-                            )
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                    }
-
-                    if !axObserver.isAccessibilityTrusted && notifManager.isEffectiveMacForwardEnabled {
-                        Button(action: {
-                            axObserver.promptAccessibilityPermissions()
-                        }) {
-                            HStack(spacing: 8) {
-                                Image(systemName: "hand.raised.fill")
-                                    .font(.system(size: 13))
-                                    .foregroundColor(BridgeColors.lime)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Mac Alert Forwarding Paused")
-                                        .font(.custom("PlusJakartaSans-Medium", size: 13))
-                                        .foregroundColor(BridgeColors.text)
-                                    Text("Click to grant Accessibility permission in System Settings")
-                                        .font(.custom("PlusJakartaSans-Regular", size: 11.5))
-                                        .foregroundColor(BridgeColors.muted)
-                                }
-                                Spacer()
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .foregroundColor(BridgeColors.muted)
-                            }
-                            .padding(10)
-                            .background(
-                                RoundedRectangle(cornerRadius: 10)
-                                    .fill(BridgeColors.lime.opacity(0.12))
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 10)
-                                    .stroke(BridgeColors.lime.opacity(0.35), lineWidth: 1)
-                            )
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                    }
-
-                    if notifManager.activeNotifications.isEmpty {
-                        VStack(spacing: 8) {
-                            Image(systemName: "bell.slash")
-                                .font(.system(size: 24))
-                                .foregroundColor(BridgeColors.muted.opacity(0.6))
-                                .padding(.top, 4)
-
-                            Text(notifManager.isEffectiveAndroidReceiveEnabled ? "No new notifications" : "Notifications paused")
-                                .font(.custom("PlusJakartaSans-Medium", size: 13))
-                                .foregroundColor(BridgeColors.soft)
-
-                            Text(
-                                notifManager.isEffectiveAndroidReceiveEnabled
-                                    ? "Notifications from your phone will appear here in real time."
-                                    : "Android notifications are turned off in Settings."
-                            )
-                                .font(.custom("PlusJakartaSans-Regular", size: 11.5))
-                                .foregroundColor(BridgeColors.muted)
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal, 16)
-                                .padding(.bottom, 4)
-                        }
-                        .padding(.vertical, 24)
-                        .frame(maxWidth: .infinity)
-                        .background(
-                            RoundedRectangle(cornerRadius: 16)
-                                .fill(BridgeColors.panel.opacity(0.6))
-                        )
-                    } else {
-                        VStack(spacing: 8) {
-                            HStack {
-                                Text("MIRRORED NOTIFICATIONS")
-                                    .font(.custom("DMMono-Regular", size: 10.5))
-                                    .foregroundColor(BridgeColors.muted)
-                                    .kerning(1.0)
-
-                                Spacer()
-
-                                Button(action: {
-                                    notifManager.clearAll()
-                                }) {
-                                    Text("Clear All")
-                                        .font(.custom("PlusJakartaSans-Medium", size: 11.5))
+                    if !model.showPairingSection {
+                        if !notifManager.isSystemNotificationAllowed && notifManager.isEffectiveAndroidReceiveEnabled {
+                            Button(action: {
+                                notifManager.openNotificationSettings()
+                            }) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "bell.badge.fill")
+                                        .font(.system(size: 13))
                                         .foregroundColor(BridgeColors.coral)
-                                        .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                            }
-                            .padding(.horizontal, 4)
 
-                            if notifManager.activeNotifications.count <= 2 {
-                                VStack(spacing: 8) {
-                                    ForEach(notifManager.activeNotifications) { notif in
-                                        NotificationCardView(notification: notif, manager: notifManager)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Mac Banners Disabled")
+                                            .font(.custom("PlusJakartaSans-Medium", size: 13))
+                                            .foregroundColor(BridgeColors.text)
+                                        Text("Allow Bridge in System Settings → Notifications to display mirrored notifications.")
+                                            .font(.custom("PlusJakartaSans-Regular", size: 11.5))
+                                            .foregroundColor(BridgeColors.muted)
                                     }
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundColor(BridgeColors.muted)
                                 }
-                            } else {
-                                ScrollView(.vertical, showsIndicators: true) {
+                                .padding(10)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .fill(BridgeColors.coral.opacity(0.12))
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .stroke(BridgeColors.coral.opacity(0.35), lineWidth: 1)
+                                )
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        if !axObserver.isAccessibilityTrusted && notifManager.isEffectiveMacForwardEnabled {
+                            Button(action: {
+                                axObserver.promptAccessibilityPermissions()
+                            }) {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "hand.raised.fill")
+                                        .font(.system(size: 13))
+                                        .foregroundColor(BridgeColors.coral)
+
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text("Mac Alert Forwarding Paused")
+                                            .font(.custom("PlusJakartaSans-Medium", size: 13))
+                                            .foregroundColor(BridgeColors.text)
+                                        Text("Grant Accessibility permission to forward Mac notifications to your phone.")
+                                            .font(.custom("PlusJakartaSans-Regular", size: 11.5))
+                                            .foregroundColor(BridgeColors.muted)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "chevron.right")
+                                        .font(.system(size: 11, weight: .semibold))
+                                        .foregroundColor(BridgeColors.muted)
+                                }
+                                .padding(10)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .fill(BridgeColors.coral.opacity(0.12))
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .stroke(BridgeColors.coral.opacity(0.35), lineWidth: 1)
+                                )
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        }
+
+                        if notifManager.activeNotifications.isEmpty {
+                            VStack(spacing: 8) {
+                                Image(systemName: notifManager.isEffectiveAndroidReceiveEnabled ? "bell.slash" : "pause.circle.fill")
+                                    .font(.system(size: 24))
+                                    .foregroundColor(BridgeColors.muted.opacity(0.6))
+                                    .padding(.top, 4)
+
+                                Text(notifManager.isEffectiveAndroidReceiveEnabled ? "No new notifications" : "Notifications paused")
+                                    .font(.custom("PlusJakartaSans-Medium", size: 13))
+                                    .foregroundColor(BridgeColors.soft)
+
+                                Text(
+                                    notifManager.isEffectiveAndroidReceiveEnabled
+                                        ? "Notifications from your phone will appear here in real time."
+                                        : "Android notifications are turned off in Settings."
+                                )
+                                    .font(.custom("PlusJakartaSans-Regular", size: 11.5))
+                                    .foregroundColor(BridgeColors.muted)
+                                    .multilineTextAlignment(.center)
+                                    .padding(.horizontal, 16)
+                                    .padding(.bottom, 4)
+                            }
+                            .padding(.vertical, 24)
+                            .frame(maxWidth: .infinity)
+                            .background(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .fill(BridgeColors.panel.opacity(0.6))
+                            )
+                        } else {
+                            VStack(spacing: 8) {
+                                HStack {
+                                    Text("MIRRORED NOTIFICATIONS")
+                                        .font(.custom("DMMono-Regular", size: 10.5))
+                                        .foregroundColor(BridgeColors.muted)
+                                        .kerning(1.0)
+
+                                    Spacer()
+
+                                    Button(action: {
+                                        notifManager.clearAll()
+                                    }) {
+                                        Text("Clear notifications")
+                                            .font(.custom("PlusJakartaSans-Medium", size: 11.5))
+                                            .foregroundColor(BridgeColors.coral)
+                                            .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                                .padding(.horizontal, 4)
+
+                                if notifManager.activeNotifications.count <= 2 {
                                     VStack(spacing: 8) {
                                         ForEach(notifManager.activeNotifications) { notif in
                                             NotificationCardView(notification: notif, manager: notifManager)
                                         }
                                     }
-                                    .padding(.trailing, 2)
+                                } else {
+                                    ScrollView(.vertical, showsIndicators: true) {
+                                        VStack(spacing: 8) {
+                                            ForEach(notifManager.activeNotifications) { notif in
+                                                NotificationCardView(notification: notif, manager: notifManager)
+                                            }
+                                        }
+                                        .padding(.trailing, 2)
+                                    }
+                                    .frame(height: 280)
                                 }
-                                .frame(height: 280)
                             }
                         }
                     }
+
+                    // Toggle Button to add another phone (Only visible on Notifications tab)
+                    Button(action: {
+                        model.showPairingSection.toggle()
+                    }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: model.showPairingSection ? "chevron.up" : "plus.circle.fill")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(BridgeColors.lime)
+
+                            Text(model.showPairingSection ? "Hide pairing code" : "Add another phone")
+                                .font(.custom("PlusJakartaSans-Medium", size: 13))
+                                .foregroundColor(BridgeColors.soft)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 36)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(BridgeColors.line2, lineWidth: 1)
+                        )
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .fixedSize(horizontal: false, vertical: true)
                 }
 
                 // Tab 2: Settings
                 if model.selectedTab == .settings {
-                    VStack(alignment: .leading, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 8) {
                         Text("SYNCED SETTINGS")
                             .font(.custom("DMMono-Regular", size: 10.5))
                             .foregroundColor(BridgeColors.muted)
                             .kerning(1.0)
 
                         // Main Master Notification Option
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Notifications")
-                                    .font(.custom("PlusJakartaSans-Medium", size: 13))
-                                    .foregroundColor(BridgeColors.text)
-                                Text("Sync notifications between Mac and phone")
-                                    .font(.custom("PlusJakartaSans-Regular", size: 11.5))
-                                    .foregroundColor(BridgeColors.muted)
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Notifications")
+                                        .font(.custom("PlusJakartaSans-Medium", size: 13))
+                                        .foregroundColor(BridgeColors.text)
+                                    Text("Sync notifications between your Mac and Android phone.")
+                                        .font(.custom("PlusJakartaSans-Regular", size: 11.5))
+                                        .foregroundColor(BridgeColors.muted)
+                                }
+                                Spacer()
+                                Toggle("", isOn: $notifManager.isMasterNotificationsEnabled)
+                                    .labelsHidden()
+                                    .toggleStyle(BridgeSwitchToggleStyle())
                             }
-                            Spacer()
-                            Toggle("", isOn: $notifManager.isMasterNotificationsEnabled)
-                                .labelsHidden()
-                                .toggleStyle(BridgeSwitchToggleStyle())
+
+                            if !notifManager.isMasterNotificationsEnabled {
+                                HStack(spacing: 6) {
+                                    Circle()
+                                        .fill(BridgeColors.coral)
+                                        .frame(width: 6, height: 6)
+                                    Text("Paused while notification sync is off.")
+                                        .font(.custom("PlusJakartaSans-Medium", size: 11.5))
+                                        .foregroundColor(BridgeColors.coral)
+                                }
+                                .padding(.top, 2)
+                            }
                         }
 
                         // Sub-options for Android and Mac notifications
@@ -701,7 +852,7 @@ struct BridgeMenuView: View {
                                 .padding(.vertical, 2)
                                 .padding(.leading, 4)
 
-                            VStack(alignment: .leading, spacing: 10) {
+                            VStack(alignment: .leading, spacing: 8) {
                                 HStack {
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text("Android Notifications")
@@ -752,7 +903,7 @@ struct BridgeMenuView: View {
                                 Text("Play Notification Sounds")
                                     .font(.custom("PlusJakartaSans-Medium", size: 13))
                                     .foregroundColor(BridgeColors.text)
-                                Text("Chime on Mac when a phone alert arrives")
+                                Text("Play a sound when a phone notification arrives.")
                                     .font(.custom("PlusJakartaSans-Regular", size: 11.5))
                                     .foregroundColor(BridgeColors.muted)
                             }
@@ -764,133 +915,179 @@ struct BridgeMenuView: View {
                         }
                         .opacity(notifManager.isEffectiveAndroidReceiveEnabled ? 1.0 : 0.45)
 
-                        if !notifManager.isSystemNotificationAllowed {
-                            Divider().background(BridgeColors.line)
+                        Divider().background(BridgeColors.line)
 
-                            Button(action: {
+                        // System Permissions Section
+                        Text("SYSTEM PERMISSIONS")
+                            .font(.custom("DMMono-Regular", size: 10.5))
+                            .foregroundColor(BridgeColors.muted)
+                            .kerning(1.0)
+
+                        // Permission 1: Mac Banners
+                        Button(action: {
+                            if !notifManager.isSystemNotificationAllowed {
                                 notifManager.openNotificationSettings()
-                            }) {
-                                HStack(spacing: 8) {
-                                    Image(systemName: "bell.badge.fill")
-                                        .font(.system(size: 13))
-                                        .foregroundColor(BridgeColors.coral)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text("Allow Mac Banners")
-                                            .font(.custom("PlusJakartaSans-Medium", size: 13))
-                                            .foregroundColor(BridgeColors.text)
-                                        Text("Enable in System Settings > Notifications")
-                                            .font(.custom("PlusJakartaSans-Regular", size: 11.5))
-                                            .foregroundColor(BridgeColors.muted)
-                                    }
-                                    Spacer()
-                                    Image(systemName: "chevron.right")
-                                        .font(.system(size: 11, weight: .semibold))
-                                        .foregroundColor(BridgeColors.muted)
-                                }
-                                .padding(.top, 2)
-                                .contentShape(Rectangle())
                             }
-                            .buttonStyle(.plain)
-                        }
+                        }) {
+                            HStack(alignment: .top, spacing: 10) {
+                                Image(systemName: "bell.badge.fill")
+                                    .font(.system(size: 13))
+                                    .foregroundColor(notifManager.isSystemNotificationAllowed ? BridgeColors.lime : BridgeColors.coral)
+                                    .padding(.top, 2)
 
-                        if !axObserver.isAccessibilityTrusted {
-                            Divider().background(BridgeColors.line)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Mac Banner Notifications")
+                                        .font(.custom("PlusJakartaSans-Medium", size: 13))
+                                        .foregroundColor(BridgeColors.text)
+                                    Text(
+                                        notifManager.isSystemNotificationAllowed
+                                            ? "Authorized to display mirrored notifications."
+                                            : "Allow Bridge in System Settings → Notifications."
+                                    )
+                                    .font(.custom("PlusJakartaSans-Regular", size: 11.5))
+                                    .foregroundColor(BridgeColors.muted)
+                                }
 
-                            Button(action: {
-                                axObserver.promptAccessibilityPermissions()
-                            }) {
-                                HStack(spacing: 8) {
-                                    Image(systemName: "hand.raised.fill")
-                                        .font(.system(size: 13))
+                                Spacer()
+
+                                if notifManager.isSystemNotificationAllowed {
+                                    Text("Active")
+                                        .font(.custom("PlusJakartaSans-SemiBold", size: 10))
                                         .foregroundColor(BridgeColors.lime)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text("Mac Accessibility Permission")
-                                            .font(.custom("PlusJakartaSans-Medium", size: 13))
-                                            .foregroundColor(BridgeColors.text)
-                                        Text("Required to capture Mac alerts. Click to open System Settings.")
-                                            .font(.custom("PlusJakartaSans-Regular", size: 11.5))
+                                        .padding(.horizontal, 7)
+                                        .padding(.vertical, 3)
+                                        .background(
+                                            Capsule().fill(BridgeColors.lime.opacity(0.16))
+                                        )
+                                } else {
+                                    HStack(spacing: 4) {
+                                        Text("Required")
+                                            .font(.custom("PlusJakartaSans-SemiBold", size: 10))
+                                            .foregroundColor(BridgeColors.coral)
+                                            .padding(.horizontal, 7)
+                                            .padding(.vertical, 3)
+                                            .background(
+                                                Capsule().fill(BridgeColors.coral.opacity(0.16))
+                                            )
+                                        Image(systemName: "chevron.right")
+                                            .font(.system(size: 10, weight: .semibold))
                                             .foregroundColor(BridgeColors.muted)
                                     }
-                                    Spacer()
-                                    Image(systemName: "chevron.right")
-                                        .font(.system(size: 11, weight: .semibold))
-                                        .foregroundColor(BridgeColors.muted)
                                 }
-                                .padding(10)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 10)
-                                        .fill(BridgeColors.lime.opacity(0.12))
-                                )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 10)
-                                        .stroke(BridgeColors.lime.opacity(0.35), lineWidth: 1)
-                                )
-                                .contentShape(Rectangle())
                             }
-                            .buttonStyle(.plain)
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
+
+                        Divider().background(BridgeColors.line.opacity(0.6))
+
+                        // Permission 2: Mac Accessibility
+                        Button(action: {
+                            if !axObserver.isAccessibilityTrusted {
+                                axObserver.promptAccessibilityPermissions()
+                            }
+                        }) {
+                            HStack(alignment: .top, spacing: 10) {
+                                Image(systemName: "hand.raised.fill")
+                                    .font(.system(size: 13))
+                                    .foregroundColor(axObserver.isAccessibilityTrusted ? BridgeColors.lime : BridgeColors.coral)
+                                    .padding(.top, 2)
+
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("Mac Accessibility Permission")
+                                        .font(.custom("PlusJakartaSans-Medium", size: 13))
+                                        .foregroundColor(BridgeColors.text)
+                                    Text(
+                                        axObserver.isAccessibilityTrusted
+                                            ? "Authorized to capture Mac alerts for sync."
+                                            : "Grant Accessibility permission in System Settings."
+                                    )
+                                    .font(.custom("PlusJakartaSans-Regular", size: 11.5))
+                                    .foregroundColor(BridgeColors.muted)
+                                }
+
+                                Spacer()
+
+                                if axObserver.isAccessibilityTrusted {
+                                    Text("Active")
+                                        .font(.custom("PlusJakartaSans-SemiBold", size: 10))
+                                        .foregroundColor(BridgeColors.lime)
+                                        .padding(.horizontal, 7)
+                                        .padding(.vertical, 3)
+                                        .background(
+                                            Capsule().fill(BridgeColors.lime.opacity(0.16))
+                                        )
+                                } else {
+                                    HStack(spacing: 4) {
+                                        Text("Required")
+                                            .font(.custom("PlusJakartaSans-SemiBold", size: 10))
+                                            .foregroundColor(BridgeColors.coral)
+                                            .padding(.horizontal, 7)
+                                            .padding(.vertical, 3)
+                                            .background(
+                                                Capsule().fill(BridgeColors.coral.opacity(0.16))
+                                            )
+                                        Image(systemName: "chevron.right")
+                                            .font(.system(size: 10, weight: .semibold))
+                                            .foregroundColor(BridgeColors.muted)
+                                    }
+                                }
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .padding(14)
+                    .padding(13)
                     .background(
                         RoundedRectangle(cornerRadius: 16)
                             .fill(BridgeColors.panel)
                     )
                 }
-
-                // Toggle Button to pair another phone
-                Button(action: {
-                    model.showPairingSection.toggle()
-                }) {
-                    HStack(spacing: 6) {
-                        Image(systemName: model.showPairingSection ? "chevron.up" : "plus.circle.fill")
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundColor(BridgeColors.lime)
-
-                        Text(model.showPairingSection ? "Hide pairing code" : "Pair another phone")
-                            .font(.custom("PlusJakartaSans-Medium", size: 13))
-                            .foregroundColor(BridgeColors.soft)
-                    }
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 36)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12)
-                            .stroke(BridgeColors.line2, lineWidth: 1)
-                    )
-                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.plain)
-                .fixedSize(horizontal: false, vertical: true)
             }
 
-            // Pairing Card (Visible when NOT connected, OR when user clicks "Pair another phone")
-            if !model.isConnected || model.showPairingSection {
-                VStack(spacing: 12) {
-                    Text(model.isConnected ? "PAIR ANOTHER PHONE" : "PAIR YOUR PHONE")
+            // Pairing Card (Visible when NOT paired/connected, OR when user clicks "Add another phone" on Notifications tab)
+            if !isPairedOrConnected || (!model.showUnpairConfirmation && model.selectedTab == .notifications && model.showPairingSection) {
+                let qrSize: CGFloat = isPairedOrConnected ? 152 : 176
+                VStack(spacing: isPairedOrConnected ? 10 : 12) {
+                    Text(isPairedOrConnected ? "ADD ANOTHER PHONE" : "PAIR YOUR PHONE")
                         .font(.custom("DMMono-Regular", size: 11))
                         .foregroundColor(BridgeColors.muted)
                         .kerning(1.54)
-                        .padding(.top, 4)
+                        .padding(.top, 2)
 
-                    // 176pt off-white QR tile
+                    // Off-white QR tile
                     ZStack {
                         RoundedRectangle(cornerRadius: 18)
                             .fill(BridgeColors.text)
-                            .frame(width: 176, height: 176)
+                            .frame(width: qrSize, height: qrSize)
 
                         if let qrImg = model.qrCodeImage {
                             Image(nsImage: qrImg)
                                 .interpolation(.none)
                                 .resizable()
                                 .scaledToFit()
-                                .padding(12)
-                                .frame(width: 176, height: 176)
+                                .padding(isPairedOrConnected ? 10 : 12)
+                                .frame(width: qrSize, height: qrSize)
                         }
                     }
 
-                    Text("Open Bridge on Android and point it here")
-                        .font(.custom("PlusJakartaSans-Regular", size: 13.5))
-                        .foregroundColor(BridgeColors.soft)
-                        .multilineTextAlignment(.center)
+                    VStack(spacing: 3) {
+                        Text("Open Bridge on your Android phone and scan this QR code to connect.")
+                            .font(.custom("PlusJakartaSans-Regular", size: 12.5))
+                            .foregroundColor(BridgeColors.soft)
+                            .multilineTextAlignment(.center)
+                            .padding(.horizontal, 8)
+
+                        if isPairedOrConnected {
+                            Text("Your existing phone will remain connected while pairing another phone.")
+                                .font(.custom("PlusJakartaSans-Regular", size: 11.5))
+                                .foregroundColor(BridgeColors.muted)
+                                .multilineTextAlignment(.center)
+                                .padding(.horizontal, 10)
+                                .padding(.top, 1)
+                        }
+                    }
 
                     // Rule
                     Rectangle()
@@ -898,35 +1095,42 @@ struct BridgeMenuView: View {
                         .frame(height: 1)
                         .padding(.horizontal, 4)
 
-                    // 6-digit code row with Copy button
-                    HStack(spacing: 12) {
-                        Text(model.formattedCode)
-                            .font(.custom("DMMono-Medium", size: 30))
-                            .foregroundColor(BridgeColors.lime)
-                            .kerning(1.8)
+                    // 6-digit code area with PAIRING CODE label
+                    VStack(spacing: 4) {
+                        Text("PAIRING CODE")
+                            .font(.custom("DMMono-Regular", size: 10))
+                            .foregroundColor(BridgeColors.muted)
+                            .kerning(1.2)
 
-                        Button(action: {
-                            model.copyPairingCode()
-                        }) {
-                            Text(model.copiedNotice ? "Copied" : "Copy")
-                                .font(.custom("PlusJakartaSans-Medium", size: 14))
-                                .foregroundColor(model.copiedNotice ? BridgeColors.ink : BridgeColors.text)
-                                .frame(minWidth: 84, minHeight: 44)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .fill(model.copiedNotice ? BridgeColors.lime : Color.clear)
-                                )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .stroke(model.copiedNotice ? BridgeColors.lime : BridgeColors.line2, lineWidth: 1)
-                                )
-                                .contentShape(Rectangle())
+                        HStack(spacing: 12) {
+                            Text(model.formattedCode)
+                                .font(.custom("DMMono-Medium", size: isPairedOrConnected ? 27 : 30))
+                                .foregroundColor(BridgeColors.lime)
+                                .kerning(1.8)
+
+                            Button(action: {
+                                model.copyPairingCode()
+                            }) {
+                                Text(model.copiedNotice ? "Copied" : "Copy")
+                                    .font(.custom("PlusJakartaSans-Medium", size: 13.5))
+                                    .foregroundColor(model.copiedNotice ? BridgeColors.ink : BridgeColors.text)
+                                    .frame(minWidth: 80, minHeight: isPairedOrConnected ? 38 : 44)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .fill(model.copiedNotice ? BridgeColors.lime : Color.clear)
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 12)
+                                            .stroke(model.copiedNotice ? BridgeColors.lime : BridgeColors.line2, lineWidth: 1)
+                                    )
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
-                    .padding(.bottom, 4)
+                    .padding(.bottom, 2)
                 }
-                .padding(18)
+                .padding(isPairedOrConnected ? 15 : 18)
                 .frame(maxWidth: .infinity)
                 .background(
                     RoundedRectangle(cornerRadius: 22)
@@ -936,9 +1140,11 @@ struct BridgeMenuView: View {
 
             // Footer Bar
             HStack {
-                Text("\(model.localIp):\(String(model.port))")
-                    .font(.custom("DMMono-Regular", size: 12))
-                    .foregroundColor(BridgeColors.muted)
+                HStack(spacing: 4) {
+                    Text("\(model.localIp):\(String(model.port))")
+                        .font(.custom("DMMono-Regular", size: 11.5))
+                        .foregroundColor(BridgeColors.muted)
+                }
 
                 Spacer()
 
