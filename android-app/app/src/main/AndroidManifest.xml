@@ -13,6 +13,8 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" tools:ignore="QueryAllPackagesCondition" />
     <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
     <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
 
@@ -23,15 +25,27 @@
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:usesCleartextTraffic="true"
+        android:requestLegacyExternalStorage="true"
         android:theme="@style/Theme.Bridge">
 
         <!-- Main Dashboard Activity -->
         <activity
             android:name=".MainActivity"
+            android:launchMode="singleTop"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <intent-filter android:label="Send to Mac (Bridge)">
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
+            </intent-filter>
+            <intent-filter android:label="Send to Mac (Bridge)">
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="*/*" />
             </intent-filter>
         </activity>
 
@@ -77,6 +91,17 @@
             android:exported="true"
             android:grantUriPermissions="true" />
 
+        <!-- FileProvider for opening received files in Downloads -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
         <!-- Notification Listener Service for Mirroring Phone Notifications to Mac -->
         <service
             android:name=".BridgeNotificationListenerService"
@@ -94,6 +119,16 @@
             android:exported="false">
             <intent-filter>
                 <action android:name="com.link.clipboardsync.ACTION_DISMISS_MAC_ALERT" />
+            </intent-filter>
+        </receiver>
+
+        <!-- BroadcastReceiver for File Transfer Accept / Decline Actions -->
+        <receiver
+            android:name=".FileTransferActionReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.link.clipboardsync.ACTION_ACCEPT_TRANSFER" />
+                <action android:name="com.link.clipboardsync.ACTION_DECLINE_TRANSFER" />
             </intent-filter>
         </receiver>
 

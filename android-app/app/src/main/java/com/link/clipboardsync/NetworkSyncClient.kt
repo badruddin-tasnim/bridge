@@ -385,6 +385,8 @@ class NetworkSyncClient(private val context: Context) {
                                 }
                             } else if (type != null && (type.startsWith("notif_") || type == "settings_sync")) {
                                 notifyNotificationPayloadReceived(trimmed)
+                            } else if (type != null && type.startsWith("file_") && jsonObj != null) {
+                                BridgeFileTransferManager.handleControlMessage(context, jsonObj, host)
                             } else {
                                 val payload = ClipboardPayload.fromJsonString(trimmed)
                                 when (payload?.type) {

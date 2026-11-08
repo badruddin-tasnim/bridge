@@ -89,7 +89,7 @@ public class BridgeNotificationManager: NSObject, ObservableObject, UNUserNotifi
         }
     }
 
-    private func recordLocalSettingsChangeAndSync() {
+    public func recordLocalSettingsChangeAndSync() {
         settingsUpdatedAt = Int64(Date().timeIntervalSince1970 * 1000)
         broadcastSettingsSync()
     }
@@ -100,6 +100,7 @@ public class BridgeNotificationManager: NSObject, ObservableObject, UNUserNotifi
             "notifMasterEnabled": isMasterNotificationsEnabled,
             "androidNotifEnabled": isMirroringEnabled,
             "macNotifEnabled": isMacAlertsForwardingEnabled,
+            "autoAcceptFiles": BridgeFileTransferManager.shared.autoAcceptIncomingFiles,
             "updatedAt": settingsUpdatedAt
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: payload),
@@ -227,8 +228,13 @@ public class BridgeNotificationManager: NSObject, ObservableObject, UNUserNotifi
         if let macEnabled = json["macNotifEnabled"] as? Bool {
             self.isMacAlertsForwardingEnabled = macEnabled
         }
+        if let autoAccept = json["autoAcceptFiles"] as? Bool {
+            BridgeFileTransferManager.shared.isApplyingRemoteSettings = true
+            BridgeFileTransferManager.shared.autoAcceptIncomingFiles = autoAccept
+            BridgeFileTransferManager.shared.isApplyingRemoteSettings = false
+        }
         isApplyingRemoteSettings = false
-        NSLog("[BridgeNotif] Applied remote settings_sync: master=\(isMasterNotificationsEnabled), android=\(isMirroringEnabled), mac=\(isMacAlertsForwardingEnabled)")
+        NSLog("[BridgeNotif] Applied remote settings_sync: master=\(isMasterNotificationsEnabled), android=\(isMirroringEnabled), mac=\(isMacAlertsForwardingEnabled), autoAcceptFiles=\(BridgeFileTransferManager.shared.autoAcceptIncomingFiles)")
     }
 
     private func normalizeNotifId(_ raw: String) -> String {
@@ -510,6 +516,25 @@ public class BridgeNotificationManager: NSObject, ObservableObject, UNUserNotifi
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
+        let reqId = response.notification.request.identifier
+        if reqId.starts(with: "bridge.transfer.") {
+            let transferId = (response.notification.request.content.userInfo["transfer_id"] as? String)
+                ?? reqId.replacingOccurrences(of: "bridge.transfer.", with: "")
+            if response.actionIdentifier.starts(with: "file_accept_") {
+                if let item = BridgeFileTransferManager.shared.transfers.first(where: { $0.id == transferId }) {
+                    BridgeFileTransferManager.shared.acceptIncomingTransfer(item)
+                }
+            } else if response.actionIdentifier.starts(with: "file_decline_") || response.actionIdentifier == UNNotificationDismissActionIdentifier {
+                BridgeFileTransferManager.shared.cancelTransfer(id: transferId, notifyPeer: true)
+            } else if response.actionIdentifier == UNNotificationDefaultActionIdentifier {
+                DispatchQueue.main.async {
+                    NSApp.activate(ignoringOtherApps: true)
+                }
+            }
+            completionHandler()
+            return
+        }
+
         let notifId = (response.notification.request.content.userInfo["notif_id"] as? String)
             ?? response.notification.request.identifier
 

@@ -17,8 +17,11 @@ object BridgePrefs {
     private const val KEY_NOTIF_SYNC_ENABLED = "notif_sync_enabled"
     private const val KEY_MAC_ALERTS_ENABLED = "mac_alerts_enabled"
     private const val KEY_PHONE_VIBRATE_ENABLED = "phone_vibrate_mac_alerts"
+    private const val KEY_AUTO_ACCEPT_FILES = "auto_accept_incoming_files"
     private const val KEY_SETTINGS_UPDATED_AT = "settings_updated_at"
     private const val KEY_BLACKLISTED_PACKAGES = "notif_blacklisted_pkgs"
+    private const val KEY_CUSTOM_SAVE_TREE_URI = "custom_save_tree_uri"
+    private const val KEY_CUSTOM_SAVE_DISPLAY_NAME = "custom_save_display_name"
 
     private fun prefs(context: Context): SharedPreferences =
         context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -87,6 +90,40 @@ object BridgePrefs {
 
     fun setPhoneVibrateEnabled(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(KEY_PHONE_VIBRATE_ENABLED, enabled).apply()
+    }
+
+    // Synced Setting: Auto-accept incoming files from paired Mac
+    fun isAutoAcceptFilesEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_AUTO_ACCEPT_FILES, true)
+
+    fun setAutoAcceptFilesEnabled(context: Context, enabled: Boolean, updateTimestamp: Boolean = true) {
+        val editor = prefs(context).edit().putBoolean(KEY_AUTO_ACCEPT_FILES, enabled)
+        if (updateTimestamp) {
+            editor.putLong(KEY_SETTINGS_UPDATED_AT, System.currentTimeMillis())
+        }
+        editor.apply()
+    }
+
+    // Phone-Only Setting: Preferred Save Location for received files
+    fun getCustomSaveTreeUri(context: Context): String? =
+        prefs(context).getString(KEY_CUSTOM_SAVE_TREE_URI, null)?.ifBlank { null }
+
+    fun getCustomSaveDisplayName(context: Context): String? =
+        prefs(context).getString(KEY_CUSTOM_SAVE_DISPLAY_NAME, null)?.ifBlank { null }
+
+    fun hasCustomSaveLocation(context: Context): Boolean =
+        !getCustomSaveTreeUri(context).isNullOrBlank()
+
+    fun setCustomSaveLocation(context: Context, treeUri: String?, displayName: String?) {
+        val editor = prefs(context).edit()
+        if (treeUri != null && !displayName.isNullOrBlank()) {
+            editor.putString(KEY_CUSTOM_SAVE_TREE_URI, treeUri)
+            editor.putString(KEY_CUSTOM_SAVE_DISPLAY_NAME, displayName)
+        } else {
+            editor.remove(KEY_CUSTOM_SAVE_TREE_URI)
+            editor.remove(KEY_CUSTOM_SAVE_DISPLAY_NAME)
+        }
+        editor.apply()
     }
 
     fun getSettingsUpdatedAt(context: Context): Long =

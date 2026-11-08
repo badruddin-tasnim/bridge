@@ -91,6 +91,7 @@ object BridgeNotificationManager {
                 put("notifMasterEnabled", BridgePrefs.isNotifMasterEnabled(context))
                 put("androidNotifEnabled", BridgePrefs.isAndroidNotifEnabled(context))
                 put("macNotifEnabled", BridgePrefs.isMacNotifEnabled(context))
+                put("autoAcceptFiles", BridgePrefs.isAutoAcceptFilesEnabled(context))
                 put("updatedAt", BridgePrefs.getSettingsUpdatedAt(context))
             }
             client.sendRawJson(json.toString())
@@ -245,6 +246,13 @@ object BridgeNotificationManager {
                             updateTimestamp = false
                         )
                     }
+                    if (json.has("autoAcceptFiles")) {
+                        BridgePrefs.setAutoAcceptFilesEnabled(
+                            context,
+                            json.optBoolean("autoAcceptFiles", true),
+                            updateTimestamp = false
+                        )
+                    }
                     if (remoteUpdatedAt > 0L) {
                         BridgePrefs.setSettingsUpdatedAt(context, remoteUpdatedAt)
                     }
@@ -258,7 +266,7 @@ object BridgeNotificationManager {
                     notifySettingsChanged()
                     Log.d(
                         TAG,
-                        "Applied remote settings_sync: master=${BridgePrefs.isNotifMasterEnabled(context)}, android=${BridgePrefs.isAndroidNotifEnabled(context)}, mac=${BridgePrefs.isMacNotifEnabled(context)}"
+                        "Applied remote settings_sync: master=${BridgePrefs.isNotifMasterEnabled(context)}, android=${BridgePrefs.isAndroidNotifEnabled(context)}, mac=${BridgePrefs.isMacNotifEnabled(context)}, autoAccept=${BridgePrefs.isAutoAcceptFilesEnabled(context)}"
                     )
                 }
                 "notif_action" -> {

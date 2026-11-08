@@ -39,6 +39,13 @@ struct ClipboardPayload: Codable {
     }
 }
 
+struct ConnectedDeviceInfo: Identifiable, Equatable {
+    let id: UUID
+    let name: String
+    let ip: String?
+    let isConnected: Bool
+}
+
 // MARK: - Helpers
 
 func computeSHA256(_ data: Data) -> String {
@@ -189,6 +196,7 @@ class BridgeServer {
     
     // Callbacks for UI
     var onStatusChanged: ((_ isConnected: Bool, _ deviceName: String?) -> Void)?
+    var onConnectedDevicesChanged: (([ConnectedDeviceInfo]) -> Void)?
     var onClipboardSynced: ((_ text: String, _ outgoing: Bool) -> Void)?
     var onIpChanged: ((_ ip: String) -> Void)?
     
@@ -196,6 +204,9 @@ class BridgeServer {
         loadOrGeneratePairingCode()
         BridgeNotificationManager.shared.sendPayload = { [weak self] jsonString in
             self?.broadcastRawJson(jsonString)
+        }
+        BridgeFileTransferManager.shared.sendControlMessage = { [weak self] jsonString, targetDeviceId in
+            self?.sendRawJson(jsonString, toDeviceId: targetDeviceId)
         }
     }
     
@@ -614,6 +625,12 @@ class BridgeServer {
             BridgeNotificationManager.shared.handleIncomingPayload(data: data)
             return
         }
+
+        if type.hasPrefix("file_") {
+            let devName = self.clientDeviceNames[id] ?? "Android Device"
+            BridgeFileTransferManager.shared.handleControlMessage(jsonObject, fromDeviceId: id, deviceName: devName)
+            return
+        }
         
         if type == "ping" {
             let pong = ClipboardPayload(type: "pong")
@@ -668,11 +685,38 @@ class BridgeServer {
     }
     
     private func notifyUiStatus() {
+        let isConnected = !self.authenticatedConnections.isEmpty
+        let device = self.clientDeviceNames.values.first
+        let devicesList = self.getConnectedDevicesList()
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
-            let isConnected = !self.authenticatedConnections.isEmpty
-            let device = self.clientDeviceNames.values.first
             self.onStatusChanged?(isConnected, device)
+            self.onConnectedDevicesChanged?(devicesList)
+        }
+    }
+
+    func getConnectedDevicesList() -> [ConnectedDeviceInfo] {
+        return authenticatedConnections.map { id in
+            ConnectedDeviceInfo(
+                id: id,
+                name: clientDeviceNames[id] ?? "Android Device",
+                ip: connectionRemoteIp[id],
+                isConnected: true
+            )
+        }
+    }
+
+    func disconnectDevice(id: UUID) {
+        networkQueue.async { [weak self] in
+            guard let self = self else { return }
+            let unpairPayload = ClipboardPayload(type: "unpair")
+            if let conn = self.connections[id] {
+                self.sendDirect(payload: unpairPayload, to: conn)
+                self.networkQueue.asyncAfter(deadline: .now() + 0.1) {
+                    conn.cancel()
+                    self.removeConnection(id: id)
+                }
+            }
         }
     }
     
@@ -709,6 +753,28 @@ class BridgeServer {
             for id in self.authenticatedConnections {
                 if let conn = self.connections[id] {
                     conn.send(content: data, completion: .contentProcessed({ _ in }))
+                }
+            }
+        }
+    }
+
+    func sendRawJson(_ jsonString: String, toDeviceId: UUID?) {
+        guard var data = jsonString.data(using: .utf8) else { return }
+        data.append(UInt8(ascii: "\n"))
+        
+        networkQueue.async { [weak self] in
+            guard let self = self else { return }
+            if let targetId = toDeviceId {
+                if self.authenticatedConnections.contains(targetId), let conn = self.connections[targetId] {
+                    conn.send(content: data, completion: .contentProcessed({ _ in }))
+                } else if let firstId = self.authenticatedConnections.first, let conn = self.connections[firstId] {
+                    conn.send(content: data, completion: .contentProcessed({ _ in }))
+                }
+            } else {
+                for id in self.authenticatedConnections {
+                    if let conn = self.connections[id] {
+                        conn.send(content: data, completion: .contentProcessed({ _ in }))
+                    }
                 }
             }
         }

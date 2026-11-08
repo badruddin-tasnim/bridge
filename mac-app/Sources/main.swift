@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import CoreText
+import UniformTypeIdentifiers
 
 // MARK: - Font Registration
 
@@ -13,6 +14,52 @@ func registerCustomFonts() {
         let fontUrl = URL(fileURLWithPath: (fontsPath as NSString).appendingPathComponent(file))
         var error: Unmanaged<CFError>?
         CTFontManagerRegisterFontsForURL(fontUrl as CFURL, .process, &error)
+    }
+}
+
+// MARK: - Status Item Drag & Drop Overlay View
+
+final class StatusItemDropOverlayView: NSView {
+    var onDragEntered: (() -> Void)?
+    var onFilesDropped: (([URL]) -> Void)?
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        registerForDraggedTypes([.fileURL])
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        registerForDraggedTypes([.fileURL])
+    }
+
+    // Pass normal mouse clicks through to NSStatusBarButton underneath
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        return nil
+    }
+
+    override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        let pb = sender.draggingPasteboard
+        if let urls = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
+           !urls.isEmpty {
+            DispatchQueue.main.async { [weak self] in
+                self?.onDragEntered?()
+            }
+            return .copy
+        }
+        return []
+    }
+
+    override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+        let pb = sender.draggingPasteboard
+        guard let urls = pb.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
+              !urls.isEmpty else {
+            return false
+        }
+        DispatchQueue.main.async { [weak self] in
+            self?.onFilesDropped?(urls)
+        }
+        return true
     }
 }
 
@@ -29,6 +76,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
            let appIcon = NSImage(contentsOfFile: iconPath) {
             NSApp.applicationIconImage = appIcon
         }
+        NSApp.servicesProvider = self
         setupStatusItem()
         setupPopover()
     }
@@ -41,6 +89,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         button.imagePosition = .imageOnly
         button.action = #selector(togglePopover)
         button.target = self
+
+        let dropOverlay = StatusItemDropOverlayView(frame: button.bounds)
+        dropOverlay.autoresizingMask = [.width, .height]
+        dropOverlay.onDragEntered = { [weak self] in
+            guard let self = self else { return }
+            if self.model.selectedTab != .files {
+                self.model.selectedTab = .files
+            }
+            self.showPopover()
+        }
+        dropOverlay.onFilesDropped = { [weak self] urls in
+            guard let self = self else { return }
+            self.handleIncomingSharedFiles(urls)
+        }
+        button.addSubview(dropOverlay)
     }
     
     private func setupPopover() {
@@ -67,6 +130,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     private func applyPopoverSize() {
         guard let pop = popover, let controller = pop.contentViewController else { return }
+
         controller.view.invalidateIntrinsicContentSize()
         controller.view.layoutSubtreeIfNeeded()
         let fitting = controller.view.fittingSize
@@ -79,10 +143,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let notifCount = BridgeNotificationManager.shared.activeNotifications.count
             if !isPaired {
                 targetHeight = 494
-            } else if model.selectedTab == .notifications && model.showPairingSection {
+            } else if model.selectedTab == .devices && model.showPairingSection {
                 targetHeight = 658
+            } else if model.selectedTab == .devices {
+                let devCount = max(1, model.connectedDevicesList.count)
+                targetHeight = 240 + CGFloat(devCount) * 75.0
+            } else if model.selectedTab == .files {
+                let txCount = BridgeFileTransferManager.shared.transfers.count
+                targetHeight = txCount == 0 ? 310 : min(340 + CGFloat(txCount) * 70.0, 580.0)
             } else if model.selectedTab == .settings {
-                targetHeight = 665
+                targetHeight = 460
             } else {
                 targetHeight = notifCount == 0 ? 444 : min(444 + CGFloat(notifCount) * 85.0, 620.0)
             }
@@ -98,21 +168,77 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     @objc private func togglePopover() {
-        guard let button = statusItem?.button, let pop = popover else { return }
+        guard let pop = popover else { return }
         if pop.isShown {
             pop.performClose(nil)
         } else {
-            BridgeNotificationManager.shared.checkNotificationAuth()
-            model.checkForUpdates(forceNetwork: false)
-            applyPopoverSize()
+            showPopover()
+        }
+    }
+
+    private func showPopover() {
+        guard let button = statusItem?.button, let pop = popover else { return }
+        BridgeNotificationManager.shared.checkNotificationAuth()
+        model.checkForUpdates(forceNetwork: false)
+        applyPopoverSize()
+        if !pop.isShown {
             pop.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
-            if let window = pop.contentViewController?.view.window {
-                window.backgroundColor = NSColor(red: 0x12 / 255.0, green: 0x14 / 255.0, blue: 0x18 / 255.0, alpha: 1.0)
-                window.makeKey()
+        }
+        if let window = pop.contentViewController?.view.window {
+            window.backgroundColor = NSColor(red: 0x12 / 255.0, green: 0x14 / 255.0, blue: 0x18 / 255.0, alpha: 1.0)
+            window.makeKey()
+        }
+        DispatchQueue.main.async { [weak self] in
+            self?.applyPopoverSize()
+        }
+    }
+
+    // MARK: - Finder Right-Click / Share / Services / Open With Integration
+
+    private func handleIncomingSharedFiles(_ urls: [URL]) {
+        let validFiles = urls.filter { $0.isFileURL && FileManager.default.fileExists(atPath: $0.path) }
+        guard !validFiles.isEmpty else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.model.selectedTab = .files
+            self.showPopover()
+            self.model.sendFiles(validFiles)
+        }
+    }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        var fileUrls: [URL] = []
+        for url in urls {
+            if url.isFileURL {
+                fileUrls.append(url)
+            } else if url.scheme?.lowercased() == "bridge" {
+                if let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+                   let queryItems = components.queryItems {
+                    for item in queryItems where item.name == "path" {
+                        if let path = item.value, !path.isEmpty {
+                            fileUrls.append(URL(fileURLWithPath: path))
+                        }
+                    }
+                }
             }
-            DispatchQueue.main.async { [weak self] in
-                self?.applyPopoverSize()
-            }
+        }
+        handleIncomingSharedFiles(fileUrls)
+    }
+
+    func application(_ sender: NSApplication, openFiles filenames: [String]) {
+        let urls = filenames.map { URL(fileURLWithPath: $0) }
+        handleIncomingSharedFiles(urls)
+        sender.reply(toOpenOrPrint: .success)
+    }
+
+    @objc func shareWithBridge(
+        _ pboard: NSPasteboard,
+        userData: String?,
+        error: AutoreleasingUnsafeMutablePointer<NSString?>
+    ) {
+        if let urls = pboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
+           !urls.isEmpty {
+            handleIncomingSharedFiles(urls)
         }
     }
     

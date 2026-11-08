@@ -18,13 +18,19 @@ class BridgeModel: ObservableObject {
     @Published var lastSyncedOutgoing: Bool = false
     @Published var qrCodeImage: NSImage? = nil
     @Published var copiedNotice: Bool = false
+    @Published var connectedDevicesList: [ConnectedDeviceInfo] = []
+    @Published var selectedTargetDeviceId: UUID? = nil
+    @Published var isDropTargeted: Bool = false
+    @Published var deviceToUnpair: ConnectedDeviceInfo? = nil
     enum BridgeTab: String, CaseIterable {
+        case devices = "Devices"
         case notifications = "Notifications"
+        case files = "Transfer"
         case settings = "Settings"
     }
-    @Published var selectedTab: BridgeTab = .notifications {
+    @Published var selectedTab: BridgeTab = .devices {
         didSet {
-            if selectedTab == .settings && showPairingSection {
+            if selectedTab != .devices && showPairingSection {
                 showPairingSection = false
             }
             onSizeChangeRequested?()
@@ -32,6 +38,9 @@ class BridgeModel: ObservableObject {
     }
     var notificationsManager: BridgeNotificationManager {
         return BridgeNotificationManager.shared
+    }
+    var fileTransferManager: BridgeFileTransferManager {
+        return BridgeFileTransferManager.shared
     }
 
     @Published var showPairingSection: Bool = false {
@@ -95,6 +104,13 @@ class BridgeModel: ObservableObject {
             }
             .store(in: &cancellables)
 
+        BridgeFileTransferManager.shared.$transfers
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.onSizeChangeRequested?()
+            }
+            .store(in: &cancellables)
+
         startUpdateChecking()
     }
     
@@ -110,6 +126,24 @@ class BridgeModel: ObservableObject {
                         UserDefaults.standard.set(dev, forKey: BridgeModel.keyPairedDevice)
                     }
                     self.showPairingSection = false
+                }
+                self.onSizeChangeRequested?()
+            }
+        }
+
+        server.onConnectedDevicesChanged = { [weak self] devices in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                self.connectedDevicesList = devices
+                if let first = devices.first {
+                    self.connectedDevice = first.name
+                    self.pairedDevice = first.name
+                    UserDefaults.standard.set(first.name, forKey: BridgeModel.keyPairedDevice)
+                    if self.selectedTargetDeviceId == nil || !devices.contains(where: { $0.id == self.selectedTargetDeviceId }) {
+                        self.selectedTargetDeviceId = first.id
+                    }
+                } else {
+                    self.selectedTargetDeviceId = nil
                 }
                 self.onSizeChangeRequested?()
             }
@@ -170,23 +204,82 @@ class BridgeModel: ObservableObject {
         }
     }
     
-    func unpair() {
-        pairedDevice = nil
-        UserDefaults.standard.removeObject(forKey: BridgeModel.keyPairedDevice)
-        server.unpairAllDevices()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-            guard let self = self else { return }
-            self.rawCode = self.server.pairingCode
-            if self.rawCode.count == 6 {
-                self.formattedCode = "\(self.rawCode.prefix(3)) \(self.rawCode.suffix(3))"
-            } else {
-                self.formattedCode = self.rawCode
+    func unpair(deviceId: UUID? = nil) {
+        if let id = deviceId {
+            server.disconnectDevice(id: id)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                guard let self = self else { return }
+                self.connectedDevicesList.removeAll { $0.id == id }
+                if self.connectedDevicesList.isEmpty {
+                    self.pairedDevice = nil
+                    UserDefaults.standard.removeObject(forKey: BridgeModel.keyPairedDevice)
+                    self.isConnected = false
+                    self.connectedDevice = nil
+                    self.selectedTargetDeviceId = nil
+                } else if let first = self.connectedDevicesList.first {
+                    self.pairedDevice = first.name
+                    self.connectedDevice = first.name
+                    UserDefaults.standard.set(first.name, forKey: BridgeModel.keyPairedDevice)
+                    if self.selectedTargetDeviceId == id || self.selectedTargetDeviceId == nil {
+                        self.selectedTargetDeviceId = first.id
+                    }
+                }
+                self.deviceToUnpair = nil
+                self.onSizeChangeRequested?()
             }
-            self.updateQrCode()
-            self.isConnected = false
-            self.connectedDevice = nil
-            self.showPairingSection = false
-            self.onSizeChangeRequested?()
+        } else {
+            pairedDevice = nil
+            connectedDevicesList.removeAll()
+            selectedTargetDeviceId = nil
+            deviceToUnpair = nil
+            UserDefaults.standard.removeObject(forKey: BridgeModel.keyPairedDevice)
+            server.unpairAllDevices()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                guard let self = self else { return }
+                self.rawCode = self.server.pairingCode
+                if self.rawCode.count == 6 {
+                    self.formattedCode = "\(self.rawCode.prefix(3)) \(self.rawCode.suffix(3))"
+                } else {
+                    self.formattedCode = self.rawCode
+                }
+                self.updateQrCode()
+                self.isConnected = false
+                self.connectedDevice = nil
+                self.showPairingSection = false
+                self.onSizeChangeRequested?()
+            }
+        }
+    }
+
+    var targetDeviceDisplayName: String {
+        if let selId = selectedTargetDeviceId,
+           let dev = connectedDevicesList.first(where: { $0.id == selId }) {
+            return dev.name
+        }
+        if let first = connectedDevicesList.first {
+            return first.name
+        }
+        return pairedDevice ?? "Android"
+    }
+
+    func sendFiles(_ urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        let targetDev = connectedDevicesList.first(where: { $0.id == selectedTargetDeviceId })
+            ?? connectedDevicesList.first
+            ?? ConnectedDeviceInfo(id: UUID(), name: connectedDevice ?? pairedDevice ?? "Android", ip: nil, isConnected: isConnected)
+        BridgeFileTransferManager.shared.sendFiles(urls: urls, to: targetDev)
+    }
+
+    func selectFilesToSend() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.title = "Select Files to Send to Android"
+        panel.prompt = "Send"
+        NSApp.activate(ignoringOtherApps: true)
+        if panel.runModal() == .OK {
+            sendFiles(panel.urls)
         }
     }
 

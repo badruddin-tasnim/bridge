@@ -9,6 +9,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.graphics.Color
+import android.graphics.Typeface
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.Uri
@@ -16,6 +17,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
+import android.util.Log
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.View
@@ -27,18 +29,33 @@ import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.documentfile.provider.DocumentFile
 import androidx.appcompat.widget.SwitchCompat
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.content.res.ResourcesCompat
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanIntentResult
 import com.journeyapps.barcodescanner.ScanOptions
 import org.json.JSONObject
 
-class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, ClipboardSyncManager.HistoryListener, UpdateChecker.UpdateListener, BridgeNotificationManager.SettingsListener {
+class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, ClipboardSyncManager.HistoryListener, UpdateChecker.UpdateListener, BridgeNotificationManager.SettingsListener, BridgeFileTransferManager.TransferUiListener {
+
+    companion object {
+        const val TAB_HOME = 0
+        const val TAB_FILES = 1
+        const val TAB_SETTINGS = 2
+    }
 
     // Header views
     private lateinit var dotStatus: View
@@ -68,16 +85,20 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
     // Screen A: Connected + Bottom Nav Tabs
     private lateinit var layoutScreenConnected: LinearLayout
     private lateinit var layoutTabBridge: LinearLayout
+    private lateinit var layoutTabFiles: LinearLayout
     private lateinit var layoutTabSettings: LinearLayout
     private lateinit var layoutBottomNav: FrameLayout
     private lateinit var viewNavActiveIndicator: View
     private lateinit var navTabHome: LinearLayout
     private lateinit var ivNavHome: ImageView
     private lateinit var tvNavHome: TextView
+    private lateinit var navTabFiles: LinearLayout
+    private lateinit var ivNavFiles: ImageView
+    private lateinit var tvNavFiles: TextView
     private lateinit var navTabSettings: LinearLayout
     private lateinit var ivNavSettings: ImageView
     private lateinit var tvNavSettings: TextView
-    private var isSettingsTabSelected = false
+    private var currentTab: Int = TAB_HOME
     private var isUpdatingSettingsUi = false
 
     // Tab 1: Home Overview
@@ -96,7 +117,15 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
     private lateinit var tvLiveBadge: TextView
     private lateinit var btnHeroConnect: Button
 
-    // Tab 2: Settings Page
+    // Tab 2: Files Page
+    private lateinit var tvFilesTargetMac: TextView
+    private lateinit var tvFilesConnectionHint: TextView
+    private lateinit var btnSelectFilesToSend: Button
+    private lateinit var btnClearCompletedTransfers: TextView
+    private lateinit var layoutTransfersEmptyState: LinearLayout
+    private lateinit var layoutTransfersList: LinearLayout
+
+    // Tab 3: Settings Page
     private lateinit var switchNotifMaster: SwitchCompat
     private lateinit var tvNotifMasterPausedNotice: TextView
     private lateinit var layoutNotifSubOptions: LinearLayout
@@ -105,6 +134,11 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
     private lateinit var switchMacNotif: SwitchCompat
     private lateinit var rowPhoneVibrate: LinearLayout
     private lateinit var switchPhoneVibrate: SwitchCompat
+    private lateinit var switchAutoAcceptFiles: SwitchCompat
+    private lateinit var rowSaveLocation: LinearLayout
+    private lateinit var tvSaveLocationPath: TextView
+    private lateinit var btnResetSaveLocation: TextView
+    private lateinit var btnChangeSaveLocation: TextView
     private lateinit var rowSettingNotifAccess: LinearLayout
     private lateinit var tvSettingNotifAccessStatus: TextView
     private lateinit var rowSettingAccessibility: LinearLayout
@@ -150,6 +184,42 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         }
     }
 
+    // Multiple File Picker Launcher
+    private val filePickerLauncher = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
+            BridgeFileTransferManager.sendFiles(this, uris)
+        }
+    }
+
+    // Preferred Save Location Folder Launcher (SAF Tree Picker)
+    private val chooseSaveDirLauncher = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
+        if (uri != null) {
+            try {
+                val takeFlags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                contentResolver.takePersistableUriPermission(uri, takeFlags)
+
+                val doc = DocumentFile.fromTreeUri(this, uri)
+                val displayName = doc?.name ?: run {
+                    val path = uri.path ?: ""
+                    val segs = path.split(":")
+                    if (segs.size > 1) segs[1] else "Custom Folder"
+                }
+                BridgePrefs.setCustomSaveLocation(this, uri.toString(), displayName)
+                updateSettingsUI()
+            } catch (e: Exception) {
+                Log.w("MainActivity", "Failed taking persistable URI permission: ${e.message}")
+            }
+        }
+    }
+
+    private fun safeGetFont(resId: Int, fallback: Typeface = Typeface.DEFAULT): Typeface {
+        return try {
+            ResourcesCompat.getFont(this, resId) ?: fallback
+        } catch (_: Exception) {
+            fallback
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -158,9 +228,81 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         setupListeners()
         checkPermissions()
 
+        // Handle navigation bar and gesture insets dynamically so bottom nav and content never overlap
+        findViewById<View>(R.id.rootLayout)?.let { root ->
+            ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
+                val navInsets = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+                val density = resources.displayMetrics.density
+
+                val navLp = layoutBottomNav.layoutParams as? FrameLayout.LayoutParams
+                if (navLp != null) {
+                    navLp.bottomMargin = (18 * density).toInt() + navInsets.bottom
+                    layoutBottomNav.layoutParams = navLp
+                }
+
+                val extraBottom = (52 + 18 + 48) * density.toInt() + navInsets.bottom
+                findViewById<View>(R.id.layoutScrollContent)?.let { content ->
+                    content.setPadding(
+                        content.paddingLeft,
+                        content.paddingTop,
+                        content.paddingRight,
+                        extraBottom
+                    )
+                }
+                insets
+            }
+        }
+
         ClipboardSyncManager.init(this)
         BridgeNotificationManager.init(this)
         ClipboardSyncForegroundService.start(this)
+
+        handleIncomingIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIncomingIntent(intent)
+    }
+
+    private fun handleIncomingIntent(intent: Intent?) {
+        if (intent == null) return
+        val openTab = intent.getStringExtra("open_tab")
+        if (openTab == "files" || openTab == "transfer") {
+            selectTab(TAB_FILES)
+            return
+        }
+        if (openTab == "settings") {
+            selectTab(TAB_SETTINGS)
+            return
+        }
+        val action = intent.action ?: return
+        if (action == Intent.ACTION_SEND) {
+            @Suppress("DEPRECATION")
+            val streamUri = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+                ?: intent.clipData?.let { if (it.itemCount > 0) it.getItemAt(0).uri else null }
+            if (streamUri != null) {
+                selectTab(TAB_FILES)
+                BridgeFileTransferManager.sendFiles(this, listOf(streamUri))
+                intent.action = Intent.ACTION_MAIN
+            }
+        } else if (action == Intent.ACTION_SEND_MULTIPLE) {
+            @Suppress("DEPRECATION")
+            val streamUris = intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)
+                ?: intent.clipData?.let { clip ->
+                    val list = ArrayList<Uri>()
+                    for (i in 0 until clip.itemCount) {
+                        clip.getItemAt(i).uri?.let { list.add(it) }
+                    }
+                    list
+                }
+            if (!streamUris.isNullOrEmpty()) {
+                selectTab(TAB_FILES)
+                BridgeFileTransferManager.sendFiles(this, streamUris)
+                intent.action = Intent.ACTION_MAIN
+            }
+        }
     }
 
     override fun onResume() {
@@ -169,11 +311,13 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         ClipboardSyncManager.addHistoryListener(this)
         ClipboardSyncManager.networkClient?.addListener(this)
         BridgeNotificationManager.addSettingsListener(this)
+        BridgeFileTransferManager.addListener(this)
         UpdateChecker.addListener(this, this)
         UpdateChecker.checkForUpdates(this, forceNetwork = false)
 
         updateAccessibilityNotice()
         updateSetupProgress()
+        renderTransfersList()
         updateUI()
 
         if (!BridgePrefs.isPaired(this)) {
@@ -186,6 +330,7 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         ClipboardSyncManager.networkClient?.removeListener(this)
         ClipboardSyncManager.removeHistoryListener(this)
         BridgeNotificationManager.removeSettingsListener(this)
+        BridgeFileTransferManager.removeListener(this)
         UpdateChecker.removeListener(this)
     }
 
@@ -216,12 +361,16 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         // Screen A & Bottom Nav Tabs
         layoutScreenConnected = findViewById(R.id.layoutScreenConnected)
         layoutTabBridge = findViewById(R.id.layoutTabBridge)
+        layoutTabFiles = findViewById(R.id.layoutTabFiles)
         layoutTabSettings = findViewById(R.id.layoutTabSettings)
         layoutBottomNav = findViewById(R.id.layoutBottomNav)
         viewNavActiveIndicator = findViewById(R.id.viewNavActiveIndicator)
         navTabHome = findViewById(R.id.navTabHome)
         ivNavHome = findViewById(R.id.ivNavHome)
         tvNavHome = findViewById(R.id.tvNavHome)
+        navTabFiles = findViewById(R.id.navTabFiles)
+        ivNavFiles = findViewById(R.id.ivNavFiles)
+        tvNavFiles = findViewById(R.id.tvNavFiles)
         navTabSettings = findViewById(R.id.navTabSettings)
         ivNavSettings = findViewById(R.id.ivNavSettings)
         tvNavSettings = findViewById(R.id.tvNavSettings)
@@ -242,7 +391,15 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         tvLiveBadge = findViewById(R.id.tvLiveBadge)
         btnHeroConnect = findViewById(R.id.btnHeroConnect)
 
-        // Tab 2: Settings
+        // Tab 2: Files
+        tvFilesTargetMac = findViewById(R.id.tvFilesTargetMac)
+        tvFilesConnectionHint = findViewById(R.id.tvFilesConnectionHint)
+        btnSelectFilesToSend = findViewById(R.id.btnSelectFilesToSend)
+        btnClearCompletedTransfers = findViewById(R.id.btnClearCompletedTransfers)
+        layoutTransfersEmptyState = findViewById(R.id.layoutTransfersEmptyState)
+        layoutTransfersList = findViewById(R.id.layoutTransfersList)
+
+        // Tab 3: Settings
         switchNotifMaster = findViewById(R.id.switchNotifMaster)
         tvNotifMasterPausedNotice = findViewById(R.id.tvNotifMasterPausedNotice)
         layoutNotifSubOptions = findViewById(R.id.layoutNotifSubOptions)
@@ -251,6 +408,11 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         switchMacNotif = findViewById(R.id.switchMacNotif)
         rowPhoneVibrate = findViewById(R.id.rowPhoneVibrate)
         switchPhoneVibrate = findViewById(R.id.switchPhoneVibrate)
+        rowSaveLocation = findViewById(R.id.rowSaveLocation)
+        tvSaveLocationPath = findViewById(R.id.tvSaveLocationPath)
+        btnResetSaveLocation = findViewById(R.id.btnResetSaveLocation)
+        btnChangeSaveLocation = findViewById(R.id.btnChangeSaveLocation)
+        switchAutoAcceptFiles = findViewById(R.id.switchAutoAcceptFiles)
         rowSettingNotifAccess = findViewById(R.id.rowSettingNotifAccess)
         tvSettingNotifAccessStatus = findViewById(R.id.tvSettingNotifAccessStatus)
         rowSettingAccessibility = findViewById(R.id.rowSettingAccessibility)
@@ -263,6 +425,7 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         styleBridgeSwitch(switchAndroidNotif)
         styleBridgeSwitch(switchMacNotif)
         styleBridgeSwitch(switchPhoneVibrate)
+        styleBridgeSwitch(switchAutoAcceptFiles)
 
         // Screen B
         layoutScreenPairing = findViewById(R.id.layoutScreenPairing)
@@ -320,37 +483,36 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
 
     private var navPillAnimator: AnimatorSet? = null
 
-    private fun selectTab(settingsTab: Boolean) {
-        if (isSettingsTabSelected == settingsTab) return
-        isSettingsTabSelected = settingsTab
+    private fun selectTab(tabIndex: Int) {
+        if (currentTab == tabIndex) return
+        currentTab = tabIndex
 
-        // 1. Update tab icon and label styles
-        if (settingsTab) {
-            ivNavHome.setImageResource(R.drawable.ic_nav_home_outline)
-            ivNavHome.imageTintList = ColorStateList.valueOf(colorSoft)
-            tvNavHome.setTextColor(colorSoft)
-            tvNavHome.typeface = ivNavSettings.context.resources.getFont(R.font.plus_jakarta_sans_medium)
+        val fontSemibold = safeGetFont(R.font.plus_jakarta_sans_semibold, Typeface.DEFAULT_BOLD)
+        val fontMedium = safeGetFont(R.font.plus_jakarta_sans_medium, Typeface.DEFAULT)
 
-            ivNavSettings.setImageResource(R.drawable.ic_nav_settings_filled)
-            ivNavSettings.imageTintList = ColorStateList.valueOf(colorLime)
-            tvNavSettings.setTextColor(colorLime)
-            tvNavSettings.typeface = ivNavSettings.context.resources.getFont(R.font.plus_jakarta_sans_semibold)
-        } else {
-            ivNavHome.setImageResource(R.drawable.ic_nav_home_filled)
-            ivNavHome.imageTintList = ColorStateList.valueOf(colorLime)
-            tvNavHome.setTextColor(colorLime)
-            tvNavHome.typeface = ivNavHome.context.resources.getFont(R.font.plus_jakarta_sans_semibold)
+        // 1. Update tab icon and label styles for all 3 tabs
+        val homeActive = tabIndex == TAB_HOME
+        ivNavHome.setImageResource(if (homeActive) R.drawable.ic_nav_home_filled else R.drawable.ic_nav_home_outline)
+        ivNavHome.imageTintList = ColorStateList.valueOf(if (homeActive) colorLime else colorSoft)
+        tvNavHome.setTextColor(if (homeActive) colorLime else colorSoft)
+        tvNavHome.typeface = if (homeActive) fontSemibold else fontMedium
 
-            ivNavSettings.setImageResource(R.drawable.ic_nav_settings_outline)
-            ivNavSettings.imageTintList = ColorStateList.valueOf(colorSoft)
-            tvNavSettings.setTextColor(colorSoft)
-            tvNavSettings.typeface = ivNavSettings.context.resources.getFont(R.font.plus_jakarta_sans_medium)
-        }
+        val filesActive = tabIndex == TAB_FILES
+        ivNavFiles.setImageResource(if (filesActive) R.drawable.ic_nav_transfer_filled else R.drawable.ic_nav_transfer_outline)
+        ivNavFiles.imageTintList = ColorStateList.valueOf(if (filesActive) colorLime else colorSoft)
+        tvNavFiles.setTextColor(if (filesActive) colorLime else colorSoft)
+        tvNavFiles.typeface = if (filesActive) fontSemibold else fontMedium
 
-        // 2. Animate the sliding indicator pill
+        val settingsActive = tabIndex == TAB_SETTINGS
+        ivNavSettings.setImageResource(if (settingsActive) R.drawable.ic_nav_settings_filled else R.drawable.ic_nav_settings_outline)
+        ivNavSettings.imageTintList = ColorStateList.valueOf(if (settingsActive) colorLime else colorSoft)
+        tvNavSettings.setTextColor(if (settingsActive) colorLime else colorSoft)
+        tvNavSettings.typeface = if (settingsActive) fontSemibold else fontMedium
+
+        // 2. Animate the sliding indicator pill across 3 tabs
         navPillAnimator?.cancel()
-        val pillWidth = viewNavActiveIndicator.width.toFloat().coerceAtLeast(102f * resources.displayMetrics.density)
-        val targetX = if (settingsTab) pillWidth else 0f
+        val pillWidth = viewNavActiveIndicator.width.toFloat().coerceAtLeast(99f * resources.displayMetrics.density)
+        val targetX = pillWidth * tabIndex
 
         val slideAnim = ObjectAnimator.ofFloat(
             viewNavActiveIndicator,
@@ -383,7 +545,11 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         }
 
         // 3. Subtle spring pop on the newly selected tab icon
-        val activeIcon = if (settingsTab) ivNavSettings else ivNavHome
+        val activeIcon = when (tabIndex) {
+            TAB_FILES -> ivNavFiles
+            TAB_SETTINGS -> ivNavSettings
+            else -> ivNavHome
+        }
         activeIcon.scaleX = 0.82f
         activeIcon.scaleY = 0.82f
         activeIcon.animate()
@@ -396,15 +562,15 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         updateAccessibilityNotice()
         updateSetupProgress()
         updateSettingsUI()
+        renderTransfersList()
         updateUI()
 
         // 4. Smooth cross-fade & slight slide on the newly visible tab page
-        val targetPage = if (settingsTab) {
-            layoutTabSettings
-        } else if (BridgePrefs.isPaired(this)) {
-            layoutScreenConnected
-        } else {
-            layoutScreenPairing
+        val targetPage = when {
+            tabIndex == TAB_SETTINGS -> layoutTabSettings
+            tabIndex == TAB_FILES -> layoutTabFiles
+            BridgePrefs.isPaired(this) -> layoutScreenConnected
+            else -> layoutScreenPairing
         }
         targetPage.alpha = 0.35f
         targetPage.translationY = 8f * resources.displayMetrics.density
@@ -418,15 +584,27 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
 
     private fun setupListeners() {
         navTabHome.setOnClickListener {
-            if (isSettingsTabSelected) {
-                selectTab(false)
-            }
+            selectTab(TAB_HOME)
+        }
+
+        navTabFiles.setOnClickListener {
+            selectTab(TAB_FILES)
         }
 
         navTabSettings.setOnClickListener {
-            if (!isSettingsTabSelected) {
-                selectTab(true)
+            selectTab(TAB_SETTINGS)
+        }
+
+        btnSelectFilesToSend.setOnClickListener {
+            if (ClipboardSyncManager.networkClient?.isConnected() != true) {
+                Toast.makeText(this, "Connect to your Mac first to send files.", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
             }
+            filePickerLauncher.launch(arrayOf("*/*"))
+        }
+
+        btnClearCompletedTransfers.setOnClickListener {
+            BridgeFileTransferManager.clearCompletedTransfers()
         }
 
         btnUpdateDownload.setOnClickListener {
@@ -509,6 +687,26 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         switchPhoneVibrate.setOnCheckedChangeListener { _, isChecked ->
             if (isUpdatingSettingsUi) return@setOnCheckedChangeListener
             BridgePrefs.setPhoneVibrateEnabled(this, isChecked)
+            updateSettingsUI()
+        }
+
+        btnChangeSaveLocation.setOnClickListener {
+            chooseSaveDirLauncher.launch(null)
+        }
+
+        rowSaveLocation.setOnClickListener {
+            chooseSaveDirLauncher.launch(null)
+        }
+
+        btnResetSaveLocation.setOnClickListener {
+            BridgePrefs.setCustomSaveLocation(this, null, null)
+            updateSettingsUI()
+        }
+
+        switchAutoAcceptFiles.setOnCheckedChangeListener { _, isChecked ->
+            if (isUpdatingSettingsUi) return@setOnCheckedChangeListener
+            BridgePrefs.setAutoAcceptFilesEnabled(this, isChecked, updateTimestamp = true)
+            BridgeNotificationManager.sendSettingsToMac(this)
             updateSettingsUI()
         }
 
@@ -624,7 +822,7 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
                 wasConnectedBefore = false
                 layoutNoteBanner.visibility = View.GONE
                 setConnectingState(false)
-                selectTab(false)
+                selectTab(TAB_HOME)
                 updateUI()
                 Toast.makeText(this, "Unpaired successfully", Toast.LENGTH_SHORT).show()
             }
@@ -748,7 +946,7 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
     }
 
     private fun updateSetupProgress() {
-        if (isSettingsTabSelected || !BridgePrefs.isPaired(this)) {
+        if (currentTab != TAB_HOME || !BridgePrefs.isPaired(this)) {
             layoutSetupProgress.visibility = View.GONE
             return
         }
@@ -777,13 +975,13 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
     }
 
     private fun updateAccessibilityNotice() {
-        if (isSettingsTabSelected || isAccessibilityServiceEnabled()) {
+        if (currentTab != TAB_HOME || isAccessibilityServiceEnabled()) {
             layoutServiceNotice.visibility = View.GONE
         } else {
             layoutServiceNotice.visibility = View.VISIBLE
         }
 
-        if (isSettingsTabSelected || isNotificationServiceEnabled() || !BridgePrefs.isNotificationSyncEnabled(this)) {
+        if (currentTab != TAB_HOME || isNotificationServiceEnabled() || !BridgePrefs.isNotificationSyncEnabled(this)) {
             layoutNotificationNotice.visibility = View.GONE
         } else {
             layoutNotificationNotice.visibility = View.VISIBLE
@@ -797,11 +995,13 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
             val androidEnabled = BridgePrefs.isAndroidNotifEnabled(this)
             val macEnabled = BridgePrefs.isMacNotifEnabled(this)
             val vibrateEnabled = BridgePrefs.isPhoneVibrateEnabled(this)
+            val autoAcceptFiles = BridgePrefs.isAutoAcceptFilesEnabled(this)
 
             switchNotifMaster.isChecked = masterEnabled
             switchAndroidNotif.isChecked = androidEnabled
             switchMacNotif.isChecked = macEnabled
             switchPhoneVibrate.isChecked = vibrateEnabled
+            switchAutoAcceptFiles.isChecked = autoAcceptFiles
 
             switchAndroidNotif.isEnabled = masterEnabled
             switchMacNotif.isEnabled = masterEnabled
@@ -814,6 +1014,16 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
             val macEffective = masterEnabled && macEnabled
             switchPhoneVibrate.isEnabled = macEffective
             rowPhoneVibrate.alpha = if (macEffective) 1.0f else 0.42f
+
+            val customSaveUri = BridgePrefs.getCustomSaveTreeUri(this)
+            val customSaveName = BridgePrefs.getCustomSaveDisplayName(this)
+            if (!customSaveUri.isNullOrBlank() && !customSaveName.isNullOrBlank()) {
+                tvSaveLocationPath.text = customSaveName
+                btnResetSaveLocation.visibility = View.VISIBLE
+            } else {
+                tvSaveLocationPath.text = "Downloads (/storage/emulated/0/Download)"
+                btnResetSaveLocation.visibility = View.GONE
+            }
 
             if (isNotificationServiceEnabled()) {
                 tvSettingNotifAccessStatus.text = "Active"
@@ -846,6 +1056,338 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         updateSetupProgress()
         updateSettingsUI()
         updateUI()
+    }
+
+    override fun onTransfersChanged() {
+        renderTransfersList()
+    }
+
+    private fun renderTransfersList() {
+        val items = BridgeFileTransferManager.transfers.toList()
+        val hasCompleted = items.any { it.status == TransferStatus.COMPLETED }
+        btnClearCompletedTransfers.visibility = if (hasCompleted) View.VISIBLE else View.GONE
+
+        if (items.isEmpty()) {
+            layoutTransfersEmptyState.visibility = View.VISIBLE
+            layoutTransfersList.visibility = View.GONE
+            layoutTransfersList.removeAllViews()
+            return
+        }
+
+        layoutTransfersEmptyState.visibility = View.GONE
+        layoutTransfersList.visibility = View.VISIBLE
+        layoutTransfersList.removeAllViews()
+
+        val density = resources.displayMetrics.density
+        val fontSemibold = safeGetFont(R.font.plus_jakarta_sans_semibold, Typeface.DEFAULT_BOLD)
+        val fontMedium = safeGetFont(R.font.plus_jakarta_sans_medium, Typeface.DEFAULT)
+        val fontMono = safeGetFont(R.font.dm_mono, Typeface.MONOSPACE)
+
+        for (item in items) {
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setBackgroundResource(R.drawable.bg_card_panel)
+                val pad = (14 * density).toInt()
+                setPadding(pad, pad, pad, pad)
+                val lp = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+                lp.bottomMargin = (10 * density).toInt()
+                layoutParams = lp
+
+                // Tap or long-press reveals complete filename
+                setOnLongClickListener {
+                    Toast.makeText(this@MainActivity, "${item.fileName}\n${item.formattedTotalSize}", Toast.LENGTH_LONG).show()
+                    true
+                }
+                if (item.status == TransferStatus.COMPLETED) {
+                    setOnClickListener {
+                        BridgeFileTransferManager.openTransferredFile(this@MainActivity, item)
+                    }
+                }
+            }
+
+            // Top row: File-type badge + file details + action buttons
+            val topRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+            }
+
+            // File Type Icon Tile (matching macOS menu bar app)
+            val iconContainer = FrameLayout(this).apply {
+                setBackgroundResource(R.drawable.bg_file_icon_tile)
+                val tilePad = (7 * density).toInt()
+                setPadding(tilePad, tilePad, tilePad, tilePad)
+                val lp = LinearLayout.LayoutParams((32 * density).toInt(), (32 * density).toInt())
+                lp.marginEnd = (10 * density).toInt()
+                layoutParams = lp
+            }
+
+            val iconView = ImageView(this).apply {
+                setImageResource(item.iconResId)
+                imageTintList = ColorStateList.valueOf(
+                    when (item.status) {
+                        TransferStatus.COMPLETED -> colorLime
+                        TransferStatus.FAILED -> colorCoral
+                        TransferStatus.CANCELLED, TransferStatus.PAUSED -> colorMuted
+                        else -> colorLime
+                    }
+                )
+                layoutParams = FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT,
+                    FrameLayout.LayoutParams.MATCH_PARENT
+                )
+            }
+            iconContainer.addView(iconView)
+            topRow.addView(iconContainer)
+
+            val textCol = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+                lp.marginEnd = (10 * density).toInt()
+                layoutParams = lp
+            }
+
+            // Angled / diagonal arrows matching Mac menu bar app (↗ and ↙)
+            val dirArrow = if (item.direction == TransferDirection.OUTGOING) "↗ " else "↙ "
+            val titleTv = TextView(this).apply {
+                text = dirArrow + item.fileName
+                setTextColor(colorText)
+                typeface = fontSemibold
+                textSize = 13.5f
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
+                setOnClickListener {
+                    Toast.makeText(this@MainActivity, item.fileName, Toast.LENGTH_SHORT).show()
+                }
+            }
+
+            val subtitleText = when (item.status) {
+                TransferStatus.HASHING -> "${item.formattedTotalSize} · Preparing…"
+                TransferStatus.WAITING_CONFIRMATION -> {
+                    if (item.direction == TransferDirection.INCOMING) {
+                        "${item.formattedTotalSize} · From ${item.deviceName}"
+                    } else {
+                        "${item.formattedTotalSize} · Connecting to ${item.deviceName}…"
+                    }
+                }
+                TransferStatus.TRANSFERRING -> {
+                    val spd = if (item.formattedSpeed.isNotEmpty()) " · ${item.formattedSpeed}" else ""
+                    "${item.percentageInt}% · ${item.formattedProgressSize}$spd"
+                }
+                TransferStatus.PAUSED -> "Paused (${item.percentageInt}%) · ${item.formattedProgressSize}"
+                TransferStatus.VERIFYING -> "Verifying SHA-256 checksum…"
+                TransferStatus.COMPLETED -> {
+                    val actionText = if (item.direction == TransferDirection.OUTGOING) "Sent to ${item.deviceName}" else "Received from ${item.deviceName}"
+                    val timeText = if (item.completedAt > 0) " · " + SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(item.completedAt)) else ""
+                    "${item.formattedTotalSize} · $actionText$timeText"
+                }
+                TransferStatus.CANCELLED -> "Cancelled"
+                TransferStatus.FAILED -> item.errorMessage ?: "Connection lost during transfer."
+            }
+
+            val subTv = TextView(this).apply {
+                text = subtitleText
+                setTextColor(
+                    when (item.status) {
+                        TransferStatus.COMPLETED -> colorLime
+                        TransferStatus.FAILED -> colorCoral
+                        TransferStatus.CANCELLED -> colorMuted
+                        else -> colorMuted
+                    }
+                )
+                typeface = fontMono
+                textSize = 11f
+                val lp = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT
+                )
+                lp.topMargin = (2 * density).toInt()
+                layoutParams = lp
+            }
+
+            textCol.addView(titleTv)
+            textCol.addView(subTv)
+
+            // Optional ETA line for active transfers (Guideline 1.B)
+            if (item.status == TransferStatus.TRANSFERRING && item.remainingTimeText.isNotEmpty()) {
+                val etaTv = TextView(this).apply {
+                    text = item.remainingTimeText
+                    setTextColor(colorSoft)
+                    typeface = fontMedium
+                    textSize = 11f
+                    val lp = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                    )
+                    lp.topMargin = (2 * density).toInt()
+                    layoutParams = lp
+                }
+                textCol.addView(etaTv)
+            }
+
+            topRow.addView(textCol)
+
+            // Action Buttons Column
+            val actionsRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = android.view.Gravity.CENTER_VERTICAL
+            }
+
+            fun makeActionButton(label: String, textColor: Int, bgRes: Int, onClick: () -> Unit): TextView {
+                return TextView(this).apply {
+                    text = label
+                    setTextColor(textColor)
+                    typeface = fontMedium
+                    textSize = 12f
+                    setBackgroundResource(bgRes)
+                    val hPad = (11 * density).toInt()
+                    val vPad = (5 * density).toInt()
+                    setPadding(hPad, vPad, hPad, vPad)
+                    val lp = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                    )
+                    lp.marginStart = (6 * density).toInt()
+                    layoutParams = lp
+                    setOnClickListener { onClick() }
+                }
+            }
+
+            when (item.status) {
+                TransferStatus.WAITING_CONFIRMATION -> {
+                    if (item.direction == TransferDirection.INCOMING) {
+                        actionsRow.addView(
+                            makeActionButton("Accept", colorInk, R.drawable.bg_button_lime) {
+                                BridgeFileTransferManager.acceptIncomingFile(this, item.id)
+                            }
+                        )
+                    }
+                    actionsRow.addView(
+                        makeActionButton("Cancel", colorMuted, R.drawable.bg_button_outline) {
+                            BridgeFileTransferManager.cancelTransfer(item.id)
+                        }
+                    )
+                }
+                TransferStatus.TRANSFERRING -> {
+                    actionsRow.addView(
+                        makeActionButton("Pause", colorSoft, R.drawable.bg_button_outline) {
+                            BridgeFileTransferManager.pauseTransfer(item.id)
+                        }
+                    )
+                    actionsRow.addView(
+                        makeActionButton("Cancel", colorMuted, R.drawable.bg_button_outline) {
+                            BridgeFileTransferManager.cancelTransfer(item.id)
+                        }
+                    )
+                }
+                TransferStatus.PAUSED -> {
+                    actionsRow.addView(
+                        makeActionButton("Resume", colorLime, R.drawable.bg_button_outline) {
+                            BridgeFileTransferManager.resumeTransfer(this, item.id)
+                        }
+                    )
+                    actionsRow.addView(
+                        makeActionButton("Cancel", colorMuted, R.drawable.bg_button_outline) {
+                            BridgeFileTransferManager.cancelTransfer(item.id)
+                        }
+                    )
+                }
+                TransferStatus.HASHING, TransferStatus.VERIFYING -> {
+                    actionsRow.addView(
+                        makeActionButton("Cancel", colorMuted, R.drawable.bg_button_outline) {
+                            BridgeFileTransferManager.cancelTransfer(item.id)
+                        }
+                    )
+                }
+                TransferStatus.COMPLETED -> {
+                    if (item.direction == TransferDirection.INCOMING && (item.destinationFile != null || item.destinationUri != null)) {
+                        actionsRow.addView(
+                            makeActionButton("Open", colorLime, R.drawable.bg_button_outline) {
+                                BridgeFileTransferManager.openTransferredFile(this, item)
+                            }
+                        )
+                    }
+                }
+                TransferStatus.FAILED -> {
+                    actionsRow.addView(
+                        makeActionButton("Retry", colorLime, R.drawable.bg_button_outline) {
+                            BridgeFileTransferManager.retryTransfer(this, item.id)
+                        }
+                    )
+                    actionsRow.addView(
+                        makeActionButton("Dismiss", colorMuted, R.drawable.bg_button_outline) {
+                            BridgeFileTransferManager.dismissTransfer(item.id)
+                        }
+                    )
+                }
+                TransferStatus.CANCELLED -> {
+                    actionsRow.addView(
+                        makeActionButton("Dismiss", colorMuted, R.drawable.bg_button_outline) {
+                            BridgeFileTransferManager.dismissTransfer(item.id)
+                        }
+                    )
+                }
+            }
+
+            topRow.addView(actionsRow)
+            card.addView(topRow)
+
+            // Progress bar for active/paused transfers
+            if (item.status == TransferStatus.TRANSFERRING || item.status == TransferStatus.PAUSED || item.status == TransferStatus.VERIFYING) {
+                val pb = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
+                    max = 1000
+                    progress = (item.progress * 1000f).toInt()
+                    progressTintList = ColorStateList.valueOf(
+                        if (item.status == TransferStatus.PAUSED) colorMuted else colorLime
+                    )
+                    progressBackgroundTintList = ColorStateList.valueOf(Color.parseColor("#2B2F36"))
+                    val lp = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        (5 * density).toInt()
+                    )
+                    lp.topMargin = (10 * density).toInt()
+                    layoutParams = lp
+                }
+                card.addView(pb)
+            }
+
+            if (item.isExecutable) {
+                val warnRow = LinearLayout(this).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = android.view.Gravity.CENTER_VERTICAL
+                    val lp = LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT
+                    )
+                    lp.topMargin = (8 * density).toInt()
+                    layoutParams = lp
+                    val padH = (8 * density).toInt()
+                    val padV = (4 * density).toInt()
+                    setPadding(padH, padV, padH, padV)
+                    background = android.graphics.drawable.GradientDrawable().apply {
+                        cornerRadius = 6 * density
+                        setColor(Color.argb(30, 245, 166, 35))
+                    }
+                }
+
+                val warnTv = TextView(this).apply {
+                    text = "⚠️ Executable file · Verify sender before opening"
+                    setTextColor(Color.parseColor("#F5A623"))
+                    typeface = fontMedium
+                    textSize = 11.5f
+                }
+                warnRow.addView(warnTv)
+                card.addView(warnRow)
+            }
+
+            layoutTransfersList.addView(card)
+        }
     }
 
     private fun isNotificationServiceEnabled(): Boolean {
@@ -917,10 +1459,16 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         val localNetAvailable = isLocalNetworkAvailable(this)
         val isMultipleFailures = consecutiveFailures >= 2 || userConnectAttempts >= 2
 
+        // Update Files tab header & CTA state
+        tvFilesTargetMac.text = if (connected) macName else "$macName · Offline"
+        tvFilesTargetMac.setTextColor(if (connected) colorLime else colorMuted)
+        btnSelectFilesToSend.alpha = if (connected) 1.0f else 0.45f
+
         if (paired) {
             layoutScreenPairing.visibility = View.GONE
-            layoutScreenConnected.visibility = if (isSettingsTabSelected) View.GONE else View.VISIBLE
-            layoutTabSettings.visibility = if (isSettingsTabSelected) View.VISIBLE else View.GONE
+            layoutScreenConnected.visibility = if (currentTab == TAB_HOME) View.VISIBLE else View.GONE
+            layoutTabFiles.visibility = if (currentTab == TAB_FILES) View.VISIBLE else View.GONE
+            layoutTabSettings.visibility = if (currentTab == TAB_SETTINGS) View.VISIBLE else View.GONE
             tvDeviceMacName.text = macName
 
             updateSettingsUI()
@@ -1017,8 +1565,9 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         } else {
             // Not Paired (Screen B)
             layoutScreenConnected.visibility = View.GONE
-            layoutScreenPairing.visibility = if (isSettingsTabSelected) View.GONE else View.VISIBLE
-            layoutTabSettings.visibility = if (isSettingsTabSelected) View.VISIBLE else View.GONE
+            layoutScreenPairing.visibility = if (currentTab == TAB_HOME) View.VISIBLE else View.GONE
+            layoutTabFiles.visibility = if (currentTab == TAB_FILES) View.VISIBLE else View.GONE
+            layoutTabSettings.visibility = if (currentTab == TAB_SETTINGS) View.VISIBLE else View.GONE
             layoutSetupProgress.visibility = View.GONE
 
             if (isConnectingState) {
