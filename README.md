@@ -18,7 +18,6 @@ A lightweight, native open-source bridge linking your **Android phone** and your
 
 <p align="center">
   <a href="#-whats-new-in-v130">What's New in v1.3.0</a> •
-  <a href="#-file--folder-sharing-benefits">File Sharing Benefits</a> •
   <a href="#-key-features">Key Features</a> •
   <a href="#-getting-started">Getting Started</a> •
   <a href="#-pairing--multi-device-connection">Pairing & Multi-Device</a> •
@@ -48,60 +47,20 @@ A lightweight, native open-source bridge linking your **Android phone** and your
 
 ## ⚡ What's New in v1.3.0
 
-Bridge **v1.3.0** introduces high-speed local file & folder sharing, conversation-grouped notification threads, and refined desktop integration:
+Bridge **v1.3.0** introduces high-speed local file & folder sharing and conversation-grouped notification threads:
 
 1. **High-Speed Encrypted Local File & Folder Sharing:**
-   - Transfer files and entire directory structures directly between Mac and Android over local Wi-Fi or Hotspot with zero cloud intermediate and no file size limits.
-   - Hardware-accelerated AES-GCM streaming encryption with SHA-256 integrity verification.
-   - macOS drag-and-drop onto the menu bar icon or popover, native Finder right-click context menu extension (*Share with Bridge*), and Android system Share sheet integration (`ACTION_SEND` / `ACTION_SEND_MULTIPLE`).
-   - Custom save directory selection with scoped storage permissions (SAF on Android, Security-Scoped Bookmarks on macOS).
-   - Clean folder packaging that automatically excludes OS metadata junk (`.DS_Store`, `__MACOSX`, `Thumbs.db`, `.Trashes`).
+   - **🚀 Direct Gigabit LAN Streaming:** Transfer files and full folder directories directly between Mac and Android over your local Wi-Fi or Personal Hotspot with zero cloud intermediate and zero internet data usage.
+   - **📦 No File Size Limits:** Send 4K video clips, raw photo shoots, and large archive collections without artificial size caps.
+   - **🛡️ Hardware-Accelerated AES-GCM:** Every frame is encrypted end-to-end (128-bit authentication tag, 12-byte random nonce per frame) with SHA-256 integrity verification.
+   - **📂 Clean Recursive Folder Sharing:** Full folder structures are preserved and packaged with fast deflate compression, automatically filtering out OS metadata junk (`.DS_Store`, `__MACOSX`, `Thumbs.db`, `.Trashes`).
+   - **📁 Custom Save Directories:** Choose custom save locations on Android (via SAF) and macOS (via Security-Scoped Bookmarks).
+   - **🖱️ Native OS Integration:** Drag & drop onto the Mac menu bar icon, right-click any file in Finder (*Quick Actions → Share with Bridge*), or tap *Share → Send to Mac (Bridge)* in Android apps.
 
 2. **Conversation-Grouped Notification Threads:**
-   - Stacked multi-line conversation cards matching Android's expanded notification panel.
-   - Pill count badge displaying unread count per sender/group chat.
-   - Unified two-way sync: swipe to dismiss on Android clears the conversation on Mac, and inline replies update in real-time.
-
----
-
-## 📁 File & Folder Sharing Benefits
-
-Bridge v1.3.0 brings an AirDrop-like local sharing experience between Android and Mac without proprietary lock-in:
-
-* **🚀 Gigabit-Class LAN Speeds:** Direct peer-to-peer TCP streaming over local Wi-Fi or Personal Hotspot. Bypasses cloud upload/download queues for maximum throughput with zero internet data consumption.
-* **📦 Unlimited File Sizes:** Send large 4K video clips, RAW photo libraries, massive ZIP archives, disk images, and backups without arbitrary 2 GB limits.
-* **📂 Full Folder Tree Preservation:** Send entire directories and nested hierarchies. Folders are packaged on the fly with `BEST_SPEED` deflate compression and streaming verification.
-* **🧹 Zero OS Junk:** Automatically filters out hidden system files (`.DS_Store`, `__MACOSX`, `Thumbs.db`, `.Trashes`, `.Spotlight-V100`, `._*`) so transferred folders stay completely clean.
-* **🛡️ End-to-End Local Encryption:** Every chunk is encrypted with hardware-accelerated **AES-GCM** (128-bit authentication tag, unique 12-byte nonce per frame) and verified with SHA-256 digests.
-* **📁 Custom Save Directories:** Choose your preferred target folders (e.g. external SD card or specific work directories) on Android via SAF and on macOS via persistent Security-Scoped Bookmarks.
-* **🖱️ Zero-Friction Desktop Integration:** Drag files onto the macOS menu bar icon, right-click any file in Finder and select **Quick Actions → Share with Bridge**, or tap **Share → Send to Mac (Bridge)** in any Android app.
-
----
-
-## ⚡ What's New in v1.2
-
-Bridge **v1.2** introduces interactive bidirectional notifications, multi-device connectivity, end-to-end security hardening, and a ground-up UI refresh:
-
-1. **Interactive Notification Mirroring & Quick Reply:**
-   - Real-time notification mirroring from Android to macOS.
-   - Reply directly to chat messages (WhatsApp, Telegram, Signal, SMS, Slack) from the Mac menu bar popover or native macOS notification banners.
-   - Tap action buttons (e.g. *Mark as Read*, *Archive*, *Call Back*) directly from your Mac.
-   - Two-way dismissal sync: clearing a notification on your phone immediately dismisses it from your Mac, and dismissing on Mac dismisses it on Android.
-
-2. **Multiple Device Connectivity:**
-   - Link multiple Android phones to a single Mac simultaneously.
-   - Mac clipboard broadcasts to all connected phones at once.
-   - Notifications from all phones mirror concurrently with smart per-device routing for replies and actions.
-   - Pair an additional phone anytime without interrupting the active connection.
-
-3. **Complete UI/UX Overhaul:**
-   - **Android:** Redesigned dark interface featuring an elevated floating pill navigation bar, smooth sliding pill indicators, tactile haptic feedback, and modern permission cards.
-   - **macOS:** Adaptive, flicker-free dark popover with smooth QR code drawer animation, native SF Symbols & Plus Jakarta Sans typography, and zero window jumping.
-
-4. **Hardened Local Security Suite:**
-   - Zero-knowledge mutual authentication: pairing codes are never transmitted in plaintext over the wire.
-   - Anti-replay nonce tracking and exponential per-IP brute-force lockout.
-   - Strict unauthenticated rate-limiting, connection timeouts, and memory buffer bounds.
+   - Multi-line conversation cards displaying the full chat thread in chronological order, matching Android's expanded notification panel.
+   - Message count pill badges indicating unread counts per contact or group chat.
+   - Seamless two-way interaction: dismissing or replying on either device synchronizes instantly in real-time.
 
 ---
 
@@ -278,24 +237,6 @@ Bridge is built from the ground up to be **100% private, local, and auditable**.
 | `CAMERA` | Active only when scanning the pairing QR code. Video frames are decoded in memory and discarded immediately. | [`MainActivity.kt`](android-app/app/src/main/java/com/link/clipboardsync/MainActivity.kt) |
 | `POST_NOTIFICATIONS` | Displays the persistent foreground notification required by Android to keep the background sync engine alive. | [`ClipboardSyncForegroundService.kt`](android-app/app/src/main/java/com/link/clipboardsync/ClipboardSyncForegroundService.kt) |
 | `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` | Prevents Android Doze mode from killing the socket connection when the device is locked. | [`MainActivity.kt`](android-app/app/src/main/java/com/link/clipboardsync/MainActivity.kt) |
-
----
-
-## 🛠️ Bug Fixes & Refinements in v1.3.0
-
-* **Folder Packaging Speed & Memory:** Excluded OS metadata files (`.DS_Store`, `__MACOSX`, `Thumbs.db`, `.Trashes`) and optimized Android packaging with `BEST_SPEED` compression and 128 KB streaming buffers.
-* **Multi-Message Notification Consolidation:** Replaced fragmented single-message cards with a single consolidated conversation card showing chronological multi-line thread history and count badges.
-* **Transfer Interruption Resilience:** Hardened state synchronization between Android and macOS during momentary network interruptions with graceful retry/resume logic.
-
----
-
-## 🛠️ Bug Fixes in v1.2
-
-* **Popover Shift & Layout Glitch:** Fixed an issue where clicking "Add another phone" shifted the macOS popover position and clipped UI elements.
-* **Fixed Height Clipping:** Eliminated hardcoded frame constraints that cut off text and buttons in macOS menu bar views.
-* **Notification Key Newline Parsing:** Fixed an issue where apps encoding keys in base64 with trailing newlines (e.g. WhatsApp) failed to match on dismissal.
-* **Real-Time Dismissal Reconciliation:** Fixed stale notifications remaining on Mac after being cleared on the phone while the connection was briefly reconnecting.
-* **Clipboard Image Provider Hardening:** Implemented cryptographically secure tokens and strict path validation in `ClipboardImageProvider`.
 
 ---
 
