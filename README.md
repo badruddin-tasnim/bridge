@@ -9,7 +9,7 @@
 A lightweight, native open-source bridge linking your **Android phone** and your **Mac** over your local Wi-Fi network—with zero cloud accounts, zero telemetry, and zero latency.
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-v1.2-C8F135?style=for-the-badge&labelColor=0E0F12" alt="Version 1.2" />
+  <img src="https://img.shields.io/badge/Version-v1.3.0-C8F135?style=for-the-badge&labelColor=0E0F12" alt="Version 1.3.0" />
   <img src="https://img.shields.io/badge/Android-Kotlin-C8F135?style=for-the-badge&logo=android&logoColor=C8F135&labelColor=0E0F12" alt="Android Kotlin" />
   <img src="https://img.shields.io/badge/macOS-Swift_%26_SwiftUI-C8F135?style=for-the-badge&logo=apple&logoColor=C8F135&labelColor=0E0F12" alt="macOS Swift" />
   <img src="https://img.shields.io/badge/Network-100%25_Local_LAN-181B20?style=for-the-badge&labelColor=0E0F12&color=C8F135" alt="100% Local LAN" />
@@ -17,12 +17,12 @@ A lightweight, native open-source bridge linking your **Android phone** and your
 </p>
 
 <p align="center">
-  <a href="#-whats-new-in-v12">What's New in v1.2</a> •
+  <a href="#-whats-new-in-v130">What's New in v1.3.0</a> •
+  <a href="#-file--folder-sharing-benefits">File Sharing Benefits</a> •
   <a href="#-key-features">Key Features</a> •
   <a href="#-getting-started">Getting Started</a> •
   <a href="#-pairing--multi-device-connection">Pairing & Multi-Device</a> •
-  <a href="#-security-privacy--permissions-transparency">Security & Privacy</a> •
-  <a href="#-bug-fixes-in-v12">Bug Fixes</a>
+  <a href="#-security-privacy--permissions-transparency">Security & Privacy</a>
 </p>
 
 <table align="center">
@@ -43,6 +43,38 @@ A lightweight, native open-source bridge linking your **Android phone** and your
 > [!NOTE]
 > **Active Open-Source Project**  
 > Bridge is an actively maintained open-source project updated on a regular basis with continuous stability enhancements, new features, and design improvements. Star the repository to follow releases and upcoming roadmap milestones.
+
+---
+
+## ⚡ What's New in v1.3.0
+
+Bridge **v1.3.0** introduces high-speed local file & folder sharing, conversation-grouped notification threads, and refined desktop integration:
+
+1. **High-Speed Encrypted Local File & Folder Sharing:**
+   - Transfer files and entire directory structures directly between Mac and Android over local Wi-Fi or Hotspot with zero cloud intermediate and no file size limits.
+   - Hardware-accelerated AES-GCM streaming encryption with SHA-256 integrity verification.
+   - macOS drag-and-drop onto the menu bar icon or popover, native Finder right-click context menu extension (*Share with Bridge*), and Android system Share sheet integration (`ACTION_SEND` / `ACTION_SEND_MULTIPLE`).
+   - Custom save directory selection with scoped storage permissions (SAF on Android, Security-Scoped Bookmarks on macOS).
+   - Clean folder packaging that automatically excludes OS metadata junk (`.DS_Store`, `__MACOSX`, `Thumbs.db`, `.Trashes`).
+
+2. **Conversation-Grouped Notification Threads:**
+   - Stacked multi-line conversation cards matching Android's expanded notification panel.
+   - Pill count badge displaying unread count per sender/group chat.
+   - Unified two-way sync: swipe to dismiss on Android clears the conversation on Mac, and inline replies update in real-time.
+
+---
+
+## 📁 File & Folder Sharing Benefits
+
+Bridge v1.3.0 brings an AirDrop-like local sharing experience between Android and Mac without proprietary lock-in:
+
+* **🚀 Gigabit-Class LAN Speeds:** Direct peer-to-peer TCP streaming over local Wi-Fi or Personal Hotspot. Bypasses cloud upload/download queues for maximum throughput with zero internet data consumption.
+* **📦 Unlimited File Sizes:** Send large 4K video clips, RAW photo libraries, massive ZIP archives, disk images, and backups without arbitrary 2 GB limits.
+* **📂 Full Folder Tree Preservation:** Send entire directories and nested hierarchies. Folders are packaged on the fly with `BEST_SPEED` deflate compression and streaming verification.
+* **🧹 Zero OS Junk:** Automatically filters out hidden system files (`.DS_Store`, `__MACOSX`, `Thumbs.db`, `.Trashes`, `.Spotlight-V100`, `._*`) so transferred folders stay completely clean.
+* **🛡️ End-to-End Local Encryption:** Every chunk is encrypted with hardware-accelerated **AES-GCM** (128-bit authentication tag, unique 12-byte nonce per frame) and verified with SHA-256 digests.
+* **📁 Custom Save Directories:** Choose your preferred target folders (e.g. external SD card or specific work directories) on Android via SAF and on macOS via persistent Security-Scoped Bookmarks.
+* **🖱️ Zero-Friction Desktop Integration:** Drag files onto the macOS menu bar icon, right-click any file in Finder and select **Quick Actions → Share with Bridge**, or tap **Share → Send to Mac (Bridge)** in any Android app.
 
 ---
 
@@ -75,6 +107,13 @@ Bridge **v1.2** introduces interactive bidirectional notifications, multi-device
 
 ## ✨ Key Features
 
+### 📁 High-Speed Encrypted Local File & Folder Sharing
+* **Unlimited Transfers:** Transfer single files, batches, or full directory structures directly between Mac and Android with zero file size limits.
+* **Direct LAN Stream:** Transfers stream straight across your local network or hotspot with hardware-accelerated AES-GCM encryption and post-transfer SHA-256 verification.
+* **Folder Structure Integrity:** Directories are packaged cleanly without OS metadata (`.DS_Store`, `__MACOSX`, `Thumbs.db`) using fast deflate compression.
+* **Native OS Shortcuts:** Drag and drop onto the macOS menu bar icon, right-click in Finder to "Share with Bridge", or share from Android's system share sheet (`ACTION_SEND`).
+* **Custom Save Locations:** Choose your custom downloads folder on both Mac (via persistent Security-Scoped Bookmarks) and Android (via Storage Access Framework).
+
 ### 📋 Two-Way Clipboard Synchronization (Text & Photos)
 * **Instant Text Copy:** Copy any text, code snippet, or link on your phone or Mac; immediately paste it on the other device with zero extra taps.
 * **Screenshot & Image Sync:** Copy an image in Preview, capture a macOS screenshot (`Cmd+Shift+4`), or copy a photo on Android—it syncs directly into the other device's pasteboard.
@@ -105,15 +144,15 @@ You can install Bridge by downloading the pre-built binaries from [**GitHub Rele
 
 ### Option 1: Direct Download
 
-1. Download the latest **`v1.2`** release assets from [**Releases**](../../releases):
-   - 💻 **`Bridge-v1.2-macOS.zip`** — Native macOS Menu Bar App (`macOS 11.0+`)
-   - 📱 **`Bridge-v1.2-Android.apk`** — Native Android App (`Android 8.0+`)
+1. Download the latest **`v1.3.0`** release assets from [**Releases**](../../releases):
+   - 💻 **`Bridge-v1.3.0-macOS.zip`** — Native macOS Menu Bar App (`macOS 11.0+`)
+   - 📱 **`Bridge-v1.3.0-Android.apk`** — Native Android App (`Android 8.0+`)
 2. **Install on macOS:**
-   - Unzip `Bridge-v1.2-macOS.zip` and move **`Bridge.app`** into `/Applications`.
+   - Unzip `Bridge-v1.3.0-macOS.zip` and move **`Bridge.app`** into `/Applications`.
    - Launch **`Bridge.app`**. *(If macOS Gatekeeper prompts on first launch, right-click `Bridge.app` → **Open**, or run `xattr -cr /Applications/Bridge.app && open /Applications/Bridge.app` in Terminal).*
    - The Bridge icon will appear in your top menu bar.
 3. **Install on Android:**
-   - Open **`Bridge-v1.2-Android.apk`** on your Android phone to install the app.
+   - Open **`Bridge-v1.3.0-Android.apk`** on your Android phone to install the app.
 
 ---
 
@@ -121,13 +160,13 @@ You can install Bridge by downloading the pre-built binaries from [**GitHub Rele
 
 ```bash
 # 1. Download & launch the macOS Menu Bar app
-curl -L -o /tmp/Bridge-macOS.zip "https://github.com/badruddin-tasnim/bridge/releases/download/v1.2/Bridge-v1.2-macOS.zip"
+curl -L -o /tmp/Bridge-macOS.zip "https://github.com/badruddin-tasnim/bridge/releases/download/v1.3.0/Bridge-v1.3.0-macOS.zip"
 unzip -q -o /tmp/Bridge-macOS.zip -d /Applications
 xattr -cr /Applications/Bridge.app
 open /Applications/Bridge.app
 
 # 2. Download & install the Android APK over ADB
-curl -L -o /tmp/Bridge-Android.apk "https://github.com/badruddin-tasnim/bridge/releases/download/v1.2/Bridge-v1.2-Android.apk"
+curl -L -o /tmp/Bridge-Android.apk "https://github.com/badruddin-tasnim/bridge/releases/download/v1.3.0/Bridge-v1.3.0-Android.apk"
 adb install -r /tmp/Bridge-Android.apk
 ```
 
@@ -239,6 +278,14 @@ Bridge is built from the ground up to be **100% private, local, and auditable**.
 | `CAMERA` | Active only when scanning the pairing QR code. Video frames are decoded in memory and discarded immediately. | [`MainActivity.kt`](android-app/app/src/main/java/com/link/clipboardsync/MainActivity.kt) |
 | `POST_NOTIFICATIONS` | Displays the persistent foreground notification required by Android to keep the background sync engine alive. | [`ClipboardSyncForegroundService.kt`](android-app/app/src/main/java/com/link/clipboardsync/ClipboardSyncForegroundService.kt) |
 | `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` | Prevents Android Doze mode from killing the socket connection when the device is locked. | [`MainActivity.kt`](android-app/app/src/main/java/com/link/clipboardsync/MainActivity.kt) |
+
+---
+
+## 🛠️ Bug Fixes & Refinements in v1.3.0
+
+* **Folder Packaging Speed & Memory:** Excluded OS metadata files (`.DS_Store`, `__MACOSX`, `Thumbs.db`, `.Trashes`) and optimized Android packaging with `BEST_SPEED` compression and 128 KB streaming buffers.
+* **Multi-Message Notification Consolidation:** Replaced fragmented single-message cards with a single consolidated conversation card showing chronological multi-line thread history and count badges.
+* **Transfer Interruption Resilience:** Hardened state synchronization between Android and macOS during momentary network interruptions with graceful retry/resume logic.
 
 ---
 

@@ -17,6 +17,19 @@ public struct BridgeNotificationAction: Codable, Identifiable {
     }
 }
 
+public struct BridgeMessageItem: Codable, Identifiable {
+    public var id: String { "\(timestamp)_\(text.hashValue)" }
+    public let text: String
+    public let timestamp: Int64
+    public let sender: String?
+
+    public init(text: String, timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000), sender: String? = nil) {
+        self.text = text
+        self.timestamp = timestamp
+        self.sender = sender
+    }
+}
+
 public struct BridgeNotification: Codable, Identifiable {
     public let id: String
     public let source: String?       // "android" or "mac"
@@ -27,6 +40,8 @@ public struct BridgeNotification: Codable, Identifiable {
     public let icon: String?         // Base64 encoded PNG
     public let timestamp: Int64?     // Epoch ms
     public let actions: [BridgeNotificationAction]?
+    public let isSilent: Bool?
+    public let messages: [BridgeMessageItem]?
 
     public init(
         id: String,
@@ -37,7 +52,9 @@ public struct BridgeNotification: Codable, Identifiable {
         text: String? = nil,
         icon: String? = nil,
         timestamp: Int64? = Int64(Date().timeIntervalSince1970 * 1000),
-        actions: [BridgeNotificationAction]? = nil
+        actions: [BridgeNotificationAction]? = nil,
+        isSilent: Bool? = false,
+        messages: [BridgeMessageItem]? = nil
     ) {
         self.id = id
         self.source = source
@@ -48,6 +65,8 @@ public struct BridgeNotification: Codable, Identifiable {
         self.icon = icon
         self.timestamp = timestamp
         self.actions = actions
+        self.isSilent = isSilent
+        self.messages = messages
     }
 
     public var iconImage: NSImage? {

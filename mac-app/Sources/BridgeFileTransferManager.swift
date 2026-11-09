@@ -3,6 +3,7 @@ import AppKit
 import Network
 import CryptoKit
 import UserNotifications
+import zlib
 
 class BridgeFileTransferManager: ObservableObject {
     static let shared = BridgeFileTransferManager()
@@ -150,53 +151,102 @@ class BridgeFileTransferManager: ObservableObject {
         NSLog("[BridgeFile] sendFiles: %ld URLs to %@", urls.count, device.name)
         for url in urls {
             var isDir: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), !isDir.boolValue else {
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) else {
                 continue
             }
-            guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
-                  let fileSize = (attrs[.size] as? NSNumber)?.int64Value,
-                  fileSize > 0 else {
-                continue
-            }
-
+            let isFolder = isDir.boolValue
             let transferId = "tx_" + UUID().uuidString.lowercased().replacingOccurrences(of: "-", with: "")
             let cleanName = Self.sanitizeFileName(url.lastPathComponent)
 
-            let item = FileTransferItem(
-                id: transferId,
-                fileName: cleanName,
-                fileSize: fileSize,
-                expectedSha256: "",
-                direction: .outgoing,
-                deviceId: device.id,
-                deviceName: device.name,
-                sourceUrl: url,
-                status: .hashing
-            )
-
-            DispatchQueue.main.async {
-                self.transfers.insert(item, at: 0)
-                self.onTransferListChanged?()
-            }
-
-            hashQueue.async { [weak self] in
-                guard let self = self else { return }
-                guard let sha256 = Self.computeFileSHA256(url: url, shouldAbort: {
-                    return item.status == .cancelled
-                }) else {
-                    DispatchQueue.main.async {
-                        if item.status != .cancelled {
-                            item.status = .failed("Failed to read file")
-                        }
-                    }
-                    return
-                }
+            if isFolder {
+                let item = FileTransferItem(
+                    id: transferId,
+                    fileName: cleanName,
+                    fileSize: 0,
+                    expectedSha256: "",
+                    direction: .outgoing,
+                    deviceId: device.id,
+                    deviceName: device.name,
+                    sourceUrl: url,
+                    isFolder: true,
+                    status: .hashing
+                )
 
                 DispatchQueue.main.async {
-                    guard item.status != .cancelled else { return }
-                    item.expectedSha256 = sha256
-                    item.status = .waitingConfirmation
-                    self.startOutgoingListenerAndOffer(item: item, isResume: false)
+                    self.transfers.insert(item, at: 0)
+                    self.onTransferListChanged?()
+                }
+
+                hashQueue.async { [weak self] in
+                    guard let self = self else { return }
+                    switch Self.packageFolderToZip(folderUrl: url, transferId: transferId, shouldAbort: {
+                        return item.status == .cancelled
+                    }) {
+                    case .failure(let err):
+                        DispatchQueue.main.async {
+                            if item.status != .cancelled {
+                                item.status = .failed(err.localizedDescription)
+                                self.onTransferListChanged?()
+                            }
+                        }
+                    case .success(let result):
+                        DispatchQueue.main.async {
+                            guard item.status != .cancelled else {
+                                try? FileManager.default.removeItem(at: result.zipUrl)
+                                return
+                            }
+                            item.tempArchiveUrl = result.zipUrl
+                            item.fileSize = result.size
+                            item.expectedSha256 = result.sha256
+                            item.status = .waitingConfirmation
+                            self.startOutgoingListenerAndOffer(item: item, isResume: false)
+                        }
+                    }
+                }
+            } else {
+                guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+                      let fileSize = (attrs[.size] as? NSNumber)?.int64Value,
+                      fileSize > 0 else {
+                    continue
+                }
+
+                let item = FileTransferItem(
+                    id: transferId,
+                    fileName: cleanName,
+                    fileSize: fileSize,
+                    expectedSha256: "",
+                    direction: .outgoing,
+                    deviceId: device.id,
+                    deviceName: device.name,
+                    sourceUrl: url,
+                    isFolder: false,
+                    status: .hashing
+                )
+
+                DispatchQueue.main.async {
+                    self.transfers.insert(item, at: 0)
+                    self.onTransferListChanged?()
+                }
+
+                hashQueue.async { [weak self] in
+                    guard let self = self else { return }
+                    guard let sha256 = Self.computeFileSHA256(url: url, shouldAbort: {
+                        return item.status == .cancelled
+                    }) else {
+                        DispatchQueue.main.async {
+                            if item.status != .cancelled {
+                                item.status = .failed("Failed to read file")
+                            }
+                        }
+                        return
+                    }
+
+                    DispatchQueue.main.async {
+                        guard item.status != .cancelled else { return }
+                        item.expectedSha256 = sha256
+                        item.status = .waitingConfirmation
+                        self.startOutgoingListenerAndOffer(item: item, isResume: false)
+                    }
                 }
             }
         }
@@ -245,7 +295,8 @@ class BridgeFileTransferManager: ObservableObject {
                         "sha256": item.expectedSha256,
                         "port": Int(port),
                         "token": token,
-                        "resume": isResume
+                        "resume": isResume,
+                        "isFolder": item.isFolder
                     ]
                     if let data = try? JSONSerialization.data(withJSONObject: offerDict),
                        let jsonStr = String(data: data, encoding: .utf8) {
@@ -304,7 +355,8 @@ class BridgeFileTransferManager: ObservableObject {
             }
 
             let offset = (dict["offset"] as? NSNumber)?.int64Value ?? 0
-            guard let sourceUrl = item.sourceUrl,
+            let readUrl = item.tempArchiveUrl ?? item.sourceUrl
+            guard let sourceUrl = readUrl,
                   let fh = try? FileHandle(forReadingFrom: sourceUrl) else {
                 conn.cancel()
                 self.failTransfer(item: item, reason: "Cannot open source file")
@@ -435,6 +487,7 @@ class BridgeFileTransferManager: ObservableObject {
                   let size = (jsonObject["size"] as? NSNumber)?.int64Value,
                   size > 0 else { return }
             let sha256 = (jsonObject["sha256"] as? String) ?? ""
+            let isFolder = (jsonObject["isFolder"] as? Bool) ?? false
             let cleanName = Self.sanitizeFileName(rawName)
 
             if !Self.hasEnoughDiskSpace(requiredBytes: size) {
@@ -461,6 +514,7 @@ class BridgeFileTransferManager: ObservableObject {
                     deviceId: fromDeviceId,
                     deviceName: deviceName,
                     partUrl: partUrl,
+                    isFolder: isFolder,
                     status: .waitingConfirmation
                 )
                 self.transfers.insert(item, at: 0)
@@ -788,11 +842,20 @@ class BridgeFileTransferManager: ObservableObject {
             let targetDir = self.effectiveSaveDirectory
             let finalUrl = Self.uniqueDestinationUrl(in: targetDir, fileName: item.fileName)
 
-            do {
-                try FileManager.default.moveItem(at: partUrl, to: finalUrl)
-            } catch {
-                self.failTransfer(item: item, reason: "Could not move file to destination folder")
-                return
+            if item.isFolder {
+                let success = Self.extractFolderArchive(archiveUrl: partUrl, destinationFolderUrl: finalUrl)
+                try? FileManager.default.removeItem(at: partUrl)
+                guard success else {
+                    self.failTransfer(item: item, reason: "Could not extract folder archive")
+                    return
+                }
+            } else {
+                do {
+                    try FileManager.default.moveItem(at: partUrl, to: finalUrl)
+                } catch {
+                    self.failTransfer(item: item, reason: "Could not move file to destination folder")
+                    return
+                }
             }
 
             let completeDict: [String: Any] = [
@@ -809,7 +872,7 @@ class BridgeFileTransferManager: ObservableObject {
                 item.completedAt = Date()
                 item.status = .completed
                 self.onTransferListChanged?()
-                self.postFileReceivedNotification(fileName: finalUrl.lastPathComponent, deviceName: item.deviceName, isExecutable: item.isExecutable)
+                self.postFileReceivedNotification(fileName: finalUrl.lastPathComponent, deviceName: item.deviceName, isFolder: item.isFolder, isExecutable: item.isExecutable)
             }
         }
     }
@@ -872,6 +935,10 @@ class BridgeFileTransferManager: ObservableObject {
             if let partUrl = item.partUrl {
                 try? FileManager.default.removeItem(at: partUrl)
             }
+            if let temp = item.tempArchiveUrl {
+                try? FileManager.default.removeItem(at: temp)
+                item.tempArchiveUrl = nil
+            }
             item.status = .cancelled
             item.speedBytesPerSec = 0
             if notifyPeer {
@@ -890,10 +957,6 @@ class BridgeFileTransferManager: ObservableObject {
             self.transfers.removeAll { $0.status == .completed }
             self.onTransferListChanged?()
         }
-    }
-
-    func clearFinishedTransfers() {
-        clearCompletedTransfers()
     }
 
     func retryTransfer(id: String) {
@@ -970,6 +1033,15 @@ class BridgeFileTransferManager: ObservableObject {
             session.connection?.cancel()
             session.listener.cancel()
         }
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            if let item = self.transfers.first(where: { $0.id == transferId }),
+               item.status.isFinished,
+               let temp = item.tempArchiveUrl {
+                try? FileManager.default.removeItem(at: temp)
+                item.tempArchiveUrl = nil
+            }
+        }
     }
 
     private func failTransfer(item: FileTransferItem, reason: String) {
@@ -997,10 +1069,12 @@ class BridgeFileTransferManager: ObservableObject {
     func postIncomingTransferBanner(_ item: FileTransferItem) {
         let center = UNUserNotificationCenter.current()
         let content = UNMutableNotificationContent()
-        content.title = "Incoming File from \(item.deviceName)"
+        content.title = item.isFolder ? "Incoming Folder from \(item.deviceName)" : "Incoming File from \(item.deviceName)"
         let formattedSize = ByteCountFormatter.string(fromByteCount: item.fileSize, countStyle: .file)
         if item.isExecutable {
             content.body = "⚠️ \"\(item.fileName)\" (\(formattedSize))\nExecutable file · Confirm before accepting."
+        } else if item.isFolder {
+            content.body = "Folder \"\(item.fileName)\" (\(formattedSize))"
         } else {
             content.body = "\"\(item.fileName)\" (\(formattedSize))"
         }
@@ -1056,18 +1130,505 @@ class BridgeFileTransferManager: ObservableObject {
         }
     }
 
-    private func postFileReceivedNotification(fileName: String, deviceName: String, isExecutable: Bool) {
+    private func postFileReceivedNotification(fileName: String, deviceName: String, isFolder: Bool, isExecutable: Bool) {
         let content = UNMutableNotificationContent()
-        content.title = "File Received from \(deviceName)"
+        content.title = isFolder ? "Folder Received from \(deviceName)" : "File Received from \(deviceName)"
         let locName = hasCustomSaveLocation ? effectiveSaveDirectory.lastPathComponent : "Downloads"
         if isExecutable {
             content.body = "⚠️ Saved \"\(fileName)\" to \(locName) · Executable file."
+        } else if isFolder {
+            content.body = "Saved folder \"\(fileName)\" to \(locName)"
         } else {
             content.body = "Saved \"\(fileName)\" to \(locName)"
         }
         content.sound = .default
         let req = UNNotificationRequest(identifier: "bridge.file.\(UUID().uuidString)", content: content, trigger: nil)
         UNUserNotificationCenter.current().add(req, withCompletionHandler: nil)
+    }
+
+    // MARK: - In-Process Fast Zip Packaging Engine
+
+    private class BridgeZipWriter {
+        struct Entry {
+            let path: String
+            let isDirectory: Bool
+            let uncompressedSize: UInt64
+            let crc: UInt32
+            let headerOffset: UInt64
+            let modTime: UInt16
+            let modDate: UInt16
+        }
+
+        private let outHandle: FileHandle
+        private var entries: [Entry] = []
+        private var currentOffset: UInt64 = 0
+        private let shouldAbort: () -> Bool
+
+        init(url: URL, shouldAbort: @escaping () -> Bool = { false }) throws {
+            FileManager.default.createFile(atPath: url.path, contents: nil)
+            self.outHandle = try FileHandle(forWritingTo: url)
+            self.shouldAbort = shouldAbort
+        }
+
+        deinit {
+            try? outHandle.close()
+        }
+
+        func addDirectory(relPath: String, modDate: Date = Date()) throws {
+            guard !shouldAbort() else { throw NSError(domain: "BridgeZip", code: -1, userInfo: [NSLocalizedDescriptionKey: "Aborted"]) }
+            let cleanPath = relPath.hasSuffix("/") ? relPath : "\(relPath)/"
+            let pathBytes = [UInt8](cleanPath.utf8)
+            let (dosDate, dosTime) = toDosTime(modDate)
+
+            let headerOffset = currentOffset
+            var header = Data()
+            header.append(contentsOf: [0x50, 0x4b, 0x03, 0x04]) // PK\3\4
+            header.append(contentsOf: [20, 0]) // version needed
+            header.append(contentsOf: [0x00, 0x08]) // flags (UTF-8)
+            header.append(contentsOf: [0, 0]) // store
+            header.append(contentsOf: [UInt8(dosTime & 0xFF), UInt8((dosTime >> 8) & 0xFF)])
+            header.append(contentsOf: [UInt8(dosDate & 0xFF), UInt8((dosDate >> 8) & 0xFF)])
+            header.append(contentsOf: [0, 0, 0, 0]) // crc
+            header.append(contentsOf: [0, 0, 0, 0]) // comp size
+            header.append(contentsOf: [0, 0, 0, 0]) // uncomp size
+            header.append(contentsOf: [UInt8(pathBytes.count & 0xFF), UInt8((pathBytes.count >> 8) & 0xFF)])
+            header.append(contentsOf: [0, 0]) // extra len
+            header.append(contentsOf: pathBytes)
+
+            try outHandle.write(contentsOf: header)
+            currentOffset += UInt64(header.count)
+
+            entries.append(Entry(
+                path: cleanPath,
+                isDirectory: true,
+                uncompressedSize: 0,
+                crc: 0,
+                headerOffset: headerOffset,
+                modTime: dosTime,
+                modDate: dosDate
+            ))
+        }
+
+        func addFile(fileUrl: URL, relPath: String) throws {
+            guard !shouldAbort() else { throw NSError(domain: "BridgeZip", code: -1, userInfo: [NSLocalizedDescriptionKey: "Aborted"]) }
+            let pathBytes = [UInt8](relPath.utf8)
+            let attrs = try FileManager.default.attributesOfItem(atPath: fileUrl.path)
+            let modDate = (attrs[.modificationDate] as? Date) ?? Date()
+            let (dosDate, dosTime) = toDosTime(modDate)
+
+            guard let inHandle = try? FileHandle(forReadingFrom: fileUrl) else {
+                return
+            }
+            defer { try? inHandle.close() }
+
+            let headerOffset = currentOffset
+            var header = Data()
+            header.append(contentsOf: [0x50, 0x4b, 0x03, 0x04])
+            header.append(contentsOf: [45, 0]) // version needed: 4.5 (Zip64 capable)
+            header.append(contentsOf: [0x00, 0x08]) // flags (UTF-8)
+            header.append(contentsOf: [0, 0]) // store
+            header.append(contentsOf: [UInt8(dosTime & 0xFF), UInt8((dosTime >> 8) & 0xFF)])
+            header.append(contentsOf: [UInt8(dosDate & 0xFF), UInt8((dosDate >> 8) & 0xFF)])
+
+            // Placeholder for crc, compSize, uncompSize (12 bytes)
+            let placeholderOffset = header.count
+            header.append(contentsOf: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+
+            // Zip64 extra field placeholder (tag=0x0001, size=16, 8 bytes uncomp, 8 bytes comp)
+            let zip64LocalExtra: [UInt8] = [
+                0x01, 0x00, // Tag 0x0001
+                0x10, 0x00, // Size 16 bytes
+                0, 0, 0, 0, 0, 0, 0, 0, // Uncompressed size
+                0, 0, 0, 0, 0, 0, 0, 0  // Compressed size
+            ]
+            let extraLen = UInt16(zip64LocalExtra.count)
+            let zip64PlaceholderOffset = placeholderOffset + 12 + 2 + 2 + pathBytes.count
+
+            header.append(contentsOf: [UInt8(pathBytes.count & 0xFF), UInt8((pathBytes.count >> 8) & 0xFF)])
+            header.append(contentsOf: [UInt8(extraLen & 0xFF), UInt8((extraLen >> 8) & 0xFF)])
+            header.append(contentsOf: pathBytes)
+            header.append(contentsOf: zip64LocalExtra)
+
+            try outHandle.write(contentsOf: header)
+            currentOffset += UInt64(header.count)
+
+            var crc: uLong = crc32(0, nil, 0)
+            let bufferSize = 256 * 1024
+            var totalBytesWritten: UInt64 = 0
+
+            while true {
+                guard !shouldAbort() else { throw NSError(domain: "BridgeZip", code: -1, userInfo: [NSLocalizedDescriptionKey: "Aborted"]) }
+                let chunk = inHandle.readData(ofLength: bufferSize)
+                if chunk.isEmpty { break }
+                chunk.withUnsafeBytes { ptr in
+                    crc = crc32(crc, ptr.bindMemory(to: Bytef.self).baseAddress, uInt(chunk.count))
+                }
+                try outHandle.write(contentsOf: chunk)
+                totalBytesWritten += UInt64(chunk.count)
+            }
+
+            let endOffset = currentOffset + totalBytesWritten
+            let crcUint = UInt32(crc)
+
+            // Patch standard 32-bit fields
+            try outHandle.seek(toOffset: UInt64(headerOffset + UInt64(placeholderOffset)))
+            var patch = Data()
+            patch.append(contentsOf: [UInt8(crcUint & 0xFF), UInt8((crcUint >> 8) & 0xFF), UInt8((crcUint >> 16) & 0xFF), UInt8((crcUint >> 24) & 0xFF)])
+            let standardSize32 = totalBytesWritten >= 0xFFFFFFFF ? 0xFFFFFFFF : UInt32(totalBytesWritten)
+            patch.append(contentsOf: [UInt8(standardSize32 & 0xFF), UInt8((standardSize32 >> 8) & 0xFF), UInt8((standardSize32 >> 16) & 0xFF), UInt8((standardSize32 >> 24) & 0xFF)])
+            patch.append(contentsOf: [UInt8(standardSize32 & 0xFF), UInt8((standardSize32 >> 8) & 0xFF), UInt8((standardSize32 >> 16) & 0xFF), UInt8((standardSize32 >> 24) & 0xFF)])
+            try outHandle.write(contentsOf: patch)
+
+            // Patch Zip64 extra field with 64-bit sizes
+            try outHandle.seek(toOffset: UInt64(headerOffset + UInt64(zip64PlaceholderOffset) + 4))
+            var zip64Patch = Data()
+            withUnsafeBytes(of: totalBytesWritten.littleEndian) { zip64Patch.append(contentsOf: $0) }
+            withUnsafeBytes(of: totalBytesWritten.littleEndian) { zip64Patch.append(contentsOf: $0) }
+            try outHandle.write(contentsOf: zip64Patch)
+
+            try outHandle.seek(toOffset: UInt64(endOffset))
+            currentOffset = endOffset
+
+            entries.append(Entry(
+                path: relPath,
+                isDirectory: false,
+                uncompressedSize: totalBytesWritten,
+                crc: crcUint,
+                headerOffset: headerOffset,
+                modTime: dosTime,
+                modDate: dosDate
+            ))
+        }
+
+        func finish() throws {
+            let centralStart = currentOffset
+            var centralData = Data()
+
+            for entry in entries {
+                let pathBytes = [UInt8](entry.path.utf8)
+                let isZip64 = entry.uncompressedSize >= 0xFFFFFFFF || entry.headerOffset >= 0xFFFFFFFF
+
+                centralData.append(contentsOf: [0x50, 0x4b, 0x01, 0x02]) // PK\1\2
+                centralData.append(contentsOf: [0x1e, 0x03]) // version made by (Unix)
+                centralData.append(contentsOf: [isZip64 ? 45 : 20, 0]) // version needed
+                centralData.append(contentsOf: [0x00, 0x08]) // UTF-8
+                centralData.append(contentsOf: [0, 0]) // store
+                centralData.append(contentsOf: [UInt8(entry.modTime & 0xFF), UInt8((entry.modTime >> 8) & 0xFF)])
+                centralData.append(contentsOf: [UInt8(entry.modDate & 0xFF), UInt8((entry.modDate >> 8) & 0xFF)])
+                centralData.append(contentsOf: [UInt8(entry.crc & 0xFF), UInt8((entry.crc >> 8) & 0xFF), UInt8((entry.crc >> 16) & 0xFF), UInt8((entry.crc >> 24) & 0xFF)])
+
+                let size32 = entry.uncompressedSize >= 0xFFFFFFFF ? 0xFFFFFFFF : UInt32(entry.uncompressedSize)
+                let offset32 = entry.headerOffset >= 0xFFFFFFFF ? 0xFFFFFFFF : UInt32(entry.headerOffset)
+                centralData.append(contentsOf: [UInt8(size32 & 0xFF), UInt8((size32 >> 8) & 0xFF), UInt8((size32 >> 16) & 0xFF), UInt8((size32 >> 24) & 0xFF)])
+                centralData.append(contentsOf: [UInt8(size32 & 0xFF), UInt8((size32 >> 8) & 0xFF), UInt8((size32 >> 16) & 0xFF), UInt8((size32 >> 24) & 0xFF)])
+                centralData.append(contentsOf: [UInt8(pathBytes.count & 0xFF), UInt8((pathBytes.count >> 8) & 0xFF)])
+
+                var extraData = Data()
+                if isZip64 {
+                    extraData.append(contentsOf: [0x01, 0x00]) // Tag 0x0001
+                    var fieldLen: UInt16 = 0
+                    var fieldData = Data()
+                    if entry.uncompressedSize >= 0xFFFFFFFF {
+                        withUnsafeBytes(of: entry.uncompressedSize.littleEndian) { fieldData.append(contentsOf: $0) }
+                        withUnsafeBytes(of: entry.uncompressedSize.littleEndian) { fieldData.append(contentsOf: $0) }
+                        fieldLen += 16
+                    }
+                    if entry.headerOffset >= 0xFFFFFFFF {
+                        withUnsafeBytes(of: entry.headerOffset.littleEndian) { fieldData.append(contentsOf: $0) }
+                        fieldLen += 8
+                    }
+                    extraData.append(contentsOf: [UInt8(fieldLen & 0xFF), UInt8((fieldLen >> 8) & 0xFF)])
+                    extraData.append(fieldData)
+                }
+
+                centralData.append(contentsOf: [UInt8(extraData.count & 0xFF), UInt8((extraData.count >> 8) & 0xFF)])
+                centralData.append(contentsOf: [0, 0, 0, 0, 0, 0]) // comment len, disk start, internal attrs
+                let extAttrs: UInt32 = entry.isDirectory ? 0x41ED0010 : 0x81A40000
+                centralData.append(contentsOf: [UInt8(extAttrs & 0xFF), UInt8((extAttrs >> 8) & 0xFF), UInt8((extAttrs >> 16) & 0xFF), UInt8((extAttrs >> 24) & 0xFF)])
+                centralData.append(contentsOf: [UInt8(offset32 & 0xFF), UInt8((offset32 >> 8) & 0xFF), UInt8((offset32 >> 16) & 0xFF), UInt8((offset32 >> 24) & 0xFF)])
+                centralData.append(contentsOf: pathBytes)
+                centralData.append(extraData)
+            }
+
+            try outHandle.write(contentsOf: centralData)
+            currentOffset += UInt64(centralData.count)
+            let centralSize = UInt64(centralData.count)
+
+            let needsZip64Eocd = centralStart >= 0xFFFFFFFF || centralSize >= 0xFFFFFFFF || entries.count >= 0xFFFF
+            if needsZip64Eocd {
+                let zip64EocdOffset = currentOffset
+                var zip64Eocd = Data()
+                zip64Eocd.append(contentsOf: [0x50, 0x4b, 0x06, 0x06]) // PK\6\6
+                withUnsafeBytes(of: UInt64(44).littleEndian) { zip64Eocd.append(contentsOf: $0) }
+                zip64Eocd.append(contentsOf: [0x1e, 0x03]) // version made by
+                zip64Eocd.append(contentsOf: [45, 0]) // version needed
+                zip64Eocd.append(contentsOf: [0, 0, 0, 0]) // disk number
+                zip64Eocd.append(contentsOf: [0, 0, 0, 0]) // disk start
+                withUnsafeBytes(of: UInt64(entries.count).littleEndian) { zip64Eocd.append(contentsOf: $0) }
+                withUnsafeBytes(of: UInt64(entries.count).littleEndian) { zip64Eocd.append(contentsOf: $0) }
+                withUnsafeBytes(of: centralSize.littleEndian) { zip64Eocd.append(contentsOf: $0) }
+                withUnsafeBytes(of: centralStart.littleEndian) { zip64Eocd.append(contentsOf: $0) }
+
+                // Zip64 locator
+                zip64Eocd.append(contentsOf: [0x50, 0x4b, 0x06, 0x07]) // PK\6\7
+                zip64Eocd.append(contentsOf: [0, 0, 0, 0]) // disk number
+                withUnsafeBytes(of: zip64EocdOffset.littleEndian) { zip64Eocd.append(contentsOf: $0) }
+                zip64Eocd.append(contentsOf: [1, 0, 0, 0]) // total disks
+
+                try outHandle.write(contentsOf: zip64Eocd)
+                currentOffset += UInt64(zip64Eocd.count)
+            }
+
+            // Standard End of central directory record
+            var eocd = Data()
+            eocd.append(contentsOf: [0x50, 0x4b, 0x05, 0x06]) // PK\5\6
+            eocd.append(contentsOf: [0, 0, 0, 0]) // disk numbers
+            let countField = UInt16(min(entries.count, 0xFFFF))
+            eocd.append(contentsOf: [UInt8(countField & 0xFF), UInt8((countField >> 8) & 0xFF)])
+            eocd.append(contentsOf: [UInt8(countField & 0xFF), UInt8((countField >> 8) & 0xFF)])
+            let centralSize32 = centralSize >= 0xFFFFFFFF ? 0xFFFFFFFF : UInt32(centralSize)
+            let centralStart32 = centralStart >= 0xFFFFFFFF ? 0xFFFFFFFF : UInt32(centralStart)
+            eocd.append(contentsOf: [UInt8(centralSize32 & 0xFF), UInt8((centralSize32 >> 8) & 0xFF), UInt8((centralSize32 >> 16) & 0xFF), UInt8((centralSize32 >> 24) & 0xFF)])
+            eocd.append(contentsOf: [UInt8(centralStart32 & 0xFF), UInt8((centralStart32 >> 8) & 0xFF), UInt8((centralStart32 >> 16) & 0xFF), UInt8((centralStart32 >> 24) & 0xFF)])
+            eocd.append(contentsOf: [0, 0]) // comment len
+
+            try outHandle.write(contentsOf: eocd)
+            try outHandle.synchronize()
+        }
+
+        private func toDosTime(_ date: Date) -> (UInt16, UInt16) {
+            let calendar = Calendar.current
+            let comps = calendar.dateComponents([.year, .month, .day, .hour, .minute, .second], from: date)
+            let year = max(1980, comps.year ?? 1980) - 1980
+            let month = comps.month ?? 1
+            let day = comps.day ?? 1
+            let hour = comps.hour ?? 0
+            let minute = comps.minute ?? 0
+            let second = (comps.second ?? 0) / 2
+
+            let dosDate = UInt16((year << 9) | (month << 5) | day)
+            let dosTime = UInt16((hour << 11) | (minute << 5) | second)
+            return (dosDate, dosTime)
+        }
+    }
+
+    // MARK: - Folder Packaging & Extraction
+
+    enum BridgePackageError: LocalizedError {
+        case permissionDenied
+        case cancelled
+        case empty
+        case hashFailed
+        case failed(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .permissionDenied:
+                return "Permission denied · Allow in System Settings"
+            case .cancelled:
+                return "Cancelled"
+            case .empty:
+                return "Generated archive was empty"
+            case .hashFailed:
+                return "Integrity hashing failed"
+            case .failed(let msg):
+                return msg
+            }
+        }
+    }
+
+    var isFilesAndFoldersAllowed: Bool {
+        guard let docsUrl = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return true }
+        return (try? FileManager.default.contentsOfDirectory(atPath: docsUrl.path)) != nil
+    }
+
+    func openFilesAndFoldersSettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_FilesAndFolders") {
+            NSWorkspace.shared.open(url)
+        } else if let fallback = URL(string: "x-apple.systempreferences:com.apple.preference.security") {
+            NSWorkspace.shared.open(fallback)
+        }
+    }
+
+    static func isIgnoredMetadataItem(name: String) -> Bool {
+        let lower = name.lowercased()
+        if lower == ".ds_store" || lower == "thumbs.db" || lower == "desktop.ini" { return true }
+        if lower == "__macosx" || lower == ".trashes" || lower == ".spotlight-v100" ||
+           lower == ".fseventsd" || lower == ".temporaryitems" || lower == ".apdisk" { return true }
+        if name.hasPrefix("._") || name.hasPrefix(".~") { return true }
+        return false
+    }
+
+    static func packageFolderToZip(folderUrl: URL, transferId: String, shouldAbort: @escaping () -> Bool) -> Result<(zipUrl: URL, size: Int64, sha256: String), BridgePackageError> {
+        let tempZipName = "bridge_pkg_\(transferId).zip"
+        let tempZipUrl = FileManager.default.temporaryDirectory.appendingPathComponent(tempZipName)
+        try? FileManager.default.removeItem(at: tempZipUrl)
+
+        let isAccessing = folderUrl.startAccessingSecurityScopedResource()
+        defer {
+            if isAccessing {
+                folderUrl.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        // Test readability first to distinguish permission issues from other failures
+        do {
+            _ = try FileManager.default.contentsOfDirectory(atPath: folderUrl.path)
+        } catch {
+            let nsErr = error as NSError
+            if nsErr.code == 257 || nsErr.localizedDescription.contains("permission") {
+                return .failure(.permissionDenied)
+            }
+            return .failure(.failed("Cannot open folder: \(error.localizedDescription)"))
+        }
+
+        let startTime = Date()
+        NSLog("[BridgeFile] packageFolderToZip starting for '%@'...", folderUrl.path)
+
+        do {
+            let writer = try BridgeZipWriter(url: tempZipUrl, shouldAbort: shouldAbort)
+            let parentName = folderUrl.lastPathComponent
+
+            // Add top-level folder entry
+            try writer.addDirectory(relPath: parentName)
+
+            let baseFolderPrefix = folderUrl.standardized.path.hasSuffix("/")
+                ? folderUrl.standardized.path
+                : "\(folderUrl.standardized.path)/"
+
+            let enumerator = FileManager.default.enumerator(
+                at: folderUrl,
+                includingPropertiesForKeys: [.isDirectoryKey, .isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            )
+
+            var entryCount = 0
+            while let itemUrl = enumerator?.nextObject() as? URL {
+                if shouldAbort() {
+                    try? FileManager.default.removeItem(at: tempZipUrl)
+                    return .failure(.cancelled)
+                }
+
+                let isDir = (try? itemUrl.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true
+
+                // Exclude OS metadata files & folders (.DS_Store, __MACOSX, Thumbs.db, etc.)
+                let name = itemUrl.lastPathComponent
+                if isIgnoredMetadataItem(name: name) {
+                    if isDir {
+                        enumerator?.skipDescendants()
+                    }
+                    continue
+                }
+
+                let standardPath = itemUrl.standardized.path
+                var cleanRel = standardPath
+                if cleanRel.hasPrefix(baseFolderPrefix) {
+                    cleanRel = String(cleanRel.dropFirst(baseFolderPrefix.count))
+                }
+                guard !cleanRel.isEmpty else { continue }
+                let zipRelPath = "\(parentName)/\(cleanRel)"
+
+                if isDir {
+                    try writer.addDirectory(relPath: zipRelPath)
+                } else {
+                    try writer.addFile(fileUrl: itemUrl, relPath: zipRelPath)
+                    entryCount += 1
+                }
+            }
+
+            try writer.finish()
+            let duration = Date().timeIntervalSince(startTime)
+            NSLog("[BridgeFile] packageFolderToZip finished in %.2fs (%ld files)", duration, entryCount)
+        } catch {
+            NSLog("[BridgeFile] packageFolderToZip error: %@", error.localizedDescription)
+            try? FileManager.default.removeItem(at: tempZipUrl)
+            return .failure(.failed("Failed to package folder: \(error.localizedDescription)"))
+        }
+
+        if shouldAbort() {
+            try? FileManager.default.removeItem(at: tempZipUrl)
+            return .failure(.cancelled)
+        }
+
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: tempZipUrl.path),
+              let size = (attrs[.size] as? NSNumber)?.int64Value,
+              size > 0 else {
+            try? FileManager.default.removeItem(at: tempZipUrl)
+            return .failure(.empty)
+        }
+
+        guard let sha256 = computeFileSHA256(url: tempZipUrl, shouldAbort: shouldAbort) else {
+            try? FileManager.default.removeItem(at: tempZipUrl)
+            return .failure(.hashFailed)
+        }
+
+        return .success((tempZipUrl, size, sha256))
+    }
+
+    static func extractFolderArchive(archiveUrl: URL, destinationFolderUrl: URL) -> Bool {
+        let tempExtractDir = FileManager.default.temporaryDirectory.appendingPathComponent("bridge_ext_\(UUID().uuidString)")
+        try? FileManager.default.removeItem(at: tempExtractDir)
+        try? FileManager.default.createDirectory(at: tempExtractDir, withIntermediateDirectories: true)
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+        process.arguments = ["-x", "-k", archiveUrl.path, tempExtractDir.path]
+
+        do {
+            try process.run()
+            process.waitUntilExit()
+            guard process.terminationStatus == 0 else {
+                try? FileManager.default.removeItem(at: tempExtractDir)
+                return false
+            }
+        } catch {
+            try? FileManager.default.removeItem(at: tempExtractDir)
+            return false
+        }
+
+        // Zip Slip defense: verify all extracted entries stay within tempExtractDir
+        guard let enumerator = FileManager.default.enumerator(at: tempExtractDir, includingPropertiesForKeys: nil) else {
+            try? FileManager.default.removeItem(at: tempExtractDir)
+            return false
+        }
+        let canonicalBase = tempExtractDir.resolvingSymlinksInPath().path
+        var metadataUrlsToRemove: [URL] = []
+        for case let fileUrl as URL in enumerator {
+            let canonicalFile = fileUrl.resolvingSymlinksInPath().path
+            if !canonicalFile.hasPrefix(canonicalBase) {
+                try? FileManager.default.removeItem(at: tempExtractDir)
+                return false
+            }
+            if isIgnoredMetadataItem(name: fileUrl.lastPathComponent) {
+                metadataUrlsToRemove.append(fileUrl)
+            }
+        }
+        for url in metadataUrlsToRemove {
+            try? FileManager.default.removeItem(at: url)
+        }
+
+        let contents = (try? FileManager.default.contentsOfDirectory(at: tempExtractDir, includingPropertiesForKeys: nil)) ?? []
+        guard !contents.isEmpty else {
+            try? FileManager.default.removeItem(at: tempExtractDir)
+            return false
+        }
+
+        do {
+            if contents.count == 1, (try? contents[0].resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
+                try FileManager.default.moveItem(at: contents[0], to: destinationFolderUrl)
+            } else {
+                try? FileManager.default.createDirectory(at: destinationFolderUrl, withIntermediateDirectories: true)
+                for item in contents {
+                    let destChild = destinationFolderUrl.appendingPathComponent(item.lastPathComponent)
+                    try FileManager.default.moveItem(at: item, to: destChild)
+                }
+            }
+            try? FileManager.default.removeItem(at: tempExtractDir)
+            return true
+        } catch {
+            try? FileManager.default.removeItem(at: tempExtractDir)
+            return false
+        }
     }
 
     static func computeFileSHA256(url: URL, shouldAbort: () -> Bool) -> String? {

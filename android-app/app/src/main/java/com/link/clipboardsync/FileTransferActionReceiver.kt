@@ -10,6 +10,7 @@ class FileTransferActionReceiver : BroadcastReceiver() {
         private const val TAG = "FileTransferAction"
         const val ACTION_ACCEPT_TRANSFER = "com.link.clipboardsync.ACTION_ACCEPT_TRANSFER"
         const val ACTION_DECLINE_TRANSFER = "com.link.clipboardsync.ACTION_DECLINE_TRANSFER"
+        const val ACTION_CANCEL_TRANSFER = "com.link.clipboardsync.ACTION_CANCEL_TRANSFER"
         const val EXTRA_TRANSFER_ID = "extra_transfer_id"
     }
 
@@ -18,12 +19,13 @@ class FileTransferActionReceiver : BroadcastReceiver() {
         Log.d(TAG, "Received transfer action: ${intent.action} for id: $transferId")
 
         BridgeFileTransferManager.dismissPromptNotification(context, transferId)
+        BridgeFileTransferManager.dismissProgressNotification(context, transferId)
 
         when (intent.action) {
             ACTION_ACCEPT_TRANSFER -> {
                 BridgeFileTransferManager.acceptIncomingFile(context, transferId)
             }
-            ACTION_DECLINE_TRANSFER -> {
+            ACTION_DECLINE_TRANSFER, ACTION_CANCEL_TRANSFER -> {
                 BridgeFileTransferManager.cancelTransfer(transferId, notifyPeer = true)
             }
         }

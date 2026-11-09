@@ -121,6 +121,7 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
     private lateinit var tvFilesTargetMac: TextView
     private lateinit var tvFilesConnectionHint: TextView
     private lateinit var btnSelectFilesToSend: Button
+    private lateinit var btnSelectFolderToSend: Button
     private lateinit var btnClearCompletedTransfers: TextView
     private lateinit var layoutTransfersEmptyState: LinearLayout
     private lateinit var layoutTransfersList: LinearLayout
@@ -188,6 +189,13 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
     private val filePickerLauncher = registerForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris: List<Uri> ->
         if (uris.isNotEmpty()) {
             BridgeFileTransferManager.sendFiles(this, uris)
+        }
+    }
+
+    // Folder Picker Launcher (SAF Tree Picker)
+    private val folderPickerLauncher = registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri: Uri? ->
+        if (uri != null) {
+            BridgeFileTransferManager.sendFolder(this, uri)
         }
     }
 
@@ -395,6 +403,7 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         tvFilesTargetMac = findViewById(R.id.tvFilesTargetMac)
         tvFilesConnectionHint = findViewById(R.id.tvFilesConnectionHint)
         btnSelectFilesToSend = findViewById(R.id.btnSelectFilesToSend)
+        btnSelectFolderToSend = findViewById(R.id.btnSelectFolderToSend)
         btnClearCompletedTransfers = findViewById(R.id.btnClearCompletedTransfers)
         layoutTransfersEmptyState = findViewById(R.id.layoutTransfersEmptyState)
         layoutTransfersList = findViewById(R.id.layoutTransfersList)
@@ -601,6 +610,14 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
                 return@setOnClickListener
             }
             filePickerLauncher.launch(arrayOf("*/*"))
+        }
+
+        btnSelectFolderToSend.setOnClickListener {
+            if (ClipboardSyncManager.networkClient?.isConnected() != true) {
+                Toast.makeText(this, "Connect to your Mac first to send folders.", Toast.LENGTH_SHORT).show()
+                return@setOnClickListener
+            }
+            folderPickerLauncher.launch(null)
         }
 
         btnClearCompletedTransfers.setOnClickListener {
@@ -1084,6 +1101,13 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         val fontMono = safeGetFont(R.font.dm_mono, Typeface.MONOSPACE)
 
         for (item in items) {
+            val isCompleted = item.status == TransferStatus.COMPLETED
+            val openAction = {
+                if (isCompleted) {
+                    BridgeFileTransferManager.openTransferredFile(this@MainActivity, item)
+                }
+            }
+
             val card = LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 setBackgroundResource(R.drawable.bg_card_panel)
@@ -1101,10 +1125,8 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
                     Toast.makeText(this@MainActivity, "${item.fileName}\n${item.formattedTotalSize}", Toast.LENGTH_LONG).show()
                     true
                 }
-                if (item.status == TransferStatus.COMPLETED) {
-                    setOnClickListener {
-                        BridgeFileTransferManager.openTransferredFile(this@MainActivity, item)
-                    }
+                if (isCompleted) {
+                    setOnClickListener { openAction() }
                 }
             }
 
@@ -1126,6 +1148,9 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
                 val lp = LinearLayout.LayoutParams((32 * density).toInt(), (32 * density).toInt())
                 lp.marginEnd = (10 * density).toInt()
                 layoutParams = lp
+                if (isCompleted) {
+                    setOnClickListener { openAction() }
+                }
             }
 
             val iconView = ImageView(this).apply {
@@ -1151,6 +1176,9 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
                 val lp = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
                 lp.marginEnd = (10 * density).toInt()
                 layoutParams = lp
+                if (isCompleted) {
+                    setOnClickListener { openAction() }
+                }
             }
 
             // Angled / diagonal arrows matching Mac menu bar app (↗ and ↙)
@@ -1163,12 +1191,16 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
                 maxLines = 1
                 ellipsize = android.text.TextUtils.TruncateAt.MIDDLE
                 setOnClickListener {
-                    Toast.makeText(this@MainActivity, item.fileName, Toast.LENGTH_SHORT).show()
+                    if (isCompleted) {
+                        openAction()
+                    } else {
+                        Toast.makeText(this@MainActivity, item.fileName, Toast.LENGTH_SHORT).show()
+                    }
                 }
             }
 
             val subtitleText = when (item.status) {
-                TransferStatus.HASHING -> "${item.formattedTotalSize} · Preparing…"
+                TransferStatus.HASHING -> if (item.isFolder) "Packaging folder…" else "${item.formattedTotalSize} · Preparing…"
                 TransferStatus.WAITING_CONFIRMATION -> {
                     if (item.direction == TransferDirection.INCOMING) {
                         "${item.formattedTotalSize} · From ${item.deviceName}"
@@ -1209,6 +1241,9 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
                 )
                 lp.topMargin = (2 * density).toInt()
                 layoutParams = lp
+                if (isCompleted) {
+                    setOnClickListener { openAction() }
+                }
             }
 
             textCol.addView(titleTv)
@@ -1306,13 +1341,7 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
                     )
                 }
                 TransferStatus.COMPLETED -> {
-                    if (item.direction == TransferDirection.INCOMING && (item.destinationFile != null || item.destinationUri != null)) {
-                        actionsRow.addView(
-                            makeActionButton("Open", colorLime, R.drawable.bg_button_outline) {
-                                BridgeFileTransferManager.openTransferredFile(this, item)
-                            }
-                        )
-                    }
+                    // No extra button needed: user taps file name, icon, or card to directly open or extract
                 }
                 TransferStatus.FAILED -> {
                     actionsRow.addView(
@@ -1335,7 +1364,9 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
                 }
             }
 
-            topRow.addView(actionsRow)
+            if (actionsRow.childCount > 0) {
+                topRow.addView(actionsRow)
+            }
             card.addView(topRow)
 
             // Progress bar for active/paused transfers
@@ -1463,6 +1494,7 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         tvFilesTargetMac.text = if (connected) macName else "$macName · Offline"
         tvFilesTargetMac.setTextColor(if (connected) colorLime else colorMuted)
         btnSelectFilesToSend.alpha = if (connected) 1.0f else 0.45f
+        btnSelectFolderToSend.alpha = if (connected) 1.0f else 0.45f
 
         if (paired) {
             layoutScreenPairing.visibility = View.GONE

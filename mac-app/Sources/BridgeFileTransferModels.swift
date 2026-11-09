@@ -38,7 +38,7 @@ enum FileTransferStatus: Equatable {
 class FileTransferItem: ObservableObject, Identifiable {
     let id: String
     let fileName: String
-    let fileSize: Int64
+    var fileSize: Int64
     var expectedSha256: String
     let direction: FileTransferDirection
     let deviceId: UUID?
@@ -46,6 +46,8 @@ class FileTransferItem: ObservableObject, Identifiable {
     let sourceUrl: URL?
     @Published var destinationUrl: URL?
     var partUrl: URL?
+    let isFolder: Bool
+    var tempArchiveUrl: URL?
 
     @Published var bytesTransferred: Int64 = 0
     @Published var speedBytesPerSec: Double = 0
@@ -64,6 +66,8 @@ class FileTransferItem: ObservableObject, Identifiable {
         sourceUrl: URL? = nil,
         destinationUrl: URL? = nil,
         partUrl: URL? = nil,
+        isFolder: Bool = false,
+        tempArchiveUrl: URL? = nil,
         status: FileTransferStatus = .waitingConfirmation
     ) {
         self.id = id
@@ -76,6 +80,8 @@ class FileTransferItem: ObservableObject, Identifiable {
         self.sourceUrl = sourceUrl
         self.destinationUrl = destinationUrl
         self.partUrl = partUrl
+        self.isFolder = isFolder
+        self.tempArchiveUrl = tempArchiveUrl
         self.status = status
     }
 
@@ -120,6 +126,9 @@ class FileTransferItem: ObservableObject, Identifiable {
     }
 
     var iconSymbolName: String {
+        if isFolder {
+            return "folder.fill"
+        }
         let ext = (fileName as NSString).pathExtension.lowercased()
         switch ext {
         case "jpg", "jpeg", "png", "gif", "webp", "heic", "bmp", "tiff", "svg":
@@ -146,6 +155,7 @@ class FileTransferItem: ObservableObject, Identifiable {
     ]
 
     var isExecutable: Bool {
+        if isFolder { return false }
         let ext = (fileName as NSString).pathExtension.lowercased()
         return Self.executableExtensions.contains(ext)
     }

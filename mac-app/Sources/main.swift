@@ -65,10 +65,11 @@ final class StatusItemDropOverlayView: NSView {
 
 // MARK: - App Delegate
 
-class AppDelegate: NSObject, NSApplicationDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var statusItem: NSStatusItem?
     private var popover: NSPopover?
     private let model = BridgeModel()
+    private var lastPopoverCloseTime: TimeInterval = 0
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         registerCustomFonts()
@@ -89,6 +90,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         button.imagePosition = .imageOnly
         button.action = #selector(togglePopover)
         button.target = self
+        button.sendAction(on: [.leftMouseDown])
 
         let dropOverlay = StatusItemDropOverlayView(frame: button.bounds)
         dropOverlay.autoresizingMask = [.width, .height]
@@ -111,6 +113,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         pop.behavior = .transient
         pop.animates = false
         pop.appearance = NSAppearance(named: .darkAqua)
+        pop.delegate = self
         let hostingController = NSHostingController(rootView: BridgeMenuView(model: model))
         if #available(macOS 13.0, *) {
             hostingController.sizingOptions = [.preferredContentSize]
@@ -163,34 +166,70 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             pop.contentSize = newSize
         }
         if let window = controller.view.window {
+            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
             window.backgroundColor = NSColor(red: 0x12 / 255.0, green: 0x14 / 255.0, blue: 0x18 / 255.0, alpha: 1.0)
         }
     }
     
     @objc private func togglePopover() {
         guard let pop = popover else { return }
+        let now = CACurrentMediaTime()
         if pop.isShown {
-            pop.performClose(nil)
-        } else {
-            showPopover()
+            pop.close()
+            lastPopoverCloseTime = now
+            return
         }
+        // If the popover was closed by a click outside or on the status item within 300ms, ignore reopening
+        if now - lastPopoverCloseTime < 0.3 {
+            return
+        }
+        showPopover()
     }
 
-    private func showPopover() {
+    private func showPopover(forceBringToFront: Bool = false) {
         guard let button = statusItem?.button, let pop = popover else { return }
         BridgeNotificationManager.shared.checkNotificationAuth()
         model.checkForUpdates(forceNetwork: false)
         applyPopoverSize()
+
+        NSApp.activate(ignoringOtherApps: true)
+
+        if forceBringToFront {
+            // Prevent immediate auto-dismissal while Finder is closing its context menu
+            pop.behavior = .applicationDefined
+        }
+
         if !pop.isShown {
             pop.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         }
+
         if let window = pop.contentViewController?.view.window {
+            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
             window.backgroundColor = NSColor(red: 0x12 / 255.0, green: 0x14 / 255.0, blue: 0x18 / 255.0, alpha: 1.0)
-            window.makeKey()
+            window.makeKeyAndOrderFront(nil)
+            window.orderFrontRegardless()
         }
-        DispatchQueue.main.async { [weak self] in
-            self?.applyPopoverSize()
+
+        applyPopoverSize()
+
+        if forceBringToFront {
+            // Restore standard transient click-outside dismissal once the Finder context menu action settles
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+                guard let self = self, let pop = self.popover else { return }
+                pop.behavior = .transient
+                self.applyPopoverSize()
+            }
         }
+    }
+
+    // MARK: - NSPopoverDelegate
+
+    func popoverWillClose(_ notification: Notification) {
+        lastPopoverCloseTime = CACurrentMediaTime()
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        lastPopoverCloseTime = CACurrentMediaTime()
     }
 
     // MARK: - Finder Right-Click / Share / Services / Open With Integration
@@ -201,9 +240,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
             self.model.selectedTab = .files
-            self.showPopover()
+            self.showPopover(forceBringToFront: true)
             self.model.sendFiles(validFiles)
+
+            // Re-trigger slightly later in case the menu bar layout needed an extra cycle
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+                self?.showPopover(forceBringToFront: true)
+            }
         }
+    }
+
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        showPopover(forceBringToFront: true)
+        return true
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {

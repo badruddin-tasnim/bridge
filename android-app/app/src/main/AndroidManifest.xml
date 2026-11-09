@@ -129,6 +129,7 @@
             <intent-filter>
                 <action android:name="com.link.clipboardsync.ACTION_ACCEPT_TRANSFER" />
                 <action android:name="com.link.clipboardsync.ACTION_DECLINE_TRANSFER" />
+                <action android:name="com.link.clipboardsync.ACTION_CANCEL_TRANSFER" />
             </intent-filter>
         </receiver>
 

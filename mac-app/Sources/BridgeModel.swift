@@ -274,8 +274,8 @@ class BridgeModel: ObservableObject {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = true
         panel.canChooseFiles = true
-        panel.canChooseDirectories = false
-        panel.title = "Select Files to Send to Android"
+        panel.canChooseDirectories = true
+        panel.title = "Select Files or Folders to Send to Android"
         panel.prompt = "Send"
         NSApp.activate(ignoringOtherApps: true)
         if panel.runModal() == .OK {

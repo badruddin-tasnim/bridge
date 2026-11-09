@@ -133,6 +133,17 @@ struct NotificationCardView: View {
                     .font(.custom("PlusJakartaSans-Regular", size: 11))
                     .foregroundColor(BridgeColors.muted)
 
+                if let count = notification.messages?.count, count > 1 {
+                    Text("\(count)")
+                        .font(.custom("PlusJakartaSans-SemiBold", size: 10))
+                        .foregroundColor(BridgeColors.lime)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1.5)
+                        .background(
+                            Capsule().fill(BridgeColors.lime.opacity(0.18))
+                        )
+                }
+
                 Spacer()
 
                 Button(action: {
@@ -148,7 +159,7 @@ struct NotificationCardView: View {
                 .help("Dismiss notification")
             }
 
-            // Title (Sender name)
+            // Title (Sender or conversation name)
             if let title = notification.title, !title.isEmpty {
                 Text(title)
                     .font(.custom("PlusJakartaSans-SemiBold", size: 13.5))
@@ -156,13 +167,30 @@ struct NotificationCardView: View {
                     .lineLimit(2)
             }
 
-            // Body Text (Notification content)
-            if let text = notification.text, !text.isEmpty {
+            // Body: Multi-line messages or single content
+            if let msgList = notification.messages, msgList.count > 1 {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(msgList) { msg in
+                        VStack(alignment: .leading, spacing: 1.5) {
+                            if let sender = msg.sender, !sender.isEmpty, sender != notification.title {
+                                Text(sender)
+                                    .font(.custom("PlusJakartaSans-SemiBold", size: 11))
+                                    .foregroundColor(BridgeColors.lime)
+                            }
+                            Text(msg.text)
+                                .font(.custom("PlusJakartaSans-Regular", size: 12))
+                                .foregroundColor(BridgeColors.soft)
+                                .lineSpacing(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+            } else if let text = notification.text, !text.isEmpty {
                 Text(text)
                     .font(.custom("PlusJakartaSans-Regular", size: 12))
                     .foregroundColor(BridgeColors.soft)
                     .lineSpacing(2.5)
-                    .lineLimit(4)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             // Inline Reply Field (if reply action exists)
@@ -471,22 +499,40 @@ struct FileTransferCardView: View {
                             }
                             .buttonStyle(.plain)
                         }
-                    } else if case .failed = item.status {
-                        Button(action: {
-                            manager.retryTransfer(id: item.id)
-                        }) {
-                            Text("Retry")
-                                .font(.custom("PlusJakartaSans-SemiBold", size: 11))
-                                .foregroundColor(BridgeColors.lime)
-                                .padding(.horizontal, 8)
-                                .frame(height: 24)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 7)
-                                        .stroke(BridgeColors.lime.opacity(0.4), lineWidth: 1)
-                                )
+                    } else if case .failed(let reason) = item.status {
+                        if reason.contains("System Settings") || reason.contains("Permission denied") {
+                            Button(action: {
+                                manager.openFilesAndFoldersSettings()
+                            }) {
+                                Text("Settings")
+                                    .font(.custom("PlusJakartaSans-SemiBold", size: 11))
+                                    .foregroundColor(BridgeColors.lime)
+                                    .padding(.horizontal, 8)
+                                    .frame(height: 24)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 7)
+                                            .stroke(BridgeColors.lime.opacity(0.4), lineWidth: 1)
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                            .help("Open macOS Privacy & Security Settings")
+                        } else {
+                            Button(action: {
+                                manager.retryTransfer(id: item.id)
+                            }) {
+                                Text("Retry")
+                                    .font(.custom("PlusJakartaSans-SemiBold", size: 11))
+                                    .foregroundColor(BridgeColors.lime)
+                                    .padding(.horizontal, 8)
+                                    .frame(height: 24)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 7)
+                                            .stroke(BridgeColors.lime.opacity(0.4), lineWidth: 1)
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                            .help("Retry transfer")
                         }
-                        .buttonStyle(.plain)
-                        .help("Retry transfer")
 
                         Button(action: {
                             manager.dismissTransfer(id: item.id)
@@ -590,7 +636,7 @@ struct FileTransferCardView: View {
     private var statusSubtitle: String {
         switch item.status {
         case .hashing:
-            return "\(item.formattedTotalSize) · Preparing…"
+            return item.isFolder ? "Packaging folder…" : "\(item.formattedTotalSize) · Preparing…"
         case .waitingConfirmation:
             return item.direction == .incoming
                 ? "\(item.formattedTotalSize) · From \(item.deviceName)"
@@ -603,7 +649,7 @@ struct FileTransferCardView: View {
             let pct = item.percentageInt
             return "Paused (\(pct)%) · \(item.formattedProgressSize)"
         case .verifying:
-            return "Verifying SHA-256 checksum…"
+            return item.isFolder ? "Extracting folder…" : "Verifying SHA-256 checksum…"
         case .completed:
             let dev = item.deviceName.isEmpty ? "" : " · \(item.deviceName)"
             return "\(item.formattedTotalSize)\(dev)"
@@ -1466,7 +1512,7 @@ struct BridgeMenuView: View {
                                         .foregroundColor(model.isConnected ? BridgeColors.lime : BridgeColors.muted)
                                 }
 
-                                Text(model.isDropTargeted ? "Drop to send to \(model.targetDeviceDisplayName)" : (model.isConnected ? "Drop files here or click to browse" : "Connect your phone to transfer files"))
+                                Text(model.isDropTargeted ? "Drop to send to \(model.targetDeviceDisplayName)" : (model.isConnected ? "Drop files or folders here or click to browse" : "Connect your phone to transfer files"))
                                     .font(.custom("PlusJakartaSans-SemiBold", size: 12.5))
                                     .foregroundColor(model.isDropTargeted ? BridgeColors.lime : (model.isConnected ? BridgeColors.text : BridgeColors.muted))
 
@@ -1767,6 +1813,47 @@ struct BridgeMenuView: View {
                                                     .font(.custom("PlusJakartaSans-Medium", size: 13))
                                                     .foregroundColor(BridgeColors.text)
                                                 Text("Grant Accessibility permission in System Settings.")
+                                                    .font(.custom("PlusJakartaSans-Regular", size: 11.5))
+                                                    .foregroundColor(BridgeColors.muted)
+                                            }
+
+                                            Spacer()
+
+                                            HStack(spacing: 4) {
+                                                Text("Required")
+                                                    .font(.custom("PlusJakartaSans-SemiBold", size: 10))
+                                                    .foregroundColor(BridgeColors.coral)
+                                                    .padding(.horizontal, 7)
+                                                    .padding(.vertical, 3)
+                                                    .background(
+                                                        Capsule().fill(BridgeColors.coral.opacity(0.16))
+                                                    )
+                                                Image(systemName: "chevron.right")
+                                                    .font(.system(size: 10, weight: .semibold))
+                                                    .foregroundColor(BridgeColors.muted)
+                                            }
+                                        }
+                                        .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                                if !fileTransferManager.isFilesAndFoldersAllowed {
+                                    Divider().background(BridgeColors.line.opacity(0.6))
+
+                                    Button(action: {
+                                        fileTransferManager.openFilesAndFoldersSettings()
+                                    }) {
+                                        HStack(alignment: .top, spacing: 10) {
+                                            Image(systemName: "folder.badge.gearshape")
+                                                .font(.system(size: 13))
+                                                .foregroundColor(BridgeColors.coral)
+                                                .padding(.top, 2)
+
+                                            VStack(alignment: .leading, spacing: 2) {
+                                                Text("Mac Files & Folders Access")
+                                                    .font(.custom("PlusJakartaSans-Medium", size: 13))
+                                                    .foregroundColor(BridgeColors.text)
+                                                Text("Allow Bridge to send files from your Documents folder.")
                                                     .font(.custom("PlusJakartaSans-Regular", size: 11.5))
                                                     .foregroundColor(BridgeColors.muted)
                                             }

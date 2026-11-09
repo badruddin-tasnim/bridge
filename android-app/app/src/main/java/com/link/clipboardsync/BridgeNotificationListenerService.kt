@@ -16,6 +16,7 @@ import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Base64
 import android.util.Log
+import androidx.core.app.NotificationCompat
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.ConcurrentHashMap
 
@@ -39,11 +40,20 @@ class BridgeNotificationListenerService : NotificationListenerService() {
 
         // Cache recent posted notifications to prevent rapid-fire duplicate events
         private val recentPosted = ConcurrentHashMap<String, Long>()
-        private val recentTitlePosted = ConcurrentHashMap<String, Long>()
-        private val recentTitleText = ConcurrentHashMap<String, String>()
+        private val lastSeenTextByNormKey = ConcurrentHashMap<String, String>()
+        private val messageHistoryByNormKey = ConcurrentHashMap<String, MutableList<BridgeMessageItem>>()
 
         fun normalizeKey(raw: String): String =
             raw.replace("\r", "").replace("\n", "").trim()
+
+        fun extractBaseKey(key: String): String {
+            return when {
+                key.contains("|msg_") -> key.substringBefore("|msg_")
+                key.contains("|line_") -> key.substringBefore("|line_")
+                key.contains("|upd_") -> key.substringBefore("|upd_")
+                else -> key
+            }
+        }
 
         data class ActionHolder(
             val action: Notification.Action,
@@ -63,6 +73,8 @@ class BridgeNotificationListenerService : NotificationListenerService() {
         instance = null
         actionCache.clear()
         rawKeyMap.clear()
+        lastSeenTextByNormKey.clear()
+        messageHistoryByNormKey.clear()
         Log.i(TAG, "Bridge Notification Listener disconnected.")
     }
 
@@ -94,7 +106,7 @@ class BridgeNotificationListenerService : NotificationListenerService() {
             return
         }
 
-        // Filter out persistent / foreground service ongoing banners (unless it's an active call or chat message)
+        // Filter out persistent / foreground service ongoing banners (unless active call or chat message)
         val isOngoing = (notif.flags and Notification.FLAG_ONGOING_EVENT) != 0 ||
                 (notif.flags and Notification.FLAG_FOREGROUND_SERVICE) != 0 ||
                 (notif.flags and Notification.FLAG_NO_CLEAR) != 0
@@ -109,47 +121,14 @@ class BridgeNotificationListenerService : NotificationListenerService() {
         }
 
         val extras = notif.extras ?: Bundle()
-        val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()
+        val defaultTitle = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()
             ?: extras.getCharSequence(Notification.EXTRA_TITLE_BIG)?.toString()
             ?: ""
 
-        val text = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
+        val defaultText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
             ?: extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
             ?: extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()
             ?: ""
-
-        if (title.isBlank() && text.isBlank()) return
-
-        if (!isFullSync) {
-            val dedupeKey = "$normKey|$title|$text"
-            val now = System.currentTimeMillis()
-            val last = recentPosted[dedupeKey] ?: 0L
-            if (now - last < 2500) {
-                Log.d(TAG, "Deduplicating duplicate notification event: $dedupeKey")
-                return
-            }
-            recentPosted[dedupeKey] = now
-            if (recentPosted.size > 100) {
-                val cutoff = now - 15000
-                recentPosted.entries.removeIf { it.value < cutoff }
-            }
-
-            // Deduplicate rapid successive notifications for same key & title
-            val dedupeTitleKey = "$normKey|$title"
-            val lastTitlePost = recentTitlePosted[dedupeTitleKey] ?: 0L
-            val lastTitleContent = recentTitleText[dedupeTitleKey] ?: ""
-            if (title.isNotBlank() && (now - lastTitlePost < 1500) && (text == lastTitleContent || (text.isNotEmpty() && lastTitleContent.isNotEmpty() && (text.contains(lastTitleContent) || lastTitleContent.contains(text))))) {
-                Log.d(TAG, "Deduplicating rapid duplicate variation for $dedupeTitleKey")
-                return
-            }
-            recentTitlePosted[dedupeTitleKey] = now
-            recentTitleText[dedupeTitleKey] = text
-            if (recentTitlePosted.size > 100) {
-                val cutoff = now - 15000
-                recentTitlePosted.entries.removeIf { it.value < cutoff }
-                recentTitleText.entries.removeIf { !recentTitlePosted.containsKey(it.key) }
-            }
-        }
 
         val appLabel = try {
             val pm = packageManager
@@ -190,16 +169,187 @@ class BridgeNotificationListenerService : NotificationListenerService() {
 
         actionCache[normKey] = actionsMap
 
+        // 1. Check for MessagingStyle (WhatsApp, Messenger, Telegram, Messages, Signal, Slack, etc.)
+        val messagingStyle = try {
+            NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(notif)
+        } catch (e: Exception) {
+            null
+        }
+
+        if (messagingStyle != null && messagingStyle.messages.isNotEmpty()) {
+            val conversationTitle = messagingStyle.conversationTitle?.toString()
+            val isGroup = messagingStyle.isGroupConversation || !conversationTitle.isNullOrBlank()
+            val messages = messagingStyle.messages
+            val messageItems = ArrayList<BridgeMessageItem>()
+
+            for (msg in messages) {
+                var msgText = msg.text?.toString() ?: ""
+                if (msgText.isBlank()) {
+                    if (msg.dataMimeType != null) {
+                        msgText = "[Attachment]"
+                    } else {
+                        continue
+                    }
+                }
+
+                val senderPerson = msg.person
+                val senderName = senderPerson?.name?.toString() ?: msg.sender?.toString()
+                val msgTime = if (msg.timestamp > 0) msg.timestamp else sbn.postTime
+                messageItems.add(BridgeMessageItem(text = msgText, timestamp = msgTime, sender = senderName))
+            }
+
+            if (messageItems.isNotEmpty()) {
+                val cardTitle = when {
+                    !conversationTitle.isNullOrBlank() -> conversationTitle
+                    !messageItems.last().sender.isNullOrBlank() -> messageItems.last().sender!!
+                    defaultTitle.isNotBlank() -> defaultTitle
+                    else -> appLabel
+                }
+
+                val combinedText = messageItems.joinToString("\n") { item ->
+                    if (isGroup && !item.sender.isNullOrBlank()) {
+                        "${item.sender}: ${item.text}"
+                    } else {
+                        item.text
+                    }
+                }
+
+                if (!isFullSync) {
+                    val dedupeKey = "$normKey|$cardTitle|$combinedText"
+                    val now = System.currentTimeMillis()
+                    val last = recentPosted[dedupeKey] ?: 0L
+                    if (now - last < 2500) {
+                        Log.d(TAG, "Deduplicating duplicate notification event: $dedupeKey")
+                        return
+                    }
+                    recentPosted[dedupeKey] = now
+                    if (recentPosted.size > 100) {
+                        val cutoff = now - 15000
+                        recentPosted.entries.removeIf { it.value < cutoff }
+                    }
+                }
+
+                val lastMsgTime = messageItems.last().timestamp
+                val bridgeNotif = BridgeNotification(
+                    id = normKey,
+                    source = "android",
+                    pkg = pkg,
+                    app = appLabel,
+                    title = cardTitle,
+                    text = combinedText,
+                    icon = iconBase64,
+                    timestamp = lastMsgTime,
+                    actions = actionsList,
+                    isSilent = isFullSync,
+                    messages = messageItems
+                )
+                BridgeNotificationManager.postToMac(bridgeNotif)
+                return
+            }
+        }
+
+        // 2. Check for InboxStyle (Gmail, Samsung Email, etc. with multiple text lines)
+        val textLines = extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES)
+        if (textLines != null && textLines.isNotEmpty()) {
+            val messageItems = ArrayList<BridgeMessageItem>()
+            for (line in textLines) {
+                val lineStr = line?.toString() ?: continue
+                if (lineStr.isBlank()) continue
+                messageItems.add(BridgeMessageItem(text = lineStr, timestamp = sbn.postTime))
+            }
+
+            if (messageItems.isNotEmpty()) {
+                val cardTitle = if (defaultTitle.isNotBlank()) defaultTitle else appLabel
+                val combinedText = messageItems.joinToString("\n") { it.text }
+
+                if (!isFullSync) {
+                    val dedupeKey = "$normKey|$cardTitle|$combinedText"
+                    val now = System.currentTimeMillis()
+                    val last = recentPosted[dedupeKey] ?: 0L
+                    if (now - last < 2500) {
+                        Log.d(TAG, "Deduplicating duplicate notification event: $dedupeKey")
+                        return
+                    }
+                    recentPosted[dedupeKey] = now
+                    if (recentPosted.size > 100) {
+                        val cutoff = now - 15000
+                        recentPosted.entries.removeIf { it.value < cutoff }
+                    }
+                }
+
+                val bridgeNotif = BridgeNotification(
+                    id = normKey,
+                    source = "android",
+                    pkg = pkg,
+                    app = appLabel,
+                    title = cardTitle,
+                    text = combinedText,
+                    icon = iconBase64,
+                    timestamp = sbn.postTime,
+                    actions = actionsList,
+                    isSilent = isFullSync,
+                    messages = messageItems
+                )
+                BridgeNotificationManager.postToMac(bridgeNotif)
+                return
+            }
+        }
+
+        // 3. Standard Notification / Non-MessagingStyle Updates
+        if (defaultTitle.isBlank() && defaultText.isBlank()) return
+
+        val isProgress = extras.getInt(Notification.EXTRA_PROGRESS_MAX, 0) > 0 ||
+                extras.getBoolean(Notification.EXTRA_PROGRESS_INDETERMINATE, false) ||
+                category == Notification.CATEGORY_PROGRESS
+
+        val history = messageHistoryByNormKey.computeIfAbsent(normKey) { ArrayList() }
+        var messagesToSend: List<BridgeMessageItem>? = null
+        var textToSend = defaultText
+
+        if (!isProgress && defaultText.isNotBlank()) {
+            synchronized(history) {
+                if (history.isEmpty() || history.last().text != defaultText) {
+                    history.add(BridgeMessageItem(text = defaultText, timestamp = sbn.postTime))
+                    if (history.size > 20) {
+                        history.removeAt(0)
+                    }
+                }
+                if (history.size > 1) {
+                    messagesToSend = ArrayList(history)
+                    textToSend = history.joinToString("\n") { it.text }
+                }
+            }
+        }
+
+        val cardTitle = if (defaultTitle.isNotBlank()) defaultTitle else appLabel
+
+        if (!isFullSync) {
+            val dedupeKey = "$normKey|$cardTitle|$textToSend"
+            val now = System.currentTimeMillis()
+            val last = recentPosted[dedupeKey] ?: 0L
+            if (now - last < 2500) {
+                Log.d(TAG, "Deduplicating duplicate notification event: $dedupeKey")
+                return
+            }
+            recentPosted[dedupeKey] = now
+            if (recentPosted.size > 100) {
+                val cutoff = now - 15000
+                recentPosted.entries.removeIf { it.value < cutoff }
+            }
+        }
+
         val bridgeNotif = BridgeNotification(
             id = normKey,
             source = "android",
             pkg = pkg,
             app = appLabel,
-            title = title,
-            text = text,
+            title = cardTitle,
+            text = textToSend,
             icon = iconBase64,
             timestamp = sbn.postTime,
-            actions = actionsList
+            actions = actionsList,
+            isSilent = isFullSync,
+            messages = messagesToSend
         )
 
         BridgeNotificationManager.postToMac(bridgeNotif)
@@ -273,6 +423,8 @@ class BridgeNotificationListenerService : NotificationListenerService() {
         Log.d(TAG, "Notification removed on device: $normKey ($pkg)")
         actionCache.remove(normKey)
         rawKeyMap.remove(normKey)
+        lastSeenTextByNormKey.remove(normKey)
+        messageHistoryByNormKey.remove(normKey)
         val remainingActive = getActiveNormalizedKeys(excludingKey = normKey)
         BridgeNotificationManager.removeFromMac(
             key = normKey,
@@ -326,7 +478,8 @@ class BridgeNotificationListenerService : NotificationListenerService() {
 
     fun executeAction(key: String, actionId: Int, replyText: String?): Boolean {
         val normKey = normalizeKey(key)
-        val actionsMap = actionCache[normKey] ?: actionCache[key] ?: return false
+        val baseKey = extractBaseKey(normKey)
+        val actionsMap = actionCache[baseKey] ?: actionCache[normKey] ?: actionCache[key] ?: return false
         val holder = actionsMap[actionId] ?: return false
 
         return try {
@@ -338,28 +491,33 @@ class BridgeNotificationListenerService : NotificationListenerService() {
                 }
                 RemoteInput.addResultsToIntent(holder.remoteInputs, intent, bundle)
                 holder.action.actionIntent.send(this, 0, intent)
-                Log.d(TAG, "Sent reply text for notification: $normKey (action $actionId)")
+                Log.d(TAG, "Sent reply text for notification: $baseKey (action $actionId)")
             } else {
                 holder.action.actionIntent.send()
-                Log.d(TAG, "Triggered action click for notification: $normKey (action $actionId)")
+                Log.d(TAG, "Triggered action click for notification: $baseKey (action $actionId)")
             }
             true
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to execute action on $normKey: ${e.message}", e)
+            Log.e(TAG, "Failed to execute action on $baseKey: ${e.message}", e)
             false
         }
     }
 
     fun dismissNotification(key: String) {
         val normKey = normalizeKey(key)
-        val targetRawKey = rawKeyMap[normKey] ?: key
+        val baseKey = extractBaseKey(normKey)
+        val targetRawKey = rawKeyMap[baseKey] ?: rawKeyMap[normKey] ?: key
         try {
             cancelNotification(targetRawKey)
+            actionCache.remove(baseKey)
             actionCache.remove(normKey)
+            rawKeyMap.remove(baseKey)
             rawKeyMap.remove(normKey)
-            Log.d(TAG, "Canceled notification: $normKey")
+            lastSeenTextByNormKey.remove(baseKey)
+            lastSeenTextByNormKey.remove(normKey)
+            Log.d(TAG, "Canceled notification: $baseKey (targetRawKey=$targetRawKey)")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to cancel notification $normKey: ${e.message}")
+            Log.e(TAG, "Failed to cancel notification $baseKey: ${e.message}")
         }
     }
 

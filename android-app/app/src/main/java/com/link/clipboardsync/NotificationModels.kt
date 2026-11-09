@@ -30,6 +30,30 @@ data class BridgeNotificationAction(
     }
 }
 
+data class BridgeMessageItem(
+    val text: String,
+    val timestamp: Long = System.currentTimeMillis(),
+    val sender: String? = null
+) {
+    fun toJson(): JSONObject {
+        val json = JSONObject()
+        json.put("text", text)
+        json.put("timestamp", timestamp)
+        sender?.let { json.put("sender", it) }
+        return json
+    }
+
+    companion object {
+        fun fromJson(json: JSONObject): BridgeMessageItem {
+            return BridgeMessageItem(
+                text = json.optString("text", ""),
+                timestamp = json.optLong("timestamp", System.currentTimeMillis()),
+                sender = json.optString("sender").ifEmpty { null }
+            )
+        }
+    }
+}
+
 data class BridgeNotification(
     val id: String,
     val source: String = "android", // "android" or "mac"
@@ -39,7 +63,9 @@ data class BridgeNotification(
     val text: String = "",
     val icon: String? = null, // Base64 encoded PNG
     val timestamp: Long = System.currentTimeMillis(),
-    val actions: List<BridgeNotificationAction> = emptyList()
+    val actions: List<BridgeNotificationAction> = emptyList(),
+    val isSilent: Boolean = false,
+    val messages: List<BridgeMessageItem>? = null
 ) {
     fun toPostJsonString(): String {
         val json = JSONObject()
@@ -51,6 +77,7 @@ data class BridgeNotification(
         json.put("title", title)
         json.put("text", text)
         json.put("timestamp", timestamp)
+        json.put("isSilent", isSilent)
         icon?.let { json.put("icon", it) }
 
         if (actions.isNotEmpty()) {
@@ -58,6 +85,13 @@ data class BridgeNotification(
             actions.forEach { arr.put(it.toJson()) }
             json.put("actions", arr)
         }
+
+        if (messages != null && messages.isNotEmpty()) {
+            val arr = JSONArray()
+            messages.forEach { arr.put(it.toJson()) }
+            json.put("messages", arr)
+        }
+
         return json.toString()
     }
 
@@ -72,6 +106,16 @@ data class BridgeNotification(
                     actionsList.add(BridgeNotificationAction.fromJson(aObj))
                 }
             }
+
+            val messagesList = ArrayList<BridgeMessageItem>()
+            val msgArr = json.optJSONArray("messages")
+            if (msgArr != null) {
+                for (i in 0 until msgArr.length()) {
+                    val mObj = msgArr.optJSONObject(i) ?: continue
+                    messagesList.add(BridgeMessageItem.fromJson(mObj))
+                }
+            }
+
             return BridgeNotification(
                 id = id,
                 source = json.optString("source", "android"),
@@ -81,7 +125,9 @@ data class BridgeNotification(
                 text = json.optString("text", ""),
                 icon = json.optString("icon").ifEmpty { null },
                 timestamp = json.optLong("timestamp", System.currentTimeMillis()),
-                actions = actionsList
+                actions = actionsList,
+                isSilent = json.optBoolean("isSilent", false),
+                messages = if (messagesList.isNotEmpty()) messagesList else null
             )
         }
     }

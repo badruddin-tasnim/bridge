@@ -1,5 +1,6 @@
 package com.link.clipboardsync
 
+import android.app.DownloadManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -19,18 +20,31 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.FileProvider
 import androidx.documentfile.provider.DocumentFile
 import org.json.JSONObject
+import java.io.BufferedInputStream
+import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.io.InputStream
 import java.io.RandomAccessFile
 import java.net.InetSocketAddress
 import java.net.Socket
 import java.security.MessageDigest
 import java.security.SecureRandom
+import java.util.ArrayDeque
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
+import java.util.zip.Deflater
+import java.util.zip.ZipEntry
+import java.util.zip.ZipFile
+import java.util.zip.ZipInputStream
+import java.util.zip.ZipOutputStream
 import javax.crypto.Cipher
 import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.SecretKeySpec
@@ -62,12 +76,14 @@ enum class TransferStatus {
 
 class FileTransferItem(
     val id: String,
-    val fileName: String,
-    val fileSize: Long,
+    @Volatile var fileName: String,
+    @Volatile var fileSize: Long,
     @Volatile var expectedSha256: String = "",
     val direction: TransferDirection,
     val deviceName: String = "Mac",
     val sourceUri: Uri? = null,
+    @Volatile var isFolder: Boolean = false,
+    @Volatile var tempArchiveFile: File? = null,
     @Volatile var partFile: File? = null,
     @Volatile var destinationFile: File? = null,
     @Volatile var destinationUri: Uri? = null,
@@ -79,7 +95,7 @@ class FileTransferItem(
     val createdAt: Long = System.currentTimeMillis()
 ) {
     val isExecutable: Boolean
-        get() = BridgeFileTransferManager.isExecutable(fileName)
+        get() = if (isFolder) false else BridgeFileTransferManager.isExecutable(fileName)
 
     @Volatile var bytesTransferred: Long = 0L
     @Volatile var speedBytesPerSec: Double = 0.0
@@ -128,6 +144,9 @@ class FileTransferItem(
 
     val iconResId: Int
         get() {
+            if (isFolder) {
+                return R.drawable.ic_file_folder
+            }
             return when (fileExtension) {
                 "pdf" -> R.drawable.ic_file_pdf
                 "jpg", "jpeg", "png", "webp", "gif", "heic", "svg", "bmp" -> R.drawable.ic_file_image
@@ -141,6 +160,7 @@ class FileTransferItem(
 
     val fileBadgeText: String
         get() {
+            if (isFolder) return "ZIP"
             return when (fileExtension) {
                 "pdf" -> "PDF"
                 "jpg", "jpeg", "png", "webp", "gif", "heic", "svg" -> "IMG"
@@ -161,6 +181,15 @@ object BridgeFileTransferManager {
     private const val HASH_CHUNK_SIZE = 1024 * 1024 // 1 MB
     private const val SAFETY_FREE_SPACE_BYTES = 50L * 1024L * 1024L // 50 MB
     private const val CHANNEL_ID_FILES = "bridge_file_transfers"
+    private const val CHANNEL_ID_TRANSFERS_PROGRESS = "bridge_file_transfers_progress"
+
+    fun isIgnoredMetadata(name: String): Boolean {
+        val lower = name.lowercase()
+        return lower == ".ds_store" || lower == "thumbs.db" || lower == "desktop.ini" ||
+               lower == "__macosx" || lower == ".trashes" || lower == ".spotlight-v100" ||
+               lower == ".fseventsd" || lower == ".temporaryitems" || lower == ".apdisk" ||
+               name.startsWith("._") || name.startsWith(".~")
+    }
 
     private val EXECUTABLE_EXTENSIONS = setOf(
         "apk", "sh", "command", "app", "dmg", "pkg", "exe", "bat", "cmd", "bin", "jar", "dex", "so", "vbs", "msi"
@@ -295,10 +324,137 @@ object BridgeFileTransferManager {
                     put("name", item.fileName)
                     put("size", item.fileSize)
                     put("sha256", item.expectedSha256)
+                    put("isFolder", false)
                 }
                 Log.d(TAG, "Sending file_request to Mac: $req")
                 sendControlJson(req)
             }
+        }
+    }
+
+    fun sendFolder(context: Context, treeUri: Uri) {
+        val appCtx = context.applicationContext
+        appContext = appCtx
+        val macName = BridgePrefs.macName(appCtx) ?: "Mac"
+
+        try {
+            appCtx.contentResolver.takePersistableUriPermission(
+                treeUri,
+                Intent.FLAG_GRANT_READ_URI_PERMISSION
+            )
+        } catch (_: Exception) {}
+
+        val docTree = DocumentFile.fromTreeUri(appCtx, treeUri) ?: return
+        val rawName = docTree.name ?: "Folder"
+        val cleanName = sanitizeFileName(rawName)
+        val id = "tx_" + UUID.randomUUID().toString().replace("-", "").lowercase()
+        Log.d(TAG, "Enqueueing outgoing folder transfer '$cleanName' with id: $id")
+
+        val item = FileTransferItem(
+            id = id,
+            fileName = cleanName,
+            fileSize = 0L,
+            direction = TransferDirection.OUTGOING,
+            deviceName = macName,
+            sourceUri = treeUri,
+            isFolder = true,
+            status = TransferStatus.HASHING
+        )
+
+        transfers.add(0, item)
+        notifyUi()
+
+        hashExecutor.execute {
+            val tempZipFile = File(appCtx.cacheDir, "bridge_pkg_${id}.zip")
+            if (tempZipFile.exists()) tempZipFile.delete()
+
+            val success = packageDocumentTreeToZip(appCtx, docTree, tempZipFile) {
+                cancelledIds.contains(id) || item.status == TransferStatus.CANCELLED
+            }
+
+            if (!success || !tempZipFile.exists() || tempZipFile.length() <= 0L) {
+                tempZipFile.delete()
+                if (!cancelledIds.contains(id) && item.status != TransferStatus.CANCELLED) {
+                    item.status = TransferStatus.FAILED
+                    item.errorMessage = "Could not package folder"
+                    notifyUi()
+                }
+                return@execute
+            }
+
+            val sha256 = computeFileSha256(tempZipFile)
+            if (sha256 == null) {
+                tempZipFile.delete()
+                if (!cancelledIds.contains(id) && item.status != TransferStatus.CANCELLED) {
+                    item.status = TransferStatus.FAILED
+                    item.errorMessage = "Could not hash folder"
+                    notifyUi()
+                }
+                return@execute
+            }
+
+            item.tempArchiveFile = tempZipFile
+            item.fileSize = tempZipFile.length()
+            item.expectedSha256 = sha256
+            item.status = TransferStatus.WAITING_CONFIRMATION
+            notifyUi()
+
+            val req = JSONObject().apply {
+                put("type", "file_request")
+                put("id", item.id)
+                put("name", item.fileName)
+                put("size", item.fileSize)
+                put("sha256", item.expectedSha256)
+                put("isFolder", true)
+            }
+            Log.d(TAG, "Sending folder file_request to Mac: $req")
+            sendControlJson(req)
+        }
+    }
+
+    private fun packageDocumentTreeToZip(
+        context: Context,
+        rootDir: DocumentFile,
+        outputZip: File,
+        shouldAbort: () -> Boolean
+    ): Boolean {
+        return try {
+            val rootName = sanitizeFileName(rootDir.name ?: "Folder")
+            // Use 128KB buffer and Deflater.BEST_SPEED (level 1) for near-instant packaging
+            ZipOutputStream(BufferedOutputStream(FileOutputStream(outputZip), 131072)).use { zos ->
+                zos.setLevel(Deflater.BEST_SPEED)
+                val queue = ArrayDeque<Pair<DocumentFile, String>>()
+                queue.add(Pair(rootDir, rootName))
+                val buffer = ByteArray(131072)
+
+                while (!queue.isEmpty()) {
+                    if (shouldAbort()) return false
+                    val (currentDoc, currentPath) = queue.removeFirst()
+                    val files = currentDoc.listFiles()
+                    for (file in files) {
+                        if (shouldAbort()) return false
+                        val fileName = file.name ?: continue
+                        if (isIgnoredMetadata(fileName)) continue
+
+                        val entryName = "$currentPath/$fileName"
+                        if (file.isDirectory) {
+                            zos.putNextEntry(ZipEntry("$entryName/"))
+                            zos.closeEntry()
+                            queue.add(Pair(file, entryName))
+                        } else if (file.isFile) {
+                            zos.putNextEntry(ZipEntry(entryName))
+                            context.contentResolver.openInputStream(file.uri)?.use { inStream ->
+                                inStream.copyTo(zos, 131072)
+                            }
+                            zos.closeEntry()
+                        }
+                    }
+                }
+            }
+            true
+        } catch (e: Exception) {
+            Log.w(TAG, "Error packaging folder to zip: ${e.message}")
+            false
         }
     }
 
@@ -316,7 +472,24 @@ object BridgeFileTransferManager {
             var sock: Socket? = null
             var input: InputStream? = null
             try {
-                val uri = item.sourceUri ?: throw IllegalStateException("Missing file URI")
+                val rawInput: InputStream = if (item.isFolder && item.tempArchiveFile != null) {
+                    FileInputStream(item.tempArchiveFile!!)
+                } else {
+                    val uri = item.sourceUri ?: throw IllegalStateException("Missing file URI")
+                    if (uri.scheme == "file") {
+                        val path = uri.path ?: ""
+                        var f = File(path)
+                        if (!f.exists()) {
+                            f = File(path.replaceFirst("^/sdcard", "/storage/emulated/0"))
+                        }
+                        FileInputStream(f)
+                    } else {
+                        context.applicationContext.contentResolver.openInputStream(uri)
+                            ?: throw IllegalStateException("Cannot open input stream for $uri")
+                    }
+                }
+                input = BufferedInputStream(rawInput, CHUNK_SIZE)
+
                 val s = Socket()
                 s.tcpNoDelay = true
                 s.keepAlive = true
@@ -333,22 +506,9 @@ object BridgeFileTransferManager {
                     put("offset", offset)
                 }.toString() + "\n"
 
-                val out = java.io.BufferedOutputStream(s.getOutputStream(), CHUNK_SIZE)
+                val out = BufferedOutputStream(s.getOutputStream(), CHUNK_SIZE)
                 out.write(header.toByteArray(Charsets.UTF_8))
                 out.flush()
-
-                val rawInput = if (uri.scheme == "file") {
-                    val path = uri.path ?: ""
-                    var f = File(path)
-                    if (!f.exists()) {
-                        f = File(path.replaceFirst("^/sdcard", "/storage/emulated/0"))
-                    }
-                    FileInputStream(f)
-                } else {
-                    context.contentResolver.openInputStream(uri)
-                        ?: throw IllegalStateException("Cannot open input stream")
-                }
-                input = java.io.BufferedInputStream(rawInput, CHUNK_SIZE)
 
                 if (offset > 0L) {
                     skipFully(input, offset)
@@ -357,6 +517,7 @@ object BridgeFileTransferManager {
                 item.bytesTransferred = offset
                 item.status = TransferStatus.TRANSFERRING
                 notifyUi()
+                updateProgressNotification(context, item)
 
                 val aesKey = deriveAesKey(token)
                 val secureRandom = SecureRandom()
@@ -366,6 +527,7 @@ object BridgeFileTransferManager {
                 var lastSpeedTime = System.currentTimeMillis()
                 var bytesSinceLastSpeed = 0L
                 var lastUiUpdateTime = 0L
+                var lastNotifUpdateTime = 0L
 
                 while (currentBytes < item.fileSize) {
                     if (pausedIds.contains(item.id) || cancelledIds.contains(item.id)) {
@@ -402,8 +564,14 @@ object BridgeFileTransferManager {
                         lastUiUpdateTime = now
                         notifyUi()
                     }
+                    if (now - lastNotifUpdateTime >= 500) {
+                        lastNotifUpdateTime = now
+                        updateProgressNotification(context, item)
+                    }
                 }
                 out.flush()
+
+                dismissProgressNotification(context, item.id)
 
                 if (cancelledIds.contains(item.id)) {
                     item.status = TransferStatus.CANCELLED
@@ -432,9 +600,14 @@ object BridgeFileTransferManager {
                 item.speedBytesPerSec = 0.0
                 notifyUi()
             } finally {
+                dismissProgressNotification(context, item.id)
                 try { input?.close() } catch (_: Exception) {}
                 try { sock?.close() } catch (_: Exception) {}
                 activeSockets.remove(item.id)
+                if (item.isFolder && (item.status.isFinished || cancelledIds.contains(item.id))) {
+                    item.tempArchiveFile?.delete()
+                    item.tempArchiveFile = null
+                }
             }
         }
     }
@@ -459,10 +632,12 @@ object BridgeFileTransferManager {
                 val port = jsonObj.optInt("port", 0)
                 val token = jsonObj.optString("token", "")
                 val isResume = jsonObj.optBoolean("resume", false)
+                val isFolder = jsonObj.optBoolean("isFolder", false)
 
                 if (size <= 0L || port <= 0 || token.isBlank() || resolvedHost.isNullOrBlank()) return
 
                 val cleanName = sanitizeFileName(rawName)
+                val targetFileName = if (isFolder && !cleanName.endsWith(".zip", ignoreCase = true)) "$cleanName.zip" else cleanName
                 val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
                 if (!downloadsDir.exists()) {
                     downloadsDir.mkdirs()
@@ -484,18 +659,21 @@ object BridgeFileTransferManager {
                     existing.offerHost = resolvedHost
                     existing.offerPort = port
                     existing.offerToken = token
+                    existing.isFolder = isFolder
+                    existing.fileName = targetFileName
                     item = existing
                 } else {
                     val partDir = File(appCtx.cacheDir, "transfers").apply { if (!exists()) mkdirs() }
                     val partFile = File(partDir, "$id.part")
                     item = FileTransferItem(
                         id = id,
-                        fileName = cleanName,
+                        fileName = targetFileName,
                         fileSize = size,
                         expectedSha256 = sha256,
                         direction = TransferDirection.INCOMING,
                         deviceName = BridgePrefs.macName(appCtx) ?: "Mac",
                         partFile = partFile,
+                        isFolder = isFolder,
                         status = TransferStatus.WAITING_CONFIRMATION,
                         offerHost = resolvedHost,
                         offerPort = port,
@@ -505,7 +683,7 @@ object BridgeFileTransferManager {
                 }
                 notifyUi()
 
-                val shouldAutoAccept = (isResume || BridgePrefs.isAutoAcceptFilesEnabled(appCtx)) && !isExecutable(cleanName)
+                val shouldAutoAccept = (isResume || BridgePrefs.isAutoAcceptFilesEnabled(appCtx)) && (isFolder || !isExecutable(cleanName))
                 if (shouldAutoAccept) {
                     acceptIncomingFile(appCtx, item.id)
                 } else {
@@ -624,6 +802,7 @@ object BridgeFileTransferManager {
                 item.bytesTransferred = offset
                 item.status = TransferStatus.TRANSFERRING
                 notifyUi()
+                updateProgressNotification(context, item)
 
                 val input = java.io.BufferedInputStream(s.getInputStream(), CHUNK_SIZE)
                 val aesKey = deriveAesKey(token)
@@ -633,6 +812,7 @@ object BridgeFileTransferManager {
                 var lastSpeedTime = System.currentTimeMillis()
                 var bytesSinceLastSpeed = 0L
                 var lastUiUpdateTime = 0L
+                var lastNotifUpdateTime = 0L
 
                 while (currentBytes < item.fileSize) {
                     if (pausedIds.contains(item.id) || cancelledIds.contains(item.id)) {
@@ -678,7 +858,13 @@ object BridgeFileTransferManager {
                         lastUiUpdateTime = now
                         notifyUi()
                     }
+                    if (now - lastNotifUpdateTime >= 500) {
+                        lastNotifUpdateTime = now
+                        updateProgressNotification(context, item)
+                    }
                 }
+
+                dismissProgressNotification(context, item.id)
 
                 try { raf.close() } catch (_: Exception) {}
                 raf = null
@@ -723,6 +909,13 @@ object BridgeFileTransferManager {
                     }
                 }
 
+                val finalName = if (item.isFolder && !item.fileName.endsWith(".zip", ignoreCase = true)) {
+                    "${item.fileName}.zip"
+                } else {
+                    item.fileName
+                }
+                item.fileName = finalName
+
                 val customUriStr = BridgePrefs.getCustomSaveTreeUri(appCtx)
                 var finalFile: File? = null
                 var finalDocUri: Uri? = null
@@ -733,7 +926,7 @@ object BridgeFileTransferManager {
                         val pickedDir = DocumentFile.fromTreeUri(appCtx, treeUri)
                         if (pickedDir != null && pickedDir.canWrite()) {
                             val ext = File(item.fileName).extension.lowercase()
-                            val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "application/octet-stream"
+                            val mime = if (item.isFolder || ext == "zip") "application/zip" else (MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "application/octet-stream")
                             val targetDoc = pickedDir.createFile(mime, item.fileName)
                             if (targetDoc != null) {
                                 appCtx.contentResolver.openOutputStream(targetDoc.uri)?.use { outStream ->
@@ -783,7 +976,7 @@ object BridgeFileTransferManager {
                 } else {
                     "Downloads"
                 }
-                postFileSavedNotification(appCtx, item.fileName, item.deviceName, locationName)
+                postFileSavedNotification(appCtx, item.fileName, item.deviceName, locationName, item.isFolder)
             } catch (e: Exception) {
                 Log.w(TAG, "Incoming transfer interrupted: ${e.message}")
                 if (cancelledIds.contains(item.id)) {
@@ -798,6 +991,7 @@ object BridgeFileTransferManager {
                 item.speedBytesPerSec = 0.0
                 notifyUi()
             } finally {
+                dismissProgressNotification(context, item.id)
                 try { raf?.close() } catch (_: Exception) {}
                 try { sock?.close() } catch (_: Exception) {}
                 activeSockets.remove(item.id)
@@ -808,6 +1002,7 @@ object BridgeFileTransferManager {
     // MARK: - Pause / Resume / Cancel
 
     fun pauseTransfer(id: String, notifyPeer: Boolean = true) {
+        dismissProgressNotification(appContext, id)
         val item = transfers.firstOrNull { it.id == id } ?: return
         pausedIds.add(id)
         activeSockets.remove(id)?.let {
@@ -840,6 +1035,7 @@ object BridgeFileTransferManager {
                 put("name", item.fileName)
                 put("size", item.fileSize)
                 put("sha256", item.expectedSha256)
+                put("isFolder", item.isFolder)
             }
             sendControlJson(req)
         } else {
@@ -856,6 +1052,7 @@ object BridgeFileTransferManager {
 
     fun cancelTransfer(id: String, notifyPeer: Boolean = true) {
         dismissPromptNotification(null, id)
+        dismissProgressNotification(appContext, id)
         val item = transfers.firstOrNull { it.id == id } ?: return
         cancelledIds.add(id)
         activeSockets.remove(id)?.let {
@@ -863,6 +1060,10 @@ object BridgeFileTransferManager {
         }
         item.partFile?.let {
             try { if (it.exists()) it.delete() } catch (_: Exception) {}
+        }
+        item.tempArchiveFile?.let {
+            try { if (it.exists()) it.delete() } catch (_: Exception) {}
+            item.tempArchiveFile = null
         }
         item.status = TransferStatus.CANCELLED
         item.speedBytesPerSec = 0.0
@@ -891,8 +1092,13 @@ object BridgeFileTransferManager {
 
         if (item.direction == TransferDirection.OUTGOING && item.sourceUri != null) {
             val uri = item.sourceUri
+            val isFolder = item.isFolder
             transfers.remove(item)
-            sendFiles(context, listOf(uri))
+            if (isFolder) {
+                sendFolder(context, uri)
+            } else {
+                sendFiles(context, listOf(uri))
+            }
         } else {
             sendControlJson(JSONObject().apply {
                 put("type", "file_resume")
@@ -902,16 +1108,58 @@ object BridgeFileTransferManager {
     }
 
     fun dismissTransfer(id: String) {
+        dismissPromptNotification(null, id)
+        dismissProgressNotification(appContext, id)
         cancelledIds.add(id)
         activeSockets.remove(id)?.let { try { it.close() } catch (_: Exception) {} }
         val item = transfers.firstOrNull { it.id == id }
         item?.partFile?.let { try { if (it.exists()) it.delete() } catch (_: Exception) {} }
+        item?.tempArchiveFile?.let { try { if (it.exists()) it.delete() } catch (_: Exception) {} }
         transfers.removeAll { it.id == id }
         notifyUi()
     }
 
     fun openTransferredFile(context: Context, item: FileTransferItem) {
         try {
+            if (item.isFolder) {
+                val destFile = item.destinationFile
+                if (destFile != null && destFile.exists()) {
+                    try {
+                        val uri = FileProvider.getUriForFile(
+                            context,
+                            "${context.packageName}.fileprovider",
+                            destFile
+                        )
+                        val intent = Intent(Intent.ACTION_VIEW).apply {
+                            setDataAndType(uri, "application/zip")
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(Intent.createChooser(intent, item.fileName).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        })
+                        return
+                    } catch (_: Exception) {}
+                    try {
+                        val dlIntent = Intent(DownloadManager.ACTION_VIEW_DOWNLOADS).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(dlIntent)
+                        return
+                    } catch (_: Exception) {}
+                } else if (item.destinationUri != null) {
+                    try {
+                        val intent = Intent(Intent.ACTION_VIEW).apply {
+                            setDataAndType(item.destinationUri, "application/zip")
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(Intent.createChooser(intent, item.fileName).apply {
+                            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        })
+                        return
+                    } catch (_: Exception) {}
+                }
+            }
+
             val uri: Uri
             val mimeType: String
             val destFile = item.destinationFile
@@ -1218,7 +1466,10 @@ object BridgeFileTransferManager {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
 
-            val body = if (item.isExecutable) {
+            val title = if (item.isFolder) "Incoming Folder Archive from ${item.deviceName}" else "Incoming File from ${item.deviceName}"
+            val body = if (item.isFolder) {
+                "📁 \"${item.fileName}\" (${item.formattedTotalSize})\nFolder archive (.zip) · Confirm to accept."
+            } else if (item.isExecutable) {
                 "⚠️ \"${item.fileName}\" (${item.formattedTotalSize})\nExecutable file · Confirm to accept."
             } else {
                 "\"${item.fileName}\" (${item.formattedTotalSize})"
@@ -1226,7 +1477,7 @@ object BridgeFileTransferManager {
 
             val notif = NotificationCompat.Builder(context, CHANNEL_ID_FILES)
                 .setSmallIcon(android.R.drawable.stat_sys_download)
-                .setContentTitle("Incoming File from ${item.deviceName}")
+                .setContentTitle(title)
                 .setContentText(body)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(body))
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
@@ -1248,7 +1499,103 @@ object BridgeFileTransferManager {
         } catch (_: Exception) {}
     }
 
-    private fun postFileSavedNotification(context: Context, fileName: String, macName: String, locationName: String) {
+    private fun ensureProgressNotificationChannel(context: Context) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+            if (nm.getNotificationChannel(CHANNEL_ID_TRANSFERS_PROGRESS) == null) {
+                val chan = NotificationChannel(
+                    CHANNEL_ID_TRANSFERS_PROGRESS,
+                    "File Transfer Progress",
+                    NotificationManager.IMPORTANCE_LOW
+                ).apply {
+                    description = "Shows live upload and download progress for active file and folder transfers"
+                    enableLights(false)
+                    enableVibration(false)
+                    setShowBadge(false)
+                }
+                nm.createNotificationChannel(chan)
+            }
+        }
+    }
+
+    fun updateProgressNotification(context: Context, item: FileTransferItem) {
+        try {
+            ensureProgressNotificationChannel(context)
+            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+
+            val isOutgoing = item.direction == TransferDirection.OUTGOING
+            val title = if (isOutgoing) {
+                if (item.isFolder) "Sending folder \"${item.fileName}\"" else "Sending \"${item.fileName}\""
+            } else {
+                if (item.isFolder) "Receiving folder \"${item.fileName}\"" else "Receiving \"${item.fileName}\""
+            }
+
+            val speedText = item.formattedSpeed
+            val etaText = item.remainingTimeText
+            val pct = item.percentageInt
+            val subtitle = if (speedText.isNotBlank()) {
+                if (etaText.isNotBlank()) "$pct% · $speedText · $etaText" else "$pct% · $speedText"
+            } else {
+                "$pct% · ${item.formattedProgressSize}"
+            }
+
+            val openIntent = Intent(context, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
+                putExtra("open_tab", "files")
+            }
+            val contentPi = PendingIntent.getActivity(
+                context,
+                ("open_" + item.id).hashCode(),
+                openIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val cancelIntent = Intent(context, FileTransferActionReceiver::class.java).apply {
+                action = FileTransferActionReceiver.ACTION_CANCEL_TRANSFER
+                putExtra(FileTransferActionReceiver.EXTRA_TRANSFER_ID, item.id)
+            }
+            val cancelPi = PendingIntent.getBroadcast(
+                context,
+                ("cancel_" + item.id).hashCode(),
+                cancelIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val smallIcon = if (isOutgoing) android.R.drawable.stat_sys_upload else android.R.drawable.stat_sys_download
+
+            val notif = NotificationCompat.Builder(context, CHANNEL_ID_TRANSFERS_PROGRESS)
+                .setSmallIcon(smallIcon)
+                .setContentTitle(title)
+                .setContentText(subtitle)
+                .setSubText(item.formattedTotalSize)
+                .setProgress(100, pct, false)
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setContentIntent(contentPi)
+                .addAction(android.R.drawable.ic_menu_close_clear_cancel, "Cancel", cancelPi)
+                .build()
+
+            nm.notify(("progress_" + item.id).hashCode(), notif)
+        } catch (e: Exception) {
+            Log.w(TAG, "Error updating progress notification: ${e.message}")
+        }
+    }
+
+    fun dismissProgressNotification(context: Context?, transferId: String) {
+        try {
+            val ctx = context ?: appContext ?: return
+            val nm = ctx.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager ?: return
+            nm.cancel(("progress_" + transferId).hashCode())
+        } catch (_: Exception) {}
+    }
+
+    private fun postFileSavedNotification(
+        context: Context,
+        fileName: String,
+        macName: String,
+        locationName: String,
+        isFolder: Boolean = false
+    ) {
         try {
             val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -1271,7 +1618,10 @@ object BridgeFileTransferManager {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
 
-            val body = if (isExecutable(fileName)) {
+            val title = if (isFolder) "Folder archive received from $macName" else "File received from $macName"
+            val body = if (isFolder) {
+                "📁 $fileName saved to $locationName · Tap to extract."
+            } else if (isExecutable(fileName)) {
                 "⚠️ $fileName saved to $locationName · Caution: Executable file."
             } else {
                 "$fileName saved to $locationName"
@@ -1279,7 +1629,7 @@ object BridgeFileTransferManager {
 
             val notif = NotificationCompat.Builder(context, CHANNEL_ID_FILES)
                 .setSmallIcon(android.R.drawable.stat_sys_download_done)
-                .setContentTitle("File received from $macName")
+                .setContentTitle(title)
                 .setContentText(body)
                 .setStyle(NotificationCompat.BigTextStyle().bigText(body))
                 .setAutoCancel(true)
