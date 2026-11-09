@@ -26,11 +26,11 @@ A lightweight, native open-source bridge linking your **Android phone** and your
 
 <table align="center">
   <tr>
-    <td align="center"><b>macOS Menu Bar App (Interactive Notifications)</b></td>
-    <td align="center"><b>Android App (Floating Pill Navigation)</b></td>
+    <td align="center"><b>macOS Menu Bar App (Local File Sharing & Transfer)</b></td>
+    <td align="center"><b>Android App (3-Tab Floating Pill Navigation)</b></td>
   </tr>
   <tr>
-    <td align="center"><img src="screenshots/mac/04-mac-connected-notifications-active.png" width="380" alt="macOS Menu Bar Popover with Interactive Notifications" /></td>
+    <td align="center"><img src="screenshots/mac/04-mac-connected-transfer.png" width="380" alt="macOS Menu Bar Popover with File Sharing & Live Transfer" /></td>
     <td align="center"><img src="screenshots/android/01-android-home-connected.png" width="240" alt="Android App Connected Screen" /></td>
   </tr>
 </table>
@@ -177,7 +177,7 @@ Pairing your devices is fast, private, and requires zero account creation:
   </tr>
   <tr>
     <td align="center"><img src="screenshots/android/02-android-home-connected-permissions-needed.png" width="240" alt="Android Permissions Screen" /></td>
-    <td align="center"><img src="screenshots/mac/03-mac-connected-notifications-empty.png" width="340" alt="macOS Connected Ready Screen" /></td>
+    <td align="center"><img src="screenshots/mac/03-mac-connected-devices.png" width="340" alt="macOS Connected Ready Screen" /></td>
   </tr>
 </table>
 
