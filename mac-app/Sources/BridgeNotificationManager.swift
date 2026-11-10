@@ -53,6 +53,7 @@ public class BridgeNotificationManager: NSObject, ObservableObject, UNUserNotifi
         didSet { UserDefaults.standard.set(isSoundEnabled, forKey: "bridge_notif_sound_enabled") }
     }
     @Published public var replyErrors: [String: String] = [:]
+    private var pendingBannerWorkItems: [String: DispatchWorkItem] = [:]
 
     public var settingsUpdatedAt: Int64 {
         get { Int64(UserDefaults.standard.integer(forKey: "bridge_settings_updated_at")) }
@@ -276,8 +277,11 @@ public class BridgeNotificationManager: NSObject, ObservableObject, UNUserNotifi
             timestamp: rawNotif.timestamp,
             actions: safeActions,
             isSilent: rawNotif.isSilent,
-            messages: rawNotif.messages
+            messages: rawNotif.messages,
+            isNewestFirst: rawNotif.isNewestFirst
         )
+
+        var previousNotif: BridgeNotification? = nil
 
         // Only treat as duplicate if ID is identical, or if app, title, AND text match within 2.5s
         if let existingIdx = activeNotifications.firstIndex(where: {
@@ -288,11 +292,15 @@ public class BridgeNotificationManager: NSObject, ObservableObject, UNUserNotifi
              abs(($0.timestamp ?? 0) - (notif.timestamp ?? 0)) < 2500)
         }) {
             let oldNotif = activeNotifications[existingIdx]
+            previousNotif = oldNotif
             activeNotifications.remove(at: existingIdx)
             activeNotifications.insert(notif, at: 0)
 
-            // If text and title did not change, it is an identical duplicate; do not re-alert
-            if oldNotif.title == notif.title && oldNotif.text == notif.text {
+            // If text, title, and message count/timestamp did not change, do not re-alert
+            if oldNotif.title == notif.title &&
+               oldNotif.text == notif.text &&
+               oldNotif.messages?.count == notif.messages?.count &&
+               oldNotif.messages?.last?.timestamp == notif.messages?.last?.timestamp {
                 return
             }
         } else {
@@ -306,16 +314,90 @@ public class BridgeNotificationManager: NSObject, ObservableObject, UNUserNotifi
 
         // Deliver native banner (unless silent sync)
         if !(notif.isSilent ?? false) {
-            deliverNativeBanner(notif)
+            deliverNativeBanner(notif, previousNotif: previousNotif)
         }
     }
 
-    private func deliverNativeBanner(_ notif: BridgeNotification) {
+    private static func isLikelyReverseChronologicalApp(_ pkg: String?) -> Bool {
+        guard let lower = pkg?.lowercased(), !lower.isEmpty else { return false }
+        let emailHints = ["com.google.android.gm", "outlook", "yahoo", "protonmail", "spark", ".email", ".mail"]
+        return emailHints.contains(where: { lower.contains($0) })
+    }
+
+    public static func formatBannerContent(
+        for notif: BridgeNotification,
+        previousNotif: BridgeNotification? = nil
+    ) -> (subtitle: String, body: String) {
+        let baseTitle = notif.title ?? ""
+
+        guard let msgList = notif.messages, !msgList.isEmpty else {
+            return (baseTitle, notif.text ?? "")
+        }
+
+        if msgList.count == 1 {
+            let single = msgList[0]
+            let body: String
+            if let sender = single.sender, !sender.isEmpty, sender != notif.title {
+                body = "\(sender): \(single.text)"
+            } else {
+                body = !single.text.isEmpty ? single.text : (notif.text ?? "")
+            }
+            return (baseTitle, String(body.prefix(2000)))
+        }
+
+        // Determine whether message array is already newest-first or chronological (oldest-first).
+        let alreadyNewestFirst: Bool
+        if let explicit = notif.isNewestFirst {
+            alreadyNewestFirst = explicit
+        } else if let prevMsgs = previousNotif?.messages, !prevMsgs.isEmpty {
+            if msgList.last?.text != prevMsgs.last?.text && msgList.first?.text == prevMsgs.first?.text {
+                alreadyNewestFirst = false
+            } else if msgList.first?.text != prevMsgs.first?.text && msgList.last?.text == prevMsgs.last?.text {
+                alreadyNewestFirst = true
+            } else if (msgList.first?.timestamp ?? 0) < (msgList.last?.timestamp ?? 0) {
+                alreadyNewestFirst = false
+            } else {
+                alreadyNewestFirst = isLikelyReverseChronologicalApp(notif.pkg)
+            }
+        } else if (msgList.first?.timestamp ?? 0) < (msgList.last?.timestamp ?? 0) {
+            alreadyNewestFirst = false
+        } else {
+            alreadyNewestFirst = isLikelyReverseChronologicalApp(notif.pkg)
+        }
+
+        // Put the newest messages at the top so collapsed macOS banners always preview the latest message,
+        // while expanding the notification reveals all older stacked messages underneath.
+        let ordered = alreadyNewestFirst ? msgList : Array(msgList.reversed())
+        let formattedLines = ordered.map { msg -> String in
+            if let sender = msg.sender, !sender.isEmpty, sender != notif.title {
+                return "\(sender): \(msg.text)"
+            }
+            return msg.text
+        }
+
+        let subtitle: String
+        if !baseTitle.isEmpty && !baseTitle.localizedCaseInsensitiveContains("message") {
+            subtitle = "\(baseTitle) · \(msgList.count) messages"
+        } else {
+            subtitle = baseTitle
+        }
+
+        let joined = formattedLines.joined(separator: "\n")
+        return (subtitle, String(joined.prefix(2000)))
+    }
+
+    private func deliverNativeBanner(_ notif: BridgeNotification, previousNotif: BridgeNotification? = nil) {
+        pendingBannerWorkItems[notif.id]?.cancel()
+        pendingBannerWorkItems.removeValue(forKey: notif.id)
+
+        let formatted = Self.formatBannerContent(for: notif, previousNotif: previousNotif)
+
         let content = UNMutableNotificationContent()
         content.title = notif.app ?? "Phone Notification"
-        content.subtitle = notif.title ?? ""
-        content.body = notif.text ?? ""
+        content.subtitle = formatted.subtitle
+        content.body = formatted.body
         content.sound = isSoundEnabled ? .default : nil
+        content.threadIdentifier = extractBaseId(notif.id)
         content.userInfo = ["notif_id": notif.id]
 
         var unActions: [UNNotificationAction] = []
@@ -351,21 +433,51 @@ public class BridgeNotificationManager: NSObject, ObservableObject, UNUserNotifi
         )
         content.categoryIdentifier = categoryId
 
-        UNUserNotificationCenter.current().getNotificationCategories { existing in
+        let center = UNUserNotificationCenter.current()
+        center.getNotificationCategories { [weak self] existing in
             var updated = existing
-            updated.insert(category)
-            UNUserNotificationCenter.current().setNotificationCategories(updated)
+            updated.update(with: category)
+            center.setNotificationCategories(updated)
 
-            let request = UNNotificationRequest(
-                identifier: notif.id,
-                content: content,
-                trigger: nil
-            )
-            UNUserNotificationCenter.current().add(request) { error in
-                if let error = error {
-                    NSLog("[BridgeNotif] Failed to post banner: \(error.localizedDescription)")
-                } else {
-                    NSLog("[BridgeNotif] Successfully posted banner for '\(notif.id)' [\(notif.app ?? "")]")
+            center.getDeliveredNotifications { delivered in
+                DispatchQueue.main.async {
+                    guard let self = self else { return }
+                    guard self.activeNotifications.contains(where: { self.normalizeNotifId($0.id) == notif.id }) else {
+                        return
+                    }
+
+                    let request = UNNotificationRequest(
+                        identifier: notif.id,
+                        content: content,
+                        trigger: nil
+                    )
+                    let postRequest: () -> Void = {
+                        center.add(request) { error in
+                            if let error = error {
+                                NSLog("[BridgeNotif] Failed to post banner: \(error.localizedDescription)")
+                            } else {
+                                NSLog("[BridgeNotif] Successfully posted banner for '\(notif.id)' [\(notif.app ?? "")]")
+                            }
+                        }
+                    }
+
+                    let alreadyDelivered = delivered.contains { $0.request.identifier == notif.id }
+                    if alreadyDelivered {
+                        self.pendingBannerWorkItems[notif.id]?.cancel()
+                        center.removeDeliveredNotifications(withIdentifiers: [notif.id])
+                        let workItem = DispatchWorkItem { [weak self] in
+                            guard let self = self else { return }
+                            self.pendingBannerWorkItems.removeValue(forKey: notif.id)
+                            guard self.activeNotifications.contains(where: { self.normalizeNotifId($0.id) == notif.id }) else {
+                                return
+                            }
+                            postRequest()
+                        }
+                        self.pendingBannerWorkItems[notif.id] = workItem
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: workItem)
+                    } else {
+                        postRequest()
+                    }
                 }
             }
         }
@@ -443,6 +555,8 @@ public class BridgeNotificationManager: NSObject, ObservableObject, UNUserNotifi
         })
         let allIdsToClean = Array(Set(matchingIds + [id, cleanId]))
         for key in allIdsToClean {
+            pendingBannerWorkItems[key]?.cancel()
+            pendingBannerWorkItems.removeValue(forKey: key)
             replyDrafts.removeValue(forKey: key)
             replyErrors.removeValue(forKey: key)
         }
@@ -508,12 +622,21 @@ public class BridgeNotificationManager: NSObject, ObservableObject, UNUserNotifi
     }
 
     public func clearLocalNotificationsOnly() {
+        for (_, item) in pendingBannerWorkItems {
+            item.cancel()
+        }
+        pendingBannerWorkItems.removeAll()
         let ids = activeNotifications.map { $0.id }
         activeNotifications.removeAll()
         replyDrafts.removeAll()
-        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ids)
-        UNUserNotificationCenter.current().removeAllPendingNotificationRequests()
-        UNUserNotificationCenter.current().setNotificationCategories([])
+        replyErrors.removeAll()
+        let center = UNUserNotificationCenter.current()
+        center.removeDeliveredNotifications(withIdentifiers: ids)
+        center.removePendingNotificationRequests(withIdentifiers: ids)
+        center.getNotificationCategories { existing in
+            let preserved = existing.filter { $0.identifier.hasPrefix("cat_file_") }
+            center.setNotificationCategories(preserved)
+        }
     }
 
     public func clearAll() {

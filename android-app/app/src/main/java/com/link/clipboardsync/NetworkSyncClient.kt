@@ -109,6 +109,7 @@ class NetworkSyncClient(private val context: Context) {
     @Volatile private var isDiscovering = false
 
     fun isConnected(): Boolean = authenticated && socket?.isClosed == false
+    fun isActivelyConnecting(): Boolean = isRunning.get()
     fun getCurrentHost(): String? = currentHost
 
     fun addListener(l: SyncListener) {
@@ -163,20 +164,32 @@ class NetworkSyncClient(private val context: Context) {
         notifyConnectionStatusChanged(false, null)
     }
 
-    fun sendUnpairAndStop() {
+    private fun stopWithSignal(signalType: String, clearPairingCode: Boolean, hostOnNotify: String?) {
         isRunning.set(false)
-        pairCode = null
+        if (clearPairingCode) {
+            pairCode = null
+        }
         stopDiscovery()
         stopHeartbeat()
+        val oldThread = readThread
+        readThread = null
         Thread {
             try {
-                writeRaw(ClipboardPayload(type = "unpair"))
+                writeRaw(ClipboardPayload(type = signalType))
+                Thread.sleep(100)
             } catch (ignored: Exception) {}
             disconnectSocket()
-            readThread?.interrupt()
-            readThread = null
-            notifyConnectionStatusChanged(false, null)
+            oldThread?.interrupt()
+            notifyConnectionStatusChanged(false, hostOnNotify)
         }.start()
+    }
+
+    fun sendDisconnectAndStop() {
+        stopWithSignal(signalType = "disconnect", clearPairingCode = false, hostOnNotify = currentHost)
+    }
+
+    fun sendUnpairAndStop() {
+        stopWithSignal(signalType = "unpair", clearPairingCode = true, hostOnNotify = null)
     }
 
     fun sendPayload(payload: ClipboardPayload) {
@@ -393,7 +406,8 @@ class NetworkSyncClient(private val context: Context) {
                                     "unpair" -> {
                                         log("Mac initiated unpair.")
                                         pairCode = null
-                                        BridgePrefs.clear(context)
+                                        BridgePrefs.clearPairing(context)
+                                        BridgeNotificationManager.cancelAllMacAlerts(context)
                                         isRunning.set(false)
                                         notifyRemoteUnpair()
                                         notifyConnectionStatusChanged(false, null)
@@ -420,17 +434,19 @@ class NetworkSyncClient(private val context: Context) {
                             if (authenticated) MAX_AUTH_LINE_CHARS else MAX_UNAUTH_LINE_CHARS
                         )
                     }
-                    if (line == null) {
+                    if (line == null && isRunning.get()) {
                         log("Connection closed by Mac (lid closed or asleep).")
                     }
                 } catch (e: Exception) {
-                    log("Connection dropped or failed: ${e.message}")
-                    failedAttempts++
-                    notifyConnectionFailed(failedAttempts)
+                    if (isRunning.get()) {
+                        log("Connection dropped or failed: ${e.message}")
+                        failedAttempts++
+                        notifyConnectionFailed(failedAttempts)
+                    }
                 } finally {
                     stopHeartbeat()
                     disconnectSocket()
-                    notifyConnectionStatusChanged(false, host)
+                    notifyConnectionStatusChanged(false, if (BridgePrefs.isPaired(context)) host else null)
                 }
 
                 if (isRunning.get()) {

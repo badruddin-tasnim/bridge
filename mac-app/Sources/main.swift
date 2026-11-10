@@ -230,6 +230,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
     func popoverDidClose(_ notification: Notification) {
         lastPopoverCloseTime = CACurrentMediaTime()
+        model.hideAllIpAddresses()
     }
 
     // MARK: - Finder Right-Click / Share / Services / Open With Integration

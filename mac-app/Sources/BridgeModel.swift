@@ -22,6 +22,8 @@ class BridgeModel: ObservableObject {
     @Published var selectedTargetDeviceId: UUID? = nil
     @Published var isDropTargeted: Bool = false
     @Published var deviceToUnpair: ConnectedDeviceInfo? = nil
+    @Published var revealedDeviceIpIds: Set<UUID> = []
+    @Published var isLocalIpRevealed: Bool = false
     enum BridgeTab: String, CaseIterable {
         case devices = "Devices"
         case notifications = "Notifications"
@@ -162,6 +164,38 @@ class BridgeModel: ObservableObject {
                 self.updateQrCode()
             }
         }
+
+        server.onRemoteUnpair = { [weak self] deviceId, _, remainingCount in
+            guard let self = self else { return }
+            self.connectedDevicesList.removeAll { $0.id == deviceId }
+            self.revealedDeviceIpIds.remove(deviceId)
+            if remainingCount == 0 && self.connectedDevicesList.isEmpty {
+                self.finalizeFullUnpairState()
+            } else if let first = self.connectedDevicesList.first {
+                self.pairedDevice = first.name
+                self.connectedDevice = first.name
+                UserDefaults.standard.set(first.name, forKey: BridgeModel.keyPairedDevice)
+                if self.selectedTargetDeviceId == deviceId || self.selectedTargetDeviceId == nil {
+                    self.selectedTargetDeviceId = first.id
+                }
+                self.onSizeChangeRequested?()
+            } else {
+                self.onSizeChangeRequested?()
+            }
+        }
+    }
+
+    func toggleDeviceIpVisibility(_ id: UUID) {
+        if revealedDeviceIpIds.contains(id) {
+            revealedDeviceIpIds.remove(id)
+        } else {
+            revealedDeviceIpIds.insert(id)
+        }
+    }
+
+    func hideAllIpAddresses() {
+        isLocalIpRevealed = false
+        revealedDeviceIpIds.removeAll()
     }
     
     func updateQrCode() {
@@ -204,18 +238,41 @@ class BridgeModel: ObservableObject {
         }
     }
     
+    private func refreshPairingCodeFromServer() {
+        rawCode = server.pairingCode
+        if rawCode.count == 6 {
+            formattedCode = "\(rawCode.prefix(3)) \(rawCode.suffix(3))"
+        } else {
+            formattedCode = rawCode
+        }
+        updateQrCode()
+    }
+
+    private func finalizeFullUnpairState() {
+        pairedDevice = nil
+        connectedDevicesList.removeAll()
+        selectedTargetDeviceId = nil
+        deviceToUnpair = nil
+        showUnpairConfirmation = false
+        showPairingSection = false
+        isConnected = false
+        connectedDevice = nil
+        hideAllIpAddresses()
+        UserDefaults.standard.removeObject(forKey: BridgeModel.keyPairedDevice)
+        BridgeNotificationManager.shared.clearLocalNotificationsOnly()
+        refreshPairingCodeFromServer()
+        onSizeChangeRequested?()
+    }
+
     func unpair(deviceId: UUID? = nil) {
         if let id = deviceId {
             server.disconnectDevice(id: id)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
                 guard let self = self else { return }
                 self.connectedDevicesList.removeAll { $0.id == id }
+                self.revealedDeviceIpIds.remove(id)
                 if self.connectedDevicesList.isEmpty {
-                    self.pairedDevice = nil
-                    UserDefaults.standard.removeObject(forKey: BridgeModel.keyPairedDevice)
-                    self.isConnected = false
-                    self.connectedDevice = nil
-                    self.selectedTargetDeviceId = nil
+                    self.finalizeFullUnpairState()
                 } else if let first = self.connectedDevicesList.first {
                     self.pairedDevice = first.name
                     self.connectedDevice = first.name
@@ -223,30 +280,16 @@ class BridgeModel: ObservableObject {
                     if self.selectedTargetDeviceId == id || self.selectedTargetDeviceId == nil {
                         self.selectedTargetDeviceId = first.id
                     }
+                    self.deviceToUnpair = nil
+                    self.onSizeChangeRequested?()
                 }
-                self.deviceToUnpair = nil
-                self.onSizeChangeRequested?()
             }
         } else {
-            pairedDevice = nil
-            connectedDevicesList.removeAll()
-            selectedTargetDeviceId = nil
-            deviceToUnpair = nil
-            UserDefaults.standard.removeObject(forKey: BridgeModel.keyPairedDevice)
+            finalizeFullUnpairState()
             server.unpairAllDevices()
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
-                guard let self = self else { return }
-                self.rawCode = self.server.pairingCode
-                if self.rawCode.count == 6 {
-                    self.formattedCode = "\(self.rawCode.prefix(3)) \(self.rawCode.suffix(3))"
-                } else {
-                    self.formattedCode = self.rawCode
-                }
-                self.updateQrCode()
-                self.isConnected = false
-                self.connectedDevice = nil
-                self.showPairingSection = false
-                self.onSizeChangeRequested?()
+                self?.refreshPairingCodeFromServer()
+                self?.onSizeChangeRequested?()
             }
         }
     }

@@ -165,6 +165,16 @@ object BridgePrefs {
             .apply()
     }
 
+    fun clearPairing(context: Context) {
+        prefs(context).edit()
+            .remove(KEY_HOST)
+            .remove(KEY_PORT)
+            .remove(KEY_CODE)
+            .remove(KEY_MAC_NAME)
+            .remove(KEY_PAIRED)
+            .apply()
+    }
+
     fun clear(context: Context) {
         prefs(context).edit().clear().apply()
     }

@@ -6,7 +6,7 @@ import CryptoKit
 // MARK: - Protocol Models
 
 struct ClipboardPayload: Codable {
-    let type: String          // "clip", "image", "ping", "pong", "hello", "welcome", "denied", "sleep", "unpair"
+    let type: String          // "clip", "image", "ping", "pong", "hello", "welcome", "denied", "sleep", "disconnect", "unpair"
     let hash: String?         // SHA-256 hex string
     let text: String?         // Plain text content
     let data: String?         // Base64-encoded image bytes
@@ -199,6 +199,7 @@ class BridgeServer {
     var onConnectedDevicesChanged: (([ConnectedDeviceInfo]) -> Void)?
     var onClipboardSynced: ((_ text: String, _ outgoing: Bool) -> Void)?
     var onIpChanged: ((_ ip: String) -> Void)?
+    var onRemoteUnpair: ((_ deviceId: UUID, _ deviceName: String?, _ remainingCount: Int) -> Void)?
     
     init() {
         loadOrGeneratePairingCode()
@@ -642,9 +643,27 @@ class BridgeServer {
             return
         }
         
-        if type == "unpair" {
+        if type == "disconnect" {
             conn.cancel()
             self.removeConnection(id: id)
+            return
+        }
+
+        if type == "unpair" {
+            let devName = self.clientDeviceNames[id]
+            conn.cancel()
+            self.removeConnection(id: id)
+            let remainingCount = self.authenticatedConnections.count
+            if remainingCount == 0 {
+                self.resetPairingSecurityState()
+            }
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                if remainingCount == 0 {
+                    self.generateNewPairingCode()
+                }
+                self.onRemoteUnpair?(id, devName, remainingCount)
+            }
             return
         }
         
@@ -715,6 +734,12 @@ class BridgeServer {
                 self.networkQueue.asyncAfter(deadline: .now() + 0.1) {
                     conn.cancel()
                     self.removeConnection(id: id)
+                    if self.authenticatedConnections.isEmpty {
+                        self.resetPairingSecurityState()
+                        DispatchQueue.main.async {
+                            self.generateNewPairingCode()
+                        }
+                    }
                 }
             }
         }
@@ -978,6 +1003,14 @@ class BridgeServer {
         notifyUiStatus()
     }
     
+    private func resetPairingSecurityState() {
+        failedHelloTimestampsByIp.removeAll()
+        ipLockoutUntil.removeAll()
+        ipLockoutCount.removeAll()
+        usedHelloNonces.removeAll()
+        usedHelloNonceOrder.removeAll()
+    }
+
     func unpairAllDevices() {
         let unpairPayload = ClipboardPayload(type: "unpair")
         broadcastPayload(unpairPayload)
@@ -985,11 +1018,7 @@ class BridgeServer {
         networkQueue.asyncAfter(deadline: .now() + 0.15) { [weak self] in
             guard let self = self else { return }
             self.closeAllConnections()
-            self.failedHelloTimestampsByIp.removeAll()
-            self.ipLockoutUntil.removeAll()
-            self.ipLockoutCount.removeAll()
-            self.usedHelloNonces.removeAll()
-            self.usedHelloNonceOrder.removeAll()
+            self.resetPairingSecurityState()
             DispatchQueue.main.async {
                 self.generateNewPairingCode()
             }

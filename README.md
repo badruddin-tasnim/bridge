@@ -9,7 +9,7 @@
 A lightweight, native open-source bridge linking your **Android phone** and your **Mac** over your local Wi-Fi network—with zero cloud accounts, zero telemetry, and zero latency.
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-v1.3.0-C8F135?style=for-the-badge&labelColor=0E0F12" alt="Version 1.3.0" />
+  <img src="https://img.shields.io/badge/Version-v1.3.1-C8F135?style=for-the-badge&labelColor=0E0F12" alt="Version 1.3.1" />
   <img src="https://img.shields.io/badge/Android-Kotlin-C8F135?style=for-the-badge&logo=android&logoColor=C8F135&labelColor=0E0F12" alt="Android Kotlin" />
   <img src="https://img.shields.io/badge/macOS-Swift_%26_SwiftUI-C8F135?style=for-the-badge&logo=apple&logoColor=C8F135&labelColor=0E0F12" alt="macOS Swift" />
   <img src="https://img.shields.io/badge/Network-100%25_Local_LAN-181B20?style=for-the-badge&labelColor=0E0F12&color=C8F135" alt="100% Local LAN" />
@@ -17,7 +17,7 @@ A lightweight, native open-source bridge linking your **Android phone** and your
 </p>
 
 <p align="center">
-  <a href="#-whats-new-in-v130">What's New in v1.3.0</a> •
+  <a href="#-whats-new-in-v131">What's New in v1.3.1</a> •
   <a href="#-key-features">Key Features</a> •
   <a href="#-getting-started">Getting Started</a> •
   <a href="#-pairing--multi-device-connection">Pairing & Multi-Device</a> •
@@ -30,8 +30,8 @@ A lightweight, native open-source bridge linking your **Android phone** and your
     <td align="center"><b>Android App (3-Tab Floating Pill Navigation)</b></td>
   </tr>
   <tr>
-    <td align="center"><img src="screenshots/mac/04-mac-connected-transfer.png" width="380" alt="macOS Menu Bar Popover with File Sharing & Live Transfer" /></td>
-    <td align="center"><img src="screenshots/android/01-android-home-connected.png" width="240" alt="Android App Connected Screen" /></td>
+    <td align="center"><img src="https://raw.githubusercontent.com/badruddin-tasnim/bridge/assets/mac/04-mac-connected-transfer.png" width="380" alt="macOS Menu Bar Popover with File Sharing & Live Transfer" /></td>
+    <td align="center"><img src="https://raw.githubusercontent.com/badruddin-tasnim/bridge/assets/android/01-android-home-connected.png" width="240" alt="Android App Connected Screen" /></td>
   </tr>
 </table>
 
@@ -45,22 +45,13 @@ A lightweight, native open-source bridge linking your **Android phone** and your
 
 ---
 
-## ⚡ What's New in v1.3.0
+## ⚡ What's New in v1.3.1
 
-Bridge **v1.3.0** introduces high-speed local file & folder sharing and conversation-grouped notification threads:
+Bridge **v1.3.1** focuses on bug fixes and privacy polish:
 
-1. **High-Speed Encrypted Local File & Folder Sharing:**
-   - **🚀 Direct Gigabit LAN Streaming:** Transfer files and full folder directories directly between Mac and Android over your local Wi-Fi or Personal Hotspot with zero cloud intermediate and zero internet data usage.
-   - **📦 No File Size Limits:** Send 4K video clips, raw photo shoots, and large archive collections without artificial size caps.
-   - **🛡️ Hardware-Accelerated AES-GCM:** Every frame is encrypted end-to-end (128-bit authentication tag, 12-byte random nonce per frame) with SHA-256 integrity verification.
-   - **📂 Clean Recursive Folder Sharing:** Full folder structures are preserved and packaged with fast deflate compression, automatically filtering out OS metadata junk (`.DS_Store`, `__MACOSX`, `Thumbs.db`, `.Trashes`).
-   - **📁 Custom Save Directories:** Choose custom save locations on Android (via SAF) and macOS (via Security-Scoped Bookmarks).
-   - **🖱️ Native OS Integration:** Drag & drop onto the Mac menu bar icon, right-click any file in Finder (*Quick Actions → Share with Bridge*), or tap *Share → Send to Mac (Bridge)* in Android apps.
-
-2. **Conversation-Grouped Notification Threads:**
-   - Multi-line conversation cards displaying the full chat thread in chronological order, matching Android's expanded notification panel.
-   - Message count pill badges indicating unread counts per contact or group chat.
-   - Seamless two-way interaction: dismissing or replying on either device synchronizes instantly in real-time.
+- **Latest Message First in macOS Notifications** — Stacked chat banners on macOS now preview the newest incoming message when collapsed while keeping older messages visible when expanded.
+- **Clean Disconnect & Unpair Sync** — Added a dedicated **Disconnect** / **Connect** button on Android, fixed the unpaired state (`No device paired`), and synchronized remote unpairing so macOS resets directly to the pairing screen.
+- **Hidden IP Addresses by Default** — Masked IP addresses in the macOS menu bar with dots (`•••.•••.•••`) and added a small eye icon toggle to reveal or hide them on click.
 
 ---
 
@@ -103,15 +94,15 @@ You can install Bridge by downloading the pre-built binaries from [**GitHub Rele
 
 ### Option 1: Direct Download
 
-1. Download the latest **`v1.3.0`** release assets from [**Releases**](../../releases):
-   - 💻 **`Bridge-v1.3.0-macOS.zip`** — Native macOS Menu Bar App (`macOS 11.0+`)
-   - 📱 **`Bridge-v1.3.0-Android.apk`** — Native Android App (`Android 8.0+`)
+1. Download the latest **`v1.3.1`** release assets from [**Releases**](../../releases):
+   - 💻 **`Bridge-v1.3.1-macOS.zip`** — Native macOS Menu Bar App (`macOS 11.0+`)
+   - 📱 **`Bridge-v1.3.1-Android.apk`** — Native Android App (`Android 8.0+`)
 2. **Install on macOS:**
-   - Unzip `Bridge-v1.3.0-macOS.zip` and move **`Bridge.app`** into `/Applications`.
+   - Unzip `Bridge-v1.3.1-macOS.zip` and move **`Bridge.app`** into `/Applications`.
    - Launch **`Bridge.app`**. *(If macOS Gatekeeper prompts on first launch, right-click `Bridge.app` → **Open**, or run `xattr -cr /Applications/Bridge.app && open /Applications/Bridge.app` in Terminal).*
    - The Bridge icon will appear in your top menu bar.
 3. **Install on Android:**
-   - Open **`Bridge-v1.3.0-Android.apk`** on your Android phone to install the app.
+   - Open **`Bridge-v1.3.1-Android.apk`** on your Android phone to install the app.
 
 ---
 
@@ -119,13 +110,13 @@ You can install Bridge by downloading the pre-built binaries from [**GitHub Rele
 
 ```bash
 # 1. Download & launch the macOS Menu Bar app
-curl -L -o /tmp/Bridge-macOS.zip "https://github.com/badruddin-tasnim/bridge/releases/download/v1.3.0/Bridge-v1.3.0-macOS.zip"
+curl -L -o /tmp/Bridge-macOS.zip "https://github.com/badruddin-tasnim/bridge/releases/download/v1.3.1/Bridge-v1.3.1-macOS.zip"
 unzip -q -o /tmp/Bridge-macOS.zip -d /Applications
 xattr -cr /Applications/Bridge.app
 open /Applications/Bridge.app
 
 # 2. Download & install the Android APK over ADB
-curl -L -o /tmp/Bridge-Android.apk "https://github.com/badruddin-tasnim/bridge/releases/download/v1.3.0/Bridge-v1.3.0-Android.apk"
+curl -L -o /tmp/Bridge-Android.apk "https://github.com/badruddin-tasnim/bridge/releases/download/v1.3.1/Bridge-v1.3.1-Android.apk"
 adb install -r /tmp/Bridge-Android.apk
 ```
 
@@ -168,16 +159,16 @@ Pairing your devices is fast, private, and requires zero account creation:
     <td align="center" width="50%"><b>Step 2: Scan QR or Enter Code on Phone</b></td>
   </tr>
   <tr>
-    <td align="center"><img src="screenshots/mac/01-mac-unpaired-waiting.png" width="340" alt="macOS Unpaired Waiting Screen" /></td>
-    <td align="center"><img src="screenshots/android/09-android-unpaired-pairing-screen.png" width="240" alt="Android Pairing Screen" /></td>
+    <td align="center"><img src="https://raw.githubusercontent.com/badruddin-tasnim/bridge/assets/mac/01-mac-unpaired-waiting.png" width="340" alt="macOS Unpaired Waiting Screen" /></td>
+    <td align="center"><img src="https://raw.githubusercontent.com/badruddin-tasnim/bridge/assets/android/09-android-unpaired-pairing-screen.png" width="240" alt="Android Pairing Screen" /></td>
   </tr>
   <tr>
-    <td align="center" width="50%"><b>Step 3: Enable Permissions</b></td>
+    <td align="center" width="50%"><b>Step 3: Permissions & Device Controls</b></td>
     <td align="center" width="50%"><b>Step 4: Connected & Ready</b></td>
   </tr>
   <tr>
-    <td align="center"><img src="screenshots/android/02-android-home-connected-permissions-needed.png" width="240" alt="Android Permissions Screen" /></td>
-    <td align="center"><img src="screenshots/mac/03-mac-connected-devices.png" width="340" alt="macOS Connected Ready Screen" /></td>
+    <td align="center"><img src="https://raw.githubusercontent.com/badruddin-tasnim/bridge/assets/android/02-android-settings-permissions-devices.png" width="240" alt="Android Permissions and Device Management Screen" /></td>
+    <td align="center"><img src="https://raw.githubusercontent.com/badruddin-tasnim/bridge/assets/mac/03-mac-connected-devices.png" width="340" alt="macOS Connected Ready Screen" /></td>
   </tr>
 </table>
 
@@ -188,7 +179,7 @@ Pairing your devices is fast, private, and requires zero account creation:
 3. **Scan or Type Code on Android:**
    - Tap **Scan QR code** in the Android app and point your camera at the Mac menu bar popover.
    - *Alternatively:* Enter the 6-digit pairing code shown on your Mac.
-   - *Manual IP:* If on an enterprise network blocking multicast (mDNS), tap **Enter IP address manually** and input the `IP:port` shown in the bottom bar of the Mac popover.
+   - *Manual IP:* If on an enterprise network blocking multicast (mDNS), tap **Enter IP address instead** and click the eye icon in the bottom bar of the Mac popover to view your `IP:port`.
 4. **Grant Permissions on Android:**
    - **Notification Access:** Allows Bridge to mirror your incoming notifications and route quick replies.
    - **Accessibility Service:** Android 10+ restricts background apps from reading the clipboard. Bridge uses an accessibility event listener to capture copy actions without screen reading or keylogging.
@@ -199,7 +190,7 @@ Pairing your devices is fast, private, and requires zero account creation:
    - Scan with your second device to link both phones simultaneously!
 
 <div align="center">
-  <img src="screenshots/mac/10-mac-connected-add-another-phone.png" width="380" alt="Pairing another phone simultaneously" />
+  <img src="https://raw.githubusercontent.com/badruddin-tasnim/bridge/assets/mac/10-mac-connected-add-another-phone.png" width="380" alt="Pairing another phone simultaneously" />
   <p><i>Expand "Add another phone" anytime to connect an additional device.</i></p>
 </div>
 

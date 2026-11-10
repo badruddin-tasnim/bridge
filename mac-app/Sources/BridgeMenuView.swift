@@ -87,6 +87,44 @@ struct UnlinkIconShape: Shape {
     }
 }
 
+struct MaskedIpToggleView: View {
+    let prefix: String
+    let ip: String
+    let suffix: String
+    let isRevealed: Bool
+    let fontName: String
+    let onToggle: () -> Void
+
+    var body: some View {
+        HStack(spacing: 0) {
+            if !prefix.isEmpty {
+                Text(prefix)
+                    .font(.custom(fontName, size: 11.5))
+                    .foregroundColor(BridgeColors.muted)
+                    .lineLimit(1)
+            }
+
+            Button(action: onToggle) {
+                HStack(spacing: 5) {
+                    Text("\(isRevealed ? ip : "•••.•••.•••")\(suffix)")
+                        .font(.custom(fontName, size: 11.5))
+                        .foregroundColor(BridgeColors.muted)
+                        .lineLimit(1)
+
+                    Image(systemName: isRevealed ? "eye.slash" : "eye")
+                        .font(.system(size: 10.5, weight: .medium))
+                        .foregroundColor(BridgeColors.muted.opacity(0.85))
+                        .frame(width: 15, height: 15)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(isRevealed ? "Hide IP address" : "Show IP address")
+        }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
 // MARK: - Notification Card Item
 
 struct NotificationCardView: View {
@@ -1142,11 +1180,32 @@ struct BridgeMenuView: View {
                                                 .lineLimit(1)
                                                 .fixedSize(horizontal: false, vertical: true)
 
-                                            Text(device.isConnected ? (device.ip != nil ? "Connected · \(device.ip!)" : "Connected · Same Wi-Fi") : "Disconnected · Check Wi-Fi")
-                                                .font(.custom("PlusJakartaSans-Regular", size: 11.5))
-                                                .foregroundColor(BridgeColors.muted)
-                                                .lineLimit(1)
-                                                .fixedSize(horizontal: false, vertical: true)
+                                            if device.isConnected {
+                                                if let ip = device.ip {
+                                                    MaskedIpToggleView(
+                                                        prefix: "Connected · ",
+                                                        ip: ip,
+                                                        suffix: "",
+                                                        isRevealed: model.revealedDeviceIpIds.contains(device.id),
+                                                        fontName: "PlusJakartaSans-Regular",
+                                                        onToggle: {
+                                                            model.toggleDeviceIpVisibility(device.id)
+                                                        }
+                                                    )
+                                                } else {
+                                                    Text("Connected · Same Wi-Fi")
+                                                        .font(.custom("PlusJakartaSans-Regular", size: 11.5))
+                                                        .foregroundColor(BridgeColors.muted)
+                                                        .lineLimit(1)
+                                                        .fixedSize(horizontal: false, vertical: true)
+                                                }
+                                            } else {
+                                                Text("Disconnected · Check Wi-Fi")
+                                                    .font(.custom("PlusJakartaSans-Regular", size: 11.5))
+                                                    .foregroundColor(BridgeColors.muted)
+                                                    .lineLimit(1)
+                                                    .fixedSize(horizontal: false, vertical: true)
+                                            }
                                         }
                                         .layoutPriority(1)
 
@@ -1983,11 +2042,16 @@ struct BridgeMenuView: View {
 
             // Footer Bar
             HStack {
-                HStack(spacing: 4) {
-                    Text("\(model.localIp):\(String(model.port))")
-                        .font(.custom("DMMono-Regular", size: 11.5))
-                        .foregroundColor(BridgeColors.muted)
-                }
+                MaskedIpToggleView(
+                    prefix: "",
+                    ip: model.localIp,
+                    suffix: ":\(String(model.port))",
+                    isRevealed: model.isLocalIpRevealed,
+                    fontName: "DMMono-Regular",
+                    onToggle: {
+                        model.isLocalIpRevealed.toggle()
+                    }
+                )
 
                 Spacer()
 

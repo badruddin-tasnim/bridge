@@ -74,9 +74,23 @@ object ClipboardSyncManager {
         networkClient?.start(host, port, code)
     }
 
+    /** Disconnects from the currently paired Mac without removing pairing credentials. */
+    fun disconnect(context: Context) {
+        networkClient?.sendDisconnectAndStop()
+        BridgeNotificationManager.cancelAllMacAlerts(context)
+    }
+
+    /** Reconnects to the saved paired Mac using stored pairing credentials. */
+    fun reconnect(context: Context) {
+        if (!BridgePrefs.isPaired(context)) return
+        init(context)
+        networkClient?.start(BridgePrefs.host(context), BridgePrefs.port(context), BridgePrefs.code(context))
+    }
+
     fun unpair(context: Context) {
+        BridgePrefs.clearPairing(context)
         networkClient?.sendUnpairAndStop()
-        BridgePrefs.clear(context)
+        BridgeNotificationManager.cancelAllMacAlerts(context)
         history.clear()
         historyListeners.forEach { try { it.onHistoryChanged() } catch (ignored: Exception) {} }
     }

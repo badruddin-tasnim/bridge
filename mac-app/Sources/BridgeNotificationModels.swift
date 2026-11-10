@@ -42,6 +42,7 @@ public struct BridgeNotification: Codable, Identifiable {
     public let actions: [BridgeNotificationAction]?
     public let isSilent: Bool?
     public let messages: [BridgeMessageItem]?
+    public let isNewestFirst: Bool?
 
     public init(
         id: String,
@@ -54,7 +55,8 @@ public struct BridgeNotification: Codable, Identifiable {
         timestamp: Int64? = Int64(Date().timeIntervalSince1970 * 1000),
         actions: [BridgeNotificationAction]? = nil,
         isSilent: Bool? = false,
-        messages: [BridgeMessageItem]? = nil
+        messages: [BridgeMessageItem]? = nil,
+        isNewestFirst: Bool? = nil
     ) {
         self.id = id
         self.source = source
@@ -67,6 +69,7 @@ public struct BridgeNotification: Codable, Identifiable {
         self.actions = actions
         self.isSilent = isSilent
         self.messages = messages
+        self.isNewestFirst = isNewestFirst
     }
 
     public var iconImage: NSImage? {

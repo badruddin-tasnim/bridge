@@ -65,7 +65,8 @@ data class BridgeNotification(
     val timestamp: Long = System.currentTimeMillis(),
     val actions: List<BridgeNotificationAction> = emptyList(),
     val isSilent: Boolean = false,
-    val messages: List<BridgeMessageItem>? = null
+    val messages: List<BridgeMessageItem>? = null,
+    val isNewestFirst: Boolean? = null
 ) {
     fun toPostJsonString(): String {
         val json = JSONObject()
@@ -79,6 +80,7 @@ data class BridgeNotification(
         json.put("timestamp", timestamp)
         json.put("isSilent", isSilent)
         icon?.let { json.put("icon", it) }
+        isNewestFirst?.let { json.put("isNewestFirst", it) }
 
         if (actions.isNotEmpty()) {
             val arr = JSONArray()
@@ -127,7 +129,8 @@ data class BridgeNotification(
                 timestamp = json.optLong("timestamp", System.currentTimeMillis()),
                 actions = actionsList,
                 isSilent = json.optBoolean("isSilent", false),
-                messages = if (messagesList.isNotEmpty()) messagesList else null
+                messages = if (messagesList.isNotEmpty()) messagesList else null,
+                isNewestFirst = if (json.has("isNewestFirst")) json.optBoolean("isNewestFirst", false) else null
             )
         }
     }

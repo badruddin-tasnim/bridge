@@ -146,12 +146,14 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
     private lateinit var tvSettingAccessibilityStatus: TextView
     private lateinit var tvSettingsDeviceMacName: TextView
     private lateinit var tvSettingsDeviceStatus: TextView
+    private lateinit var btnToggleConnectMacSettings: Button
     private lateinit var btnUnpairMacSettings: Button
 
     // Failure / Retry tracking
     private var consecutiveFailures = 0
     private var userConnectAttempts = 0
     private var wasConnectedBefore = false
+    private var userManuallyDisconnected = false
 
     // Screen B: Pairing
     private lateinit var layoutScreenPairing: LinearLayout
@@ -428,6 +430,7 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         tvSettingAccessibilityStatus = findViewById(R.id.tvSettingAccessibilityStatus)
         tvSettingsDeviceMacName = findViewById(R.id.tvSettingsDeviceMacName)
         tvSettingsDeviceStatus = findViewById(R.id.tvSettingsDeviceStatus)
+        btnToggleConnectMacSettings = findViewById(R.id.btnToggleConnectMacSettings)
         btnUnpairMacSettings = findViewById(R.id.btnUnpairMacSettings)
 
         styleBridgeSwitch(switchNotifMaster)
@@ -807,19 +810,23 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         }
 
         btnHeroConnect.setOnClickListener {
-            userConnectAttempts++
-            if (!isLocalNetworkAvailable(this)) {
-                layoutHeroCautionBanner.visibility = View.VISIBLE
-                tvHeroCautionTitle.text = "Couldn't connect to your Mac"
-                tvHeroCautionText.text = "Bridge couldn't reach your Mac. Please verify the following:"
-            }
+            connectSavedMac()
+        }
 
-            setConnectingState(true)
-            ClipboardSyncManager.networkClient?.start(
-                BridgePrefs.host(this),
-                BridgePrefs.port(this),
-                BridgePrefs.code(this)
-            )
+        btnToggleConnectMacSettings.setOnClickListener {
+            if (!BridgePrefs.isPaired(this)) return@setOnClickListener
+            if (ClipboardSyncManager.networkClient?.isConnected() == true) {
+                userManuallyDisconnected = true
+                consecutiveFailures = 0
+                userConnectAttempts = 0
+                wasConnectedBefore = false
+                isConnectingState = false
+                ClipboardSyncManager.disconnect(this)
+                updateSettingsUI()
+                updateUI()
+            } else {
+                connectSavedMac()
+            }
         }
 
         btnUnpairMacSettings.setOnClickListener {
@@ -827,19 +834,35 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         }
     }
 
+    private fun connectSavedMac() {
+        userManuallyDisconnected = false
+        userConnectAttempts++
+        if (!isLocalNetworkAvailable(this)) {
+            layoutHeroCautionBanner.visibility = View.VISIBLE
+            tvHeroCautionTitle.text = "Couldn't connect to your Mac"
+            tvHeroCautionText.text = "Bridge couldn't reach your Mac. Please verify the following:"
+        }
+
+        setConnectingState(true)
+        updateSettingsUI()
+        ClipboardSyncManager.reconnect(this)
+    }
+
     private fun showUnpairConfirmationDialog() {
         AlertDialog.Builder(this)
             .setTitle(R.string.dialog_unpair_title)
             .setMessage(R.string.dialog_unpair_message)
             .setPositiveButton(R.string.dialog_unpair) { _, _ ->
+                userManuallyDisconnected = false
                 ClipboardSyncManager.unpair(this)
                 etPairCode.setText("")
+                etServerIp.setText("")
                 consecutiveFailures = 0
                 userConnectAttempts = 0
                 wasConnectedBefore = false
                 layoutNoteBanner.visibility = View.GONE
                 setConnectingState(false)
-                selectTab(TAB_HOME)
+                updateSettingsUI()
                 updateUI()
                 Toast.makeText(this, "Unpaired successfully", Toast.LENGTH_SHORT).show()
             }
@@ -1058,11 +1081,36 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
                 tvSettingAccessibilityStatus.setTextColor(colorCoral)
             }
 
-            val pairedMac = BridgePrefs.macName(this) ?: "Mac"
-            tvSettingsDeviceMacName.text = pairedMac
-            val isLive = ClipboardSyncManager.networkClient?.isConnected() == true
-            tvSettingsDeviceStatus.text = if (isLive) "Connected · Live" else "Paired device · Disconnected"
-            tvSettingsDeviceStatus.setTextColor(if (isLive) colorLime else colorMuted)
+            val paired = BridgePrefs.isPaired(this)
+            val isLive = paired && ClipboardSyncManager.networkClient?.isConnected() == true
+            if (!paired) {
+                tvSettingsDeviceMacName.text = "No device paired"
+                tvSettingsDeviceStatus.text = "No device is paired or connected"
+                tvSettingsDeviceStatus.setTextColor(colorMuted)
+                btnToggleConnectMacSettings.visibility = View.GONE
+                btnUnpairMacSettings.visibility = View.GONE
+            } else {
+                val pairedMac = BridgePrefs.macName(this) ?: "Mac"
+                tvSettingsDeviceMacName.text = pairedMac
+                btnToggleConnectMacSettings.visibility = View.VISIBLE
+                btnUnpairMacSettings.visibility = View.VISIBLE
+
+                if (isLive) {
+                    tvSettingsDeviceStatus.text = "Connected · Live"
+                    tvSettingsDeviceStatus.setTextColor(colorLime)
+                    btnToggleConnectMacSettings.isEnabled = true
+                    btnToggleConnectMacSettings.text = "Disconnect"
+                    btnToggleConnectMacSettings.setTextColor(colorText)
+                    btnToggleConnectMacSettings.setBackgroundResource(R.drawable.bg_button_outline)
+                } else {
+                    tvSettingsDeviceStatus.text = if (isConnectingState) "Connecting…" else "Paired device · Disconnected"
+                    tvSettingsDeviceStatus.setTextColor(if (isConnectingState) colorLime else colorMuted)
+                    btnToggleConnectMacSettings.isEnabled = !isConnectingState
+                    btnToggleConnectMacSettings.text = if (isConnectingState) "Connecting…" else "Connect"
+                    btnToggleConnectMacSettings.setTextColor(if (isConnectingState) colorMuted else colorInk)
+                    btnToggleConnectMacSettings.setBackgroundResource(if (isConnectingState) R.drawable.bg_button_outline else R.drawable.bg_button_lime)
+                }
+            }
         } finally {
             isUpdatingSettingsUi = false
         }
@@ -1491,7 +1539,11 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         val isMultipleFailures = consecutiveFailures >= 2 || userConnectAttempts >= 2
 
         // Update Files tab header & CTA state
-        tvFilesTargetMac.text = if (connected) macName else "$macName · Offline"
+        tvFilesTargetMac.text = when {
+            !paired -> "Not paired"
+            connected -> macName
+            else -> "$macName · Disconnected"
+        }
         tvFilesTargetMac.setTextColor(if (connected) colorLime else colorMuted)
         btnSelectFilesToSend.alpha = if (connected) 1.0f else 0.45f
         btnSelectFolderToSend.alpha = if (connected) 1.0f else 0.45f
@@ -1508,6 +1560,7 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
 
             if (connected) {
                 wasConnectedBefore = true
+                userManuallyDisconnected = false
                 isConnectingState = false
                 stopDotBlink()
                 consecutiveFailures = 0
@@ -1538,7 +1591,7 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
                 btnHeroConnect.visibility = View.GONE
             } else {
                 // Paired but not connected (Idle or Reconnecting)
-                val showCaution = !localNetAvailable || isMultipleFailures
+                val showCaution = !userManuallyDisconnected && !isConnectingState && (!localNetAvailable || isMultipleFailures)
                 if (showCaution) {
                     layoutHeroCautionBanner.visibility = View.VISIBLE
                     tvHeroCautionTitle.text = "Couldn't connect to your Mac"
@@ -1547,7 +1600,7 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
                     layoutHeroCautionBanner.visibility = View.GONE
                 }
 
-                tvLiveBadge.text = if (wasConnectedBefore) "Connection lost" else "Disconnected"
+                tvLiveBadge.text = if (wasConnectedBefore && !userManuallyDisconnected) "Connection lost" else "Disconnected"
                 tvLiveBadge.setTextColor(colorMuted)
 
                 if (isConnectingState) {
@@ -1571,14 +1624,14 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
                     btnHeroConnect.setBackgroundResource(R.drawable.bg_button_outline)
                 } else {
                     stopDotBlink()
-                    tvStatusPill.text = if (wasConnectedBefore) "Connection lost" else "Disconnected"
+                    tvStatusPill.text = if (wasConnectedBefore && !userManuallyDisconnected) "Connection lost" else "Disconnected"
                     tvStatusPill.setTextColor(colorMuted)
                     dotStatus.backgroundTintList = ColorStateList.valueOf(colorMuted)
 
                     heroCard.setBackgroundResource(R.drawable.bg_card_panel)
-                    tvHeroTitle.text = if (wasConnectedBefore) "Connection lost" else "Disconnected"
+                    tvHeroTitle.text = if (wasConnectedBefore && !userManuallyDisconnected) "Connection lost" else "Disconnected"
                     tvHeroTitle.setTextColor(colorText)
-                    tvHeroSub.text = if (wasConnectedBefore) {
+                    tvHeroSub.text = if (wasConnectedBefore && !userManuallyDisconnected) {
                         "Your Mac dropped offline or moved to another network."
                     } else {
                         "Your Mac is paired. Tap below to reconnect."
@@ -1589,7 +1642,7 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
 
                     btnHeroConnect.visibility = View.VISIBLE
                     btnHeroConnect.isEnabled = true
-                    btnHeroConnect.text = if (wasConnectedBefore) "Try again" else "Connect to Mac"
+                    btnHeroConnect.text = if (wasConnectedBefore && !userManuallyDisconnected) "Try again" else "Connect to Mac"
                     btnHeroConnect.setTextColor(colorInk)
                     btnHeroConnect.setBackgroundResource(R.drawable.bg_button_lime)
                 }
@@ -1601,6 +1654,8 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
             layoutTabFiles.visibility = if (currentTab == TAB_FILES) View.VISIBLE else View.GONE
             layoutTabSettings.visibility = if (currentTab == TAB_SETTINGS) View.VISIBLE else View.GONE
             layoutSetupProgress.visibility = View.GONE
+
+            updateSettingsUI()
 
             if (isConnectingState) {
                 tvStatusPill.text = "Connecting..."
@@ -1635,6 +1690,7 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
                 consecutiveFailures = 0
                 userConnectAttempts = 0
                 wasConnectedBefore = true
+                userManuallyDisconnected = false
             }
             updateUI()
         }
@@ -1665,6 +1721,7 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
                 consecutiveFailures = 0
                 userConnectAttempts = 0
                 wasConnectedBefore = true
+                userManuallyDisconnected = false
                 showPairingNote("Connected. You're all set.", BannerStyle.CONNECTED)
                 updateUI()
             } else {
@@ -1683,7 +1740,9 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
     override fun onRemoteUnpair() {
         runOnUiThread {
             isConnectingState = false
+            userManuallyDisconnected = false
             etPairCode.setText("")
+            etServerIp.setText("")
             consecutiveFailures = 0
             userConnectAttempts = 0
             wasConnectedBefore = false
