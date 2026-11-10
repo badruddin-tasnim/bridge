@@ -21,3 +21,6 @@ releases/
 dist/
 *.apk
 *.zip
+
+# Local agent workspace rules
+.agents/
