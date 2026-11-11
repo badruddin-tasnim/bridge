@@ -70,6 +70,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var popover: NSPopover?
     private let model = BridgeModel()
     private var lastPopoverCloseTime: TimeInterval = 0
+    private var isAnimatingClose = false
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         registerCustomFonts()
@@ -175,7 +176,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         guard let pop = popover else { return }
         let now = CACurrentMediaTime()
         if pop.isShown {
-            pop.close()
+            closePopoverAnimated()
             lastPopoverCloseTime = now
             return
         }
@@ -199,8 +200,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             pop.behavior = .applicationDefined
         }
 
+        // Reopened mid-close (e.g. Finder share): cancel the close animation.
+        if isAnimatingClose, let view = pop.contentViewController?.view, let window = view.window {
+            isAnimatingClose = false
+            view.layer?.removeAnimation(forKey: "bridgeSlide")
+            window.alphaValue = 1
+        }
+
+        var didOpen = false
         if !pop.isShown {
             pop.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            didOpen = true
         }
 
         if let window = pop.contentViewController?.view.window {
@@ -212,6 +222,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
         applyPopoverSize()
 
+        if didOpen {
+            animatePopoverIn()
+        }
+
         if forceBringToFront {
             // Restore standard transient click-outside dismissal once the Finder context menu action settles
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
@@ -222,7 +236,77 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
     }
 
+    // MARK: - Open / Close Animation
+    // NSPopover's built-in animation is off (it fights the resize right after
+    // showing), so we fade the popover window and slide its content instead.
+
+    private static let openDuration: TimeInterval = 0.2
+    private static let closeDuration: TimeInterval = 0.14
+    private static let slideDistance: CGFloat = 8
+
+    private func animatePopoverIn() {
+        guard let view = popover?.contentViewController?.view, let window = view.window else { return }
+        isAnimatingClose = false
+        window.alphaValue = 0
+
+        if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            view.wantsLayer = true
+            let slide = CABasicAnimation(keyPath: "transform.translation.y")
+            slide.fromValue = Self.slideDistance  // start slightly up, toward the menu bar
+            slide.toValue = 0
+            slide.duration = Self.openDuration
+            slide.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.3, 1.0)
+            view.layer?.add(slide, forKey: "bridgeSlide")
+        }
+
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = Self.openDuration
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            window.animator().alphaValue = 1
+        }
+    }
+
+    private func closePopoverAnimated() {
+        guard let pop = popover, pop.isShown, !isAnimatingClose else { return }
+        guard let view = pop.contentViewController?.view, let window = view.window else {
+            pop.close()
+            return
+        }
+        isAnimatingClose = true
+        lastPopoverCloseTime = CACurrentMediaTime()
+
+        if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            view.wantsLayer = true
+            let slide = CABasicAnimation(keyPath: "transform.translation.y")
+            slide.fromValue = 0
+            slide.toValue = Self.slideDistance
+            slide.duration = Self.closeDuration
+            slide.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            slide.fillMode = .forwards
+            slide.isRemovedOnCompletion = false
+            view.layer?.add(slide, forKey: "bridgeSlide")
+        }
+
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = Self.closeDuration
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            window.animator().alphaValue = 0
+        }, completionHandler: { [weak self] in
+            guard let self = self, self.isAnimatingClose else { return }
+            self.isAnimatingClose = false
+            pop.close()  // close() skips popoverShouldClose, so this doesn't loop
+            view.layer?.removeAnimation(forKey: "bridgeSlide")
+            window.alphaValue = 1
+        })
+    }
+
     // MARK: - NSPopoverDelegate
+
+    // Clicks outside / Esc land here for a transient popover: animate out first.
+    func popoverShouldClose(_ popover: NSPopover) -> Bool {
+        closePopoverAnimated()
+        return false
+    }
 
     func popoverWillClose(_ notification: Notification) {
         lastPopoverCloseTime = CACurrentMediaTime()
