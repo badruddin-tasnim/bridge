@@ -29,16 +29,48 @@ jobs:
           java-version: '17'
           cache: gradle
 
-      - name: Build Android APK
+      - name: Configure Android Release Signing
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ] || [ -z "$ANDROID_KEYSTORE_PASSWORD" ] || [ -z "$ANDROID_KEY_ALIAS" ] || [ -z "$ANDROID_KEY_PASSWORD" ]; then
+            echo "::error::Missing required Android release signing secrets."
+            exit 1
+          fi
+          KEYSTORE_FILE="$RUNNER_TEMP/bridge-release.jks"
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_FILE"
+          chmod 600 "$KEYSTORE_FILE"
+          echo "ANDROID_KEYSTORE_PATH=$KEYSTORE_FILE" >> "$GITHUB_ENV"
+
+      - name: Build Signed Release Android APK
         working-directory: android-app
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           chmod +x ./gradlew
-          ./gradlew assembleDebug --no-daemon
+          ./gradlew assembleRelease --no-daemon
 
-      - name: Rename APK for Release
+      - name: Clean up Release Keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/bridge-release.jks"
+
+      - name: Rename and Verify APK Signature
         run: |
           TAG_NAME="${{ github.event.inputs.tag || github.ref_name }}"
-          cp android-app/app/build/outputs/apk/debug/app-debug.apk "Bridge-${TAG_NAME}-Android.apk"
+          APK_OUT="Bridge-${TAG_NAME}-Android.apk"
+          cp android-app/app/build/outputs/apk/release/app-release.apk "$APK_OUT"
+          SDK_DIR="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          APKSIGNER="$(find "$SDK_DIR/build-tools" -name apksigner | sort -V | tail -n 1)"
+          if [ -z "$APKSIGNER" ]; then
+            echo "::error::Could not find apksigner under $SDK_DIR/build-tools."
+            exit 1
+          fi
+          "$APKSIGNER" verify --print-certs "$APK_OUT"
 
       - name: Upload Android asset
         uses: actions/upload-artifact@v4

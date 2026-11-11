@@ -40,22 +40,23 @@ Bridge uses newline-delimited JSON (`\n`) for metadata control framing over a pe
 
 | Message `type` | Direction | Description |
 | :--- | :---: | :--- |
-| **`hello`** | Android → Mac | Initial client handshake containing `proof` (salted SHA-256 HMAC of pairing code + client nonce), `nonce`, and `device` name. |
-| **`welcome`** | Mac → Android | Server handshake acknowledgment containing `proof` (matching response salt) and `name` (Mac hostname). Authorizes session. |
-| **`denied`** | Mac → Android | Sent when handshake proof fails or client IP is rate-limited. |
+| **`hello`** | Android → Mac | Initial client handshake carrying `hash` (`SHA-256("bridge-hello:" + code + ":" + clientNonce)`), `text` (`clientNonce`), and `device` name. |
+| **`welcome`** | Mac → Android | Server handshake acknowledgment carrying `hash` (`SHA-256("bridge-welcome:" + code + ":" + clientNonce)`) and `name` (Mac hostname). |
+| **`denied`** | Mac → Android | Sent when handshake verification fails or client IP is rate-limited. |
 | **`clip`** | Bi-directional | Text clipboard sync payload with `text`, `hash` (SHA-256 digest), and `timestamp`. |
-| **`image_clip`** | Bi-directional | Screenshot/image sync payload carrying image data, dimension metadata, and verification token. |
-| **`notification`** | Android → Mac | Mirrored Android status bar notification payload with app identifier, sender, conversation thread, icon, and action descriptors. |
-| **`notif_reply`** | Mac → Android | Inline quick reply text sent from macOS popover/banner to Android's active notification key. |
-| **`notif_action`** | Mac → Android | Action button tap event (e.g. *Mark as Read*, *Archive*) routed back to Android. |
-| **`notif_dismiss`**| Bi-directional | Two-way notification dismissal synchronization. |
-| **`settings_sync`**| Bi-directional | Real-time settings synchronization (notification mirroring toggles, auto-accept file transfer preferences). |
-| **`file_offer`** | Bi-directional | File transfer proposal with filename, file size, SHA-256 digest, and mime type. |
-| **`file_response`**| Bi-directional | Accept or decline response for an offered file transfer. |
-| **`file_cancel`** | Bi-directional | Halts an ongoing file or folder transfer in real-time. |
-| **`ping` / `pong`**| Bi-directional | Keepalive heartbeat exchanged every 10–12 seconds to keep router NAT state open. |
-| **`sleep`** | Mac → Android | Broadcast before macOS enters system sleep so Android can pause polling and cleanly reconnect on wake. |
-| **`unpair`** | Bi-directional | Terminates pairing relationships and triggers credential rotation on both platforms. |
+| **`image`** | Bi-directional | Screenshot/image sync payload carrying Base64 `data`, `mime` (`image/png` or `image/jpeg`), `hash`, and `text` (`"[Image]"`). |
+| **`notif_post`** | Android → Mac | Mirrored notification payload with `id`, `pkg`, `app`, `title`, `text`, optional `icon` (Base64 PNG), `actions`, and `messages`. |
+| **`notif_remove` / `notif_sync`** | Android → Mac | Removes dismissed Android notifications or synchronizes active notification IDs on Mac. |
+| **`notif_action`** | Mac → Android | Action button tap or inline reply (`id`, `actionId`, optional `replyText`) routed back to Android. |
+| **`notif_dismiss`**| Bi-directional | Two-way notification dismissal synchronization (`id`, `target`). |
+| **`settings_sync`**| Bi-directional | Real-time settings synchronization (notification mirroring toggles and `autoAcceptFiles`). |
+| **`file_offer` / `file_request`** | Bi-directional | Proposes a file or zipped folder transfer (`id`, `name`, `size`, `sha256`, `isFolder`; `file_offer` also sends `port`, `token`, `resume`). |
+| **`file_accept` / `file_reject`**| Bi-directional | Accepts (with `port`, `token`, `offset`) or declines (`reason`) a transfer request. |
+| **`file_pause` / `file_resume` / `file_cancel` / `file_complete` / `file_error`** | Bi-directional | Transfer lifecycle state messages keyed by `id`. |
+| **`ping` / `pong`**| Bi-directional | Keepalive heartbeat sent every 2.5–3 seconds (`ping` → `pong`) to detect dropped connections quickly. |
+| **`sleep`** | Mac → Android | Sent before macOS enters system sleep so Android can drop and cleanly reconnect on wake. |
+| **`disconnect`** | Android → Mac | Cleanly closes the current session while keeping pairing credentials intact. |
+| **`unpair`** | Bi-directional | Terminates pairing and clears/rotates pairing credentials on both devices. |
 
 ---
 
@@ -71,10 +72,10 @@ Bridge uses newline-delimited JSON (`\n`) for metadata control framing over a pe
    - File transfer implementations must strictly sanitize paths and block directory traversal attacks (`../`).
    - Android permissions must follow least-privilege principles and be documented in `README.md`.
 5. **Pre-Submission Verification:**
-   - Before opening a pull request, verify that both platforms build cleanly:
+   - Before opening a pull request, verify that both platforms build and pass tests/lint cleanly:
      ```bash
-     cd mac-app && make clean && make
-     cd ../android-app && ./gradlew assembleDebug
+     cd mac-app && make test && make clean && make
+     cd ../android-app && ./gradlew testDebugUnitTest lintDebug assembleDebug
      ```
 6. **Branching Model:**
    - Submit PRs against the `main` branch.

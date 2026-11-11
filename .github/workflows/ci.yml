@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -31,6 +34,12 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
+      - name: Run Unit Tests
+        run: ./gradlew testDebugUnitTest --no-daemon
+
+      - name: Run Android Lint
+        run: ./gradlew lintDebug --no-daemon
+
       - name: Build Debug APK
         run: ./gradlew assembleDebug --no-daemon
 
@@ -50,8 +59,14 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Run Swift Unit Tests
+        run: make test
+
       - name: Build Bridge.app
         run: make clean && make
+
+      - name: Verify Code Signature
+        run: codesign --verify --deep Bridge.app
 
       - name: Package Bridge.app archive
         run: ditto -c -k --sequesterRsrc --keepParent Bridge.app Bridge-macOS.zip

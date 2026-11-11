@@ -74,4 +74,11 @@ install: $(APP_NAME)
 	@echo "Installed Bridge to /Applications/Bridge.app and registered Finder right-click Quick Action & Share Extension"
 
 clean:
-	rm -rf $(APP_NAME)
+	rm -rf $(APP_NAME) .build-tests
+
+.PHONY: test
+test:
+	@mkdir -p .build-tests
+	swiftc Tests/BridgeTests.swift Sources/BridgeNotificationModels.swift Sources/BridgeFileTransferModels.swift Sources/AXNotificationObserver.swift Sources/BridgeNotificationManager.swift Sources/BridgeFileTransferManager.swift Sources/BridgeServer.swift Sources/BridgeModel.swift -o .build-tests/BridgeTests -framework AppKit -framework SwiftUI -framework Network -framework CryptoKit -framework CoreImage -framework CoreText -framework UserNotifications -framework ApplicationServices -framework UniformTypeIdentifiers
+	@.build-tests/BridgeTests
+	@rm -rf .build-tests
