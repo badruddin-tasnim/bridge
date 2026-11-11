@@ -71,6 +71,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private let model = BridgeModel()
     private var lastPopoverCloseTime: TimeInterval = 0
     private var isAnimatingClose = false
+    private var isFinishingAnimatedClose = false
+    private var closeGeneration = 0
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         registerCustomFonts()
@@ -200,14 +202,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             pop.behavior = .applicationDefined
         }
 
-        // Reopened mid-close (e.g. Finder share): cancel the close animation.
-        if isAnimatingClose, let view = pop.contentViewController?.view, let window = view.window {
+        // Reopened mid-close (e.g. Finder share or drag-and-drop): the popover is
+        // still shown, so cancel the close and animate back in. Setting alphaValue
+        // directly would not stop the in-flight animator() fade to 0.
+        var didOpen = false
+        var resumingFromClose = false
+        if isAnimatingClose {
             isAnimatingClose = false
-            view.layer?.removeAnimation(forKey: "bridgeSlide")
-            window.alphaValue = 1
+            closeGeneration += 1  // invalidates the pending close completion
+            resumingFromClose = true
         }
 
-        var didOpen = false
         if !pop.isShown {
             pop.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             didOpen = true
@@ -222,8 +227,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
         applyPopoverSize()
 
-        if didOpen {
-            animatePopoverIn()
+        if didOpen || resumingFromClose {
+            animatePopoverIn(resumingFromClose: resumingFromClose)
         }
 
         if forceBringToFront {
@@ -244,12 +249,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private static let closeDuration: TimeInterval = 0.14
     private static let slideDistance: CGFloat = 8
 
-    private func animatePopoverIn() {
+    /// `resumingFromClose`: the popover is mid fade-out, so fade back up from its
+    /// current alpha instead of starting at 0 (which would flicker).
+    private func animatePopoverIn(resumingFromClose: Bool = false) {
         guard let view = popover?.contentViewController?.view, let window = view.window else { return }
         isAnimatingClose = false
-        window.alphaValue = 0
+        view.layer?.removeAnimation(forKey: "bridgeSlide")
+        if !resumingFromClose {
+            window.alphaValue = 0
+        }
 
-        if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+        if !resumingFromClose && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
             view.wantsLayer = true
             let slide = CABasicAnimation(keyPath: "transform.translation.y")
             slide.fromValue = Self.slideDistance  // start slightly up, toward the menu bar
@@ -273,6 +283,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             return
         }
         isAnimatingClose = true
+        closeGeneration += 1
+        let generation = closeGeneration
+        // The reopen debounce in togglePopover() counts from when the close starts.
         lastPopoverCloseTime = CACurrentMediaTime()
 
         if !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
@@ -292,8 +305,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
             window.animator().alphaValue = 0
         }, completionHandler: { [weak self] in
-            guard let self = self, self.isAnimatingClose else { return }
+            guard let self = self, self.isAnimatingClose, generation == self.closeGeneration else { return }
             self.isAnimatingClose = false
+            self.isFinishingAnimatedClose = true  // keep the delegate from resetting the debounce
             pop.close()  // close() skips popoverShouldClose, so this doesn't loop
             view.layer?.removeAnimation(forKey: "bridgeSlide")
             window.alphaValue = 1
@@ -309,11 +323,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     func popoverWillClose(_ notification: Notification) {
-        lastPopoverCloseTime = CACurrentMediaTime()
+        if !isFinishingAnimatedClose {
+            lastPopoverCloseTime = CACurrentMediaTime()
+        }
     }
 
     func popoverDidClose(_ notification: Notification) {
-        lastPopoverCloseTime = CACurrentMediaTime()
+        if !isFinishingAnimatedClose {
+            lastPopoverCloseTime = CACurrentMediaTime()
+        }
+        isFinishingAnimatedClose = false
         model.hideAllIpAddresses()
     }
 

@@ -10,7 +10,7 @@ QUICK_APPEX = $(PLUGINS)/BridgeQuickAction.appex
 
 # Minimum supported macOS. Without an explicit target, swiftc stamps the binary
 # with the build machine's macOS version, which locks out older systems.
-MACOS_MIN ?= 14.0
+MACOS_MIN ?= 13.0
 ARCH ?= $(shell uname -m)
 SWIFT_TARGET = -target $(ARCH)-apple-macosx$(MACOS_MIN)
 
@@ -79,6 +79,6 @@ clean:
 .PHONY: test
 test:
 	@mkdir -p .build-tests
-	swiftc Tests/BridgeTests.swift Sources/BridgeNotificationModels.swift Sources/BridgeFileTransferModels.swift Sources/AXNotificationObserver.swift Sources/BridgeNotificationManager.swift Sources/BridgeFileTransferManager.swift Sources/BridgeServer.swift Sources/BridgeModel.swift -o .build-tests/BridgeTests -framework AppKit -framework SwiftUI -framework Network -framework CryptoKit -framework CoreImage -framework CoreText -framework UserNotifications -framework ApplicationServices -framework UniformTypeIdentifiers
+	swiftc Tests/BridgeTests.swift Sources/BridgeNotificationModels.swift Sources/BridgeFileTransferModels.swift Sources/AXNotificationObserver.swift Sources/BridgeNotificationManager.swift Sources/BridgeFileTransferManager.swift Sources/BridgeServer.swift Sources/BridgeModel.swift -o .build-tests/BridgeTests -framework AppKit -framework SwiftUI -framework Network -framework CryptoKit -framework CoreImage -framework CoreText -framework UserNotifications -framework ApplicationServices -framework UniformTypeIdentifiers $(SWIFT_TARGET)
 	@.build-tests/BridgeTests
 	@rm -rf .build-tests

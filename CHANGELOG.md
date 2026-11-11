@@ -11,6 +11,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Release verification instructions and Android APK signing certificate SHA-256 fingerprint in [`README.md`](README.md).
 - Grouped monthly Dependabot configuration and least-privilege `contents: read` CI token permissions in [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 - Android & macOS unit tests, Android Lint checks, and `CODE_OF_CONDUCT.md`.
+- Fade and slide animation when opening and closing the macOS menu bar popover (fade only with Reduce Motion) in [`main.swift`](mac-app/Sources/main.swift).
+
+### Fixed
+- macOS builds now pass an explicit `-target` (minimum macOS 13.0) in [`mac-app/Makefile`](mac-app/Makefile). Previously binaries required the build machine's macOS version, so release builds would not launch on older macOS.
 
 ### Security
 - Enforced global handshake rate-limiting (`globalLockoutUntil` across all IPs) and removed the legacy plaintext `code` login fallback in [`BridgeServer.swift`](mac-app/Sources/BridgeServer.swift).
