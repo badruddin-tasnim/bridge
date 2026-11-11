@@ -8,6 +8,12 @@ PLUGINS = $(CONTENTS)/PlugIns
 SHARE_APPEX = $(PLUGINS)/BridgeShare.appex
 QUICK_APPEX = $(PLUGINS)/BridgeQuickAction.appex
 
+# Minimum supported macOS. Without an explicit target, swiftc stamps the binary
+# with the build machine's macOS version, which locks out older systems.
+MACOS_MIN ?= 14.0
+ARCH ?= $(shell uname -m)
+SWIFT_TARGET = -target $(ARCH)-apple-macosx$(MACOS_MIN)
+
 SWIFT_SOURCES = Sources/main.swift Sources/BridgeNotificationModels.swift Sources/BridgeFileTransferModels.swift Sources/AXNotificationObserver.swift Sources/BridgeNotificationManager.swift Sources/BridgeFileTransferManager.swift Sources/BridgeServer.swift Sources/BridgeModel.swift Sources/BridgeMenuView.swift
 
 all: $(APP_NAME)
@@ -17,14 +23,14 @@ $(APP_NAME): $(SWIFT_SOURCES) Info.plist ShareExtension/Info.plist ShareExtensio
 	@cp Info.plist $(CONTENTS)/Info.plist
 	@cp -R Resources/* $(RESOURCES)/ 2>/dev/null || true
 	@rm -rf $(RESOURCES)/QuickAction 2>/dev/null || true
-	swiftc $(SWIFT_SOURCES) -o $(MACOS)/Bridge -framework AppKit -framework SwiftUI -framework Network -framework CryptoKit -framework CoreImage -framework CoreText -framework UserNotifications -framework ApplicationServices -framework UniformTypeIdentifiers -O
+	swiftc $(SWIFT_SOURCES) -o $(MACOS)/Bridge -framework AppKit -framework SwiftUI -framework Network -framework CryptoKit -framework CoreImage -framework CoreText -framework UserNotifications -framework ApplicationServices -framework UniformTypeIdentifiers $(SWIFT_TARGET) -O
 	@cp ShareExtension/Info.plist $(SHARE_APPEX)/Contents/Info.plist
 	@cp Resources/Bridge.icns $(SHARE_APPEX)/Contents/Resources/Bridge.icns 2>/dev/null || true
-	swiftc ShareExtension/ShareController.swift -module-name BridgeShare -o $(SHARE_APPEX)/Contents/MacOS/BridgeShare -framework AppKit -framework Foundation -framework UniformTypeIdentifiers -Xlinker -e -Xlinker _NSExtensionMain -O
+	swiftc ShareExtension/ShareController.swift -module-name BridgeShare -o $(SHARE_APPEX)/Contents/MacOS/BridgeShare -framework AppKit -framework Foundation -framework UniformTypeIdentifiers -Xlinker -e -Xlinker _NSExtensionMain $(SWIFT_TARGET) -O
 	@cp QuickActionExtension/Info.plist $(QUICK_APPEX)/Contents/Info.plist
 	@cp Resources/Bridge.icns $(QUICK_APPEX)/Contents/Resources/Bridge.icns 2>/dev/null || true
 	@cp Resources/MenuBarIcon@2x.png $(QUICK_APPEX)/Contents/Resources/NSActionTemplate.png 2>/dev/null || true
-	swiftc ShareExtension/ShareController.swift -module-name BridgeQuickAction -o $(QUICK_APPEX)/Contents/MacOS/BridgeQuickAction -framework AppKit -framework Foundation -framework UniformTypeIdentifiers -Xlinker -e -Xlinker _NSExtensionMain -O
+	swiftc ShareExtension/ShareController.swift -module-name BridgeQuickAction -o $(QUICK_APPEX)/Contents/MacOS/BridgeQuickAction -framework AppKit -framework Foundation -framework UniformTypeIdentifiers -Xlinker -e -Xlinker _NSExtensionMain $(SWIFT_TARGET) -O
 	@xattr -cr $(APP_NAME) 2>/dev/null || true
 	@codesign --force --sign - --entitlements ShareExtension/BridgeShare.entitlements --identifier com.link.bridge.share $(SHARE_APPEX)
 	@codesign --force --sign - --entitlements ShareExtension/BridgeShare.entitlements --identifier com.link.bridge.quickaction $(QUICK_APPEX)

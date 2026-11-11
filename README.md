@@ -95,7 +95,7 @@ You can install Bridge by downloading the pre-built binaries from [**GitHub Rele
 ### Option 1: Direct Download
 
 1. Download the latest **`v1.3.1`** release assets from [**Releases**](../../releases):
-   - 💻 **`Bridge-v1.3.1-macOS.zip`** — Native macOS Menu Bar App (`macOS 11.0+`)
+   - 💻 **`Bridge-v1.3.1-macOS.zip`** — Native macOS Menu Bar App (`macOS 14.0+`)
    - 📱 **`Bridge-v1.3.1-Android.apk`** — Native Android App (`Android 8.0+`)
 2. **Install on macOS:**
    - Unzip `Bridge-v1.3.1-macOS.zip` and move **`Bridge.app`** into `/Applications`.
@@ -128,7 +128,7 @@ adb install -r /tmp/Bridge-Android.apk
 <summary><b>Click to expand build instructions (Swift & Gradle)</b></summary>
 
 #### Prerequisites
-- **macOS:** macOS 11.0+ with Xcode Command Line Tools (`xcode-select --install`)
+- **macOS:** macOS 14.0+ with Xcode Command Line Tools (`xcode-select --install`)
 - **Android:** JDK 17+ and Android SDK (`compileSdk 34`)
 
 #### Build macOS Menu Bar App
