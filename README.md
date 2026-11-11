@@ -147,6 +147,24 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 </details>
 
+### Verify Release Downloads
+
+All official release assets include `SHA256SUMS.txt` on the GitHub Release page. Starting after `v1.3.1`, release APKs are also signed with Bridge's dedicated Android release certificate:
+
+```bash
+# 1. Verify archive & APK checksums against SHA256SUMS.txt
+shasum -a 256 -c SHA256SUMS.txt
+
+# 2. Verify the Android APK signing certificate SHA-256 fingerprint
+apksigner verify --print-certs Bridge-*-Android.apk
+```
+
+Expected Android signing certificate SHA-256 digest:
+
+```text
+AC:40:63:01:B9:1F:9D:49:65:8D:37:12:3D:4C:D6:A7:F7:91:13:2C:D7:BB:3A:3F:51:F5:60:BD:60:B9:77:DC
+```
+
 ---
 
 ## 🔗 Pairing & Multi-Device Connection
