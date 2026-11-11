@@ -125,7 +125,7 @@
         <!-- BroadcastReceiver for File Transfer Accept / Decline Actions -->
         <receiver
             android:name=".FileTransferActionReceiver"
-            android:exported="true">
+            android:exported="false">
             <intent-filter>
                 <action android:name="com.link.clipboardsync.ACTION_ACCEPT_TRANSFER" />
                 <action android:name="com.link.clipboardsync.ACTION_DECLINE_TRANSFER" />

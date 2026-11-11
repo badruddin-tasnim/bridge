@@ -121,11 +121,116 @@ private func runFileTransferSecurityTests() throws {
     expect(!pdfItem.isExecutable, "Expected .pdf file to not be marked executable")
 }
 
+private func runHandshakeGateTests() {
+    let gate = BridgeHandshakeGate()
+    let code = "482913"
+    let nonce1 = "0123456789abcdef0123456789abcdef"
+    let validProof1 = computeSHA256("bridge-hello:\(code):\(nonce1)")
+
+    // 1. Valid salted SHA-256 handshake succeeds
+    let ok = gate.evaluateHello(
+        jsonObject: ["type": "hello", "hash": validProof1, "text": nonce1],
+        pairingCode: code,
+        remoteIp: "192.168.1.10",
+        now: 1000
+    )
+    expect(ok.authenticated && ok.clientNonce == nonce1, "Valid SHA-256 hello should authenticate")
+
+    // 2. Replaying the same nonce is rejected
+    let replay = gate.evaluateHello(
+        jsonObject: ["type": "hello", "hash": validProof1, "text": nonce1],
+        pairingCode: code,
+        remoteIp: "192.168.1.10",
+        now: 1001
+    )
+    expect(!replay.authenticated && replay.failureReason == .replayedNonce, "Replayed nonce must be rejected")
+
+    // 3. Legacy plaintext code login is rejected
+    let plaintext = gate.evaluateHello(
+        jsonObject: ["type": "hello", "code": code],
+        pairingCode: code,
+        remoteIp: "192.168.1.11",
+        now: 1002
+    )
+    expect(!plaintext.authenticated && plaintext.failureReason == .invalidPayload, "Plaintext code fallback must be rejected")
+
+    // 4. Per-IP lockout after 5 failed attempts
+    let ipGate = BridgeHandshakeGate()
+    for i in 0..<5 {
+        let res = ipGate.evaluateHello(
+            jsonObject: ["type": "hello", "hash": "bad", "text": "nonce_\(i)_0123456789abcdef"],
+            pairingCode: code,
+            remoteIp: "192.168.1.50",
+            now: 2000 + Double(i)
+        )
+        expect(!res.authenticated, "Bad proof should fail")
+    }
+    let nonce2 = "abcdef0123456789abcdef0123456789"
+    let validProof2 = computeSHA256("bridge-hello:\(code):\(nonce2)")
+    let lockedOut = ipGate.evaluateHello(
+        jsonObject: ["type": "hello", "hash": validProof2, "text": nonce2],
+        pairingCode: code,
+        remoteIp: "192.168.1.50",
+        now: 2010
+    )
+    expect(!lockedOut.authenticated && lockedOut.failureReason == .rateLimited, "IP should be locked out for 60s")
+    let afterIpCooldown = ipGate.evaluateHello(
+        jsonObject: ["type": "hello", "hash": validProof2, "text": nonce2],
+        pairingCode: code,
+        remoteIp: "192.168.1.50",
+        now: 2065
+    )
+    expect(afterIpCooldown.authenticated, "IP should unlock after 60s lockout expires")
+
+    // 5. Global lockout triggers after 10 failures across distinct IPs and blocks a brand new IP
+    let globalGate = BridgeHandshakeGate()
+    for i in 0..<10 {
+        let res = globalGate.evaluateHello(
+            jsonObject: ["type": "hello", "hash": "wrong", "text": "global_\(i)_0123456789abcdef"],
+            pairingCode: code,
+            remoteIp: "192.168.1.\(100 + i)",
+            now: 3000 + Double(i)
+        )
+        expect(!res.authenticated, "Invalid attempt across distinct IPs should fail")
+    }
+    let nonce3 = "fedcba9876543210fedcba9876543210"
+    let validProof3 = computeSHA256("bridge-hello:\(code):\(nonce3)")
+    let blockedByGlobal = globalGate.evaluateHello(
+        jsonObject: ["type": "hello", "hash": validProof3, "text": nonce3],
+        pairingCode: code,
+        remoteIp: "192.168.1.250",
+        now: 3015
+    )
+    expect(!blockedByGlobal.authenticated && blockedByGlobal.failureReason == .rateLimited, "Global lockout must block even a brand new IP")
+
+    let afterGlobalCooldown = globalGate.evaluateHello(
+        jsonObject: ["type": "hello", "hash": validProof3, "text": nonce3],
+        pairingCode: code,
+        remoteIp: "192.168.1.250",
+        now: 3040
+    )
+    expect(afterGlobalCooldown.authenticated, "Global lockout should expire after 30s")
+
+    // 6. reset() clears lockouts
+    for i in 0..<10 {
+        _ = globalGate.evaluateHello(
+            jsonObject: ["type": "hello", "hash": "wrong", "text": "reset_\(i)_0123456789abcdef"],
+            pairingCode: code,
+            remoteIp: "192.168.2.\(100 + i)",
+            now: 4000
+        )
+    }
+    expect(globalGate.isRateLimited(ip: "192.168.2.250", now: 4005), "Expected global lockout active before reset")
+    globalGate.reset()
+    expect(!globalGate.isRateLimited(ip: "192.168.2.250", now: 4005), "Expected reset() to clear global lockout")
+}
+
 @main
 struct BridgeTestRunner {
     static func main() {
         runLocalIpTests()
         runCryptoAndAuthHelperTests()
+        runHandshakeGateTests()
         do {
             try runPayloadAndVersionTests()
             try runFileTransferSecurityTests()

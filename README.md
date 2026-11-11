@@ -230,7 +230,8 @@ Bridge is built to be **100% local, zero-cloud, and auditable** (see [SECURITY.m
 * **Current threat model (Trusted Local Wi-Fi):** Control messages on `TCP :8765` (clipboard text/images, notifications, and file-transfer control tokens) currently run over an unencrypted local TCP socket, while file-transfer data streams are encrypted with `AES-256-GCM` using a `SHA-256`-derived session token. **TLS transport encryption and PAKE / high-entropy pairing authentication are planned for `v1.4.0`** (so until then, only use Bridge on trusted private networks/hotspots).
 
 ### 2. Brute-Force & Denial-of-Service Defense
-* **Per-IP Exponential Lockout:** 5 failed handshake attempts from an IP within 60 seconds trigger an immediate 60-second lockout, doubling exponentially on consecutive violations up to 960 seconds. *(Global lockout enforcement across IPs and removal of a legacy server fallback are scheduled for `v1.3.2`.)*
+* **Per-IP Exponential Lockout:** 5 failed handshake attempts from an IP within 60 seconds trigger an immediate 60-second lockout, doubling exponentially on consecutive violations up to 960 seconds.
+* **Global Rate-Limiting:** 10 failed handshake attempts across all IPs within 60 seconds trigger a 30-second global handshake lockout.
 * **Anti-Replay Nonce Caching:** Caches the most recent 256 handshake nonces to reject replayed `hello` packets.
 * **Unauthenticated Handshake Timeout:** Connections that do not authenticate within 8 seconds are automatically dropped.
 * **Bounded Buffers:** Unauthenticated connections are restricted to 8 KB max payload size (and max 4 concurrent unauthenticated sockets) to mitigate memory exhaustion and socket DoS.
