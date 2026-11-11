@@ -60,7 +60,7 @@ object UpdateChecker {
     }
 
     private val listeners = CopyOnWriteArrayList<UpdateListener>()
-    private val mainHandler = Handler(Looper.getMainLooper())
+    private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
     private val scheduler = Executors.newSingleThreadScheduledExecutor()
     @Volatile
     private var periodicStarted = false
