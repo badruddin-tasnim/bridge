@@ -144,6 +144,129 @@ func getPrimaryIPv4Address() -> String? {
     return nil
 }
 
+// MARK: - Pairing Security Gate
+
+final class BridgeHandshakeGate {
+    enum FailureReason: Equatable {
+        case rateLimited
+        case invalidPayload
+        case replayedNonce
+        case invalidProof
+    }
+
+    struct EvaluationResult {
+        let authenticated: Bool
+        let clientNonce: String?
+        let failureReason: FailureReason?
+    }
+
+    static let maxFailedAttemptsPerIp = 5
+    static let attemptWindowSeconds: TimeInterval = 60.0
+    static let baseLockoutSeconds: TimeInterval = 60.0
+    static let maxGlobalFailedAttempts = 10
+    static let globalLockoutSeconds: TimeInterval = 30.0
+    static let maxNonceHistory = 256
+
+    private var failedHelloTimestampsByIp = [String: [TimeInterval]]()
+    private var ipLockoutUntil = [String: TimeInterval]()
+    private var ipLockoutCount = [String: Int]()
+    private var globalFailedHelloTimestamps = [TimeInterval]()
+    private var globalLockoutUntil: TimeInterval = 0
+    private var usedHelloNonces = Set<String>()
+    private var usedHelloNonceOrder = [String]()
+
+    func isRateLimited(ip: String, now: TimeInterval) -> Bool {
+        if now < globalLockoutUntil {
+            return true
+        }
+        if let until = ipLockoutUntil[ip], now < until {
+            return true
+        }
+        return false
+    }
+
+    func evaluateHello(
+        jsonObject: [String: Any],
+        pairingCode: String,
+        remoteIp: String,
+        now: TimeInterval = Date().timeIntervalSince1970
+    ) -> EvaluationResult {
+        if isRateLimited(ip: remoteIp, now: now) {
+            return EvaluationResult(authenticated: false, clientNonce: nil, failureReason: .rateLimited)
+        }
+
+        let targetCode = pairingCode.replacingOccurrences(of: " ", with: "")
+        let incomingHash = (jsonObject["hash"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        let clientNonce = (jsonObject["text"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        guard !incomingHash.isEmpty, clientNonce.count >= 16, clientNonce.count <= 128 else {
+            recordFailedAttempt(for: remoteIp, now: now)
+            return EvaluationResult(authenticated: false, clientNonce: nil, failureReason: .invalidPayload)
+        }
+
+        if usedHelloNonces.contains(clientNonce) {
+            recordFailedAttempt(for: remoteIp, now: now)
+            return EvaluationResult(authenticated: false, clientNonce: nil, failureReason: .replayedNonce)
+        }
+
+        let expectedHash = computeSHA256("bridge-hello:\(targetCode):\(clientNonce)")
+        guard constantTimeEquals(incomingHash, expectedHash) else {
+            recordFailedAttempt(for: remoteIp, now: now)
+            return EvaluationResult(authenticated: false, clientNonce: nil, failureReason: .invalidProof)
+        }
+
+        usedHelloNonces.insert(clientNonce)
+        usedHelloNonceOrder.append(clientNonce)
+        if usedHelloNonceOrder.count > Self.maxNonceHistory {
+            let oldest = usedHelloNonceOrder.removeFirst()
+            usedHelloNonces.remove(oldest)
+        }
+        clearFailedAttempts(for: remoteIp)
+        return EvaluationResult(authenticated: true, clientNonce: clientNonce, failureReason: nil)
+    }
+
+    func recordFailedAttempt(for ip: String, now: TimeInterval) {
+        let cutoff = now - Self.attemptWindowSeconds
+        var attempts = (failedHelloTimestampsByIp[ip] ?? []).filter { $0 >= cutoff }
+        attempts.append(now)
+        failedHelloTimestampsByIp[ip] = attempts
+
+        if attempts.count >= Self.maxFailedAttemptsPerIp {
+            let lockCount = (ipLockoutCount[ip] ?? 0) + 1
+            ipLockoutCount[ip] = lockCount
+            let multiplier = min(16.0, pow(2.0, Double(lockCount - 1)))
+            let lockoutDuration = Self.baseLockoutSeconds * multiplier
+            ipLockoutUntil[ip] = now + lockoutDuration
+            failedHelloTimestampsByIp.removeValue(forKey: ip)
+            NSLog("[BridgeSecurity] Locked out IP %@ for %.0fs after %d failed pairing attempts", ip, lockoutDuration, attempts.count)
+        }
+
+        globalFailedHelloTimestamps = globalFailedHelloTimestamps.filter { $0 >= cutoff }
+        globalFailedHelloTimestamps.append(now)
+        if globalFailedHelloTimestamps.count >= Self.maxGlobalFailedAttempts {
+            globalLockoutUntil = now + Self.globalLockoutSeconds
+            globalFailedHelloTimestamps.removeAll()
+            NSLog("[BridgeSecurity] Global handshake rate-limit triggered for %.0fs", Self.globalLockoutSeconds)
+        }
+    }
+
+    func clearFailedAttempts(for ip: String) {
+        failedHelloTimestampsByIp.removeValue(forKey: ip)
+        ipLockoutUntil.removeValue(forKey: ip)
+        ipLockoutCount.removeValue(forKey: ip)
+    }
+
+    func reset() {
+        failedHelloTimestampsByIp.removeAll()
+        ipLockoutUntil.removeAll()
+        ipLockoutCount.removeAll()
+        globalFailedHelloTimestamps.removeAll()
+        globalLockoutUntil = 0
+        usedHelloNonces.removeAll()
+        usedHelloNonceOrder.removeAll()
+    }
+}
+
 // MARK: - Bridge Server Engine
 
 class BridgeServer {
@@ -164,22 +287,12 @@ class BridgeServer {
     private static let maxConcurrentConnections = 8
     private static let maxUnauthConnections = 4
     private static let unauthHandshakeTimeoutSeconds: TimeInterval = 8.0
-    private static let maxFailedAttemptsPerIp = 5
-    private static let attemptWindowSeconds: TimeInterval = 60.0
-    private static let baseLockoutSeconds: TimeInterval = 60.0
-    private static let maxGlobalFailedAttempts = 10
     private static let supportedImageExtensions: Set<String> = [
         "png", "jpg", "jpeg", "webp", "heic", "tiff", "tif", "bmp", "gif"
     ]
 
     // Brute-force & replay protection state (accessed on networkQueue)
-    private var failedHelloTimestampsByIp = [String: [TimeInterval]]()
-    private var ipLockoutUntil = [String: TimeInterval]()
-    private var ipLockoutCount = [String: Int]()
-    private var globalFailedHelloTimestamps = [TimeInterval]()
-    private var globalLockoutUntil: TimeInterval = 0
-    private var usedHelloNonces = Set<String>()
-    private var usedHelloNonceOrder = [String]()
+    private let handshakeGate = BridgeHandshakeGate()
     
     // Pairing state
     private(set) var pairingCode: String = ""
@@ -386,44 +499,6 @@ class BridgeServer {
         }
     }
 
-    private func isIpLockedOut(_ ip: String, now: TimeInterval) -> Bool {
-        if let until = ipLockoutUntil[ip], now < until {
-            return true
-        }
-        return false
-    }
-
-    private func recordFailedHelloAttempt(for ip: String, now: TimeInterval) {
-        let cutoff = now - Self.attemptWindowSeconds
-        var attempts = (failedHelloTimestampsByIp[ip] ?? []).filter { $0 >= cutoff }
-        attempts.append(now)
-        failedHelloTimestampsByIp[ip] = attempts
-
-        if attempts.count >= Self.maxFailedAttemptsPerIp {
-            let lockCount = (ipLockoutCount[ip] ?? 0) + 1
-            ipLockoutCount[ip] = lockCount
-            let multiplier = min(16.0, pow(2.0, Double(lockCount - 1)))
-            let lockoutDuration = Self.baseLockoutSeconds * multiplier
-            ipLockoutUntil[ip] = now + lockoutDuration
-            failedHelloTimestampsByIp.removeValue(forKey: ip)
-            NSLog("[BridgeSecurity] Locked out IP %@ for %.0fs after %d failed pairing attempts", ip, lockoutDuration, attempts.count)
-        }
-
-        globalFailedHelloTimestamps = globalFailedHelloTimestamps.filter { $0 >= cutoff }
-        globalFailedHelloTimestamps.append(now)
-        if globalFailedHelloTimestamps.count >= Self.maxGlobalFailedAttempts {
-            globalLockoutUntil = now + 30.0
-            globalFailedHelloTimestamps.removeAll()
-            NSLog("[BridgeSecurity] Global handshake rate-limit triggered for 30s")
-        }
-    }
-
-    private func clearFailedAttempts(for ip: String) {
-        failedHelloTimestampsByIp.removeValue(forKey: ip)
-        ipLockoutUntil.removeValue(forKey: ip)
-        ipLockoutCount.removeValue(forKey: ip)
-    }
-
     private func handleNewConnection(_ conn: NWConnection) {
         let connectionId = UUID()
         networkQueue.async { [weak self, conn] in
@@ -543,47 +618,14 @@ class BridgeServer {
         if type == "hello" {
             let now = Date().timeIntervalSince1970
             let remoteIp = self.connectionRemoteIp[id] ?? self.extractRemoteIp(from: conn)
+            let result = self.handshakeGate.evaluateHello(
+                jsonObject: jsonObject,
+                pairingCode: self.pairingCode,
+                remoteIp: remoteIp,
+                now: now
+            )
 
-            if self.isIpLockedOut(remoteIp, now: now) {
-                NSLog("[BridgeSecurity] Denied 'hello' from rate-limited IP: %@", remoteIp)
-                self.denyAndDisconnect(conn, id: id)
-                return
-            }
-
-            let targetCode = self.pairingCode.replacingOccurrences(of: " ", with: "")
-            let incomingHash = (jsonObject["hash"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
-            let clientNonce = (jsonObject["text"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            let rawCode = (jsonObject["code"] as? String)?
-                .replacingOccurrences(of: " ", with: "")
-                .replacingOccurrences(of: "-", with: "")
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-
-            var isAuthenticated = false
-
-            if !incomingHash.isEmpty && clientNonce.count >= 16 && clientNonce.count <= 128 {
-                // Anti-replay check on clientNonce
-                if self.usedHelloNonces.contains(clientNonce) {
-                    NSLog("[BridgeSecurity] Rejected replayed hello nonce from %@", remoteIp)
-                    self.recordFailedHelloAttempt(for: remoteIp, now: now)
-                    self.denyAndDisconnect(conn, id: id)
-                    return
-                }
-                let expectedHash = computeSHA256("bridge-hello:\(targetCode):\(clientNonce)")
-                if constantTimeEquals(incomingHash, expectedHash) {
-                    isAuthenticated = true
-                    self.usedHelloNonces.insert(clientNonce)
-                    self.usedHelloNonceOrder.append(clientNonce)
-                    if self.usedHelloNonceOrder.count > 256 {
-                        let oldest = self.usedHelloNonceOrder.removeFirst()
-                        self.usedHelloNonces.remove(oldest)
-                    }
-                }
-            } else if incomingHash.isEmpty && !rawCode.isEmpty {
-                isAuthenticated = constantTimeEquals(rawCode, targetCode)
-            }
-            
-            if isAuthenticated {
-                self.clearFailedAttempts(for: remoteIp)
+            if result.authenticated, let clientNonce = result.clientNonce {
                 self.authenticatedConnections.insert(id)
                 let rawDevice = (jsonObject["device"] as? String) ?? "Android Device"
                 let sanitizedDevice = String(
@@ -593,11 +635,10 @@ class BridgeServer {
                         .prefix(64)
                 )
                 self.clientDeviceNames[id] = sanitizedDevice.isEmpty ? "Android Device" : sanitizedDevice
-                
+
                 let macName = Host.current().localizedName ?? "Mac"
-                let welcomeProof = clientNonce.isEmpty
-                    ? computeSHA256("bridge-welcome:\(targetCode)")
-                    : computeSHA256("bridge-welcome:\(targetCode):\(clientNonce)")
+                let targetCode = self.pairingCode.replacingOccurrences(of: " ", with: "")
+                let welcomeProof = computeSHA256("bridge-welcome:\(targetCode):\(clientNonce)")
                 let welcome = ClipboardPayload(type: "welcome", hash: welcomeProof, name: macName)
                 self.sendDirect(payload: welcome, to: conn)
                 if let settingsStr = BridgeNotificationManager.shared.buildSettingsSyncJson(),
@@ -607,8 +648,14 @@ class BridgeServer {
                 }
                 self.notifyUiStatus()
             } else {
-                self.recordFailedHelloAttempt(for: remoteIp, now: now)
-                NSLog("[BridgeSecurity] Invalid pairing attempt from %@", remoteIp)
+                switch result.failureReason {
+                case .rateLimited:
+                    NSLog("[BridgeSecurity] Denied 'hello' due to rate limit from %@", remoteIp)
+                case .replayedNonce:
+                    NSLog("[BridgeSecurity] Rejected replayed hello nonce from %@", remoteIp)
+                case .invalidPayload, .invalidProof, .none:
+                    NSLog("[BridgeSecurity] Invalid pairing attempt from %@", remoteIp)
+                }
                 self.denyAndDisconnect(conn, id: id)
             }
             return
@@ -1004,11 +1051,7 @@ class BridgeServer {
     }
     
     private func resetPairingSecurityState() {
-        failedHelloTimestampsByIp.removeAll()
-        ipLockoutUntil.removeAll()
-        ipLockoutCount.removeAll()
-        usedHelloNonces.removeAll()
-        usedHelloNonceOrder.removeAll()
+        handshakeGate.reset()
     }
 
     func unpairAllDevices() {

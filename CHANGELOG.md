@@ -10,6 +10,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Signed, R8-minified Android release APK builds (`assembleRelease`) in [`.github/workflows/release.yml`](.github/workflows/release.yml) and [`android-app/app/build.gradle.kts`](android-app/app/build.gradle.kts).
 - Release verification instructions and Android APK signing certificate SHA-256 fingerprint in [`README.md`](README.md).
 - Grouped monthly Dependabot configuration and least-privilege `contents: read` CI token permissions in [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+- Android & macOS unit tests, Android Lint checks, and `CODE_OF_CONDUCT.md`.
+
+### Security
+- Enforced global handshake rate-limiting (`globalLockoutUntil` across all IPs) and removed the legacy plaintext `code` login fallback in [`BridgeServer.swift`](mac-app/Sources/BridgeServer.swift).
+- Restricted `FileTransferActionReceiver` with `android:exported="false"` in [`AndroidManifest.xml`](android-app/app/src/main/AndroidManifest.xml).
+- Aligned [`SECURITY.md`](SECURITY.md), [`README.md`](README.md), and [`CONTRIBUTING.md`](CONTRIBUTING.md) with the current cryptographic and wire protocol implementation.
 
 ## [1.3.1] - 2026-11-10
 

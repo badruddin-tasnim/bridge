@@ -21,8 +21,7 @@
 ### 1. Challenge-Response Mutual Authentication
 - The Android client authenticates using a salted SHA-256 challenge-response rather than sending the 6-digit pairing code:
   $$\text{Proof} = \text{SHA-256}(\text{"bridge-hello:"} + \text{PairingCode} + \text{":"} + \text{ClientNonce})$$
-- The Mac verifies the proof in constant time and returns a matching `welcome` proof before authorizing session messages.
-- *(Known `v1.3.2` hardening item: remove the unused legacy plaintext `code` fallback branch still accepted by [`BridgeServer.swift`](mac-app/Sources/BridgeServer.swift).)*
+- The Mac verifies the proof in constant time and returns a matching `welcome` proof before authorizing session messages. Legacy unhashed plaintext `code` handshakes are rejected.
 
 ### 2. Local Network Boundary Enforcement
 - Bridge accepts connections **only from private/local network ranges** (RFC 1918: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, link-local `169.254.0.0/16`, CGNAT `100.64.0.0/10`, loopback, and IPv6 `fe80:`/`fc`/`fd`).
@@ -31,7 +30,7 @@
 
 ### 3. Brute-Force & Denial-of-Service Defense
 - **Per-IP Exponential Lockout:** 5 failed handshake attempts from an IP within 60 seconds trigger a 60-second lockout, doubling exponentially on consecutive violations up to 960 seconds (`16x`).
-- **Global Handshake Rate-Limiting (`v1.3.2` fix pending):** `globalLockoutUntil` tracking is present in `BridgeServer.swift` and is scheduled to be enforced in `v1.3.2`.
+- **Global Handshake Rate-Limiting:** 10 failed handshake attempts across all IPs within 60 seconds trigger a 30-second global handshake lockout.
 - **Anti-Replay Nonce Caching:** Caches up to 256 recent `clientNonce` values to reject replayed `hello` packets.
 - **Unauthenticated Handshake Timeout:** Unauthenticated sockets that do not complete a handshake within 8 seconds are disconnected.
 - **Memory & Connection Bounds:** Unauthenticated sockets are limited to 8 KB buffers and 4 concurrent unauthenticated connections (8 total concurrent connections).
@@ -47,7 +46,7 @@
 ### 5. Private Content Protection & Android Manifest Hardening
 - Clipboard text and notification bodies are not logged in normal sync paths (using truncated SHA-256 hashes for clipboard diagnostics).
 - `android:allowBackup="false"` prevents cloud backup extraction of local preferences.
-- *(Known `v1.3.2` hardening item: mark `FileTransferActionReceiver` `android:exported="false"` in [`AndroidManifest.xml`](android-app/app/src/main/AndroidManifest.xml).)*
+- Internal receivers and helper components (including `FileTransferActionReceiver` and `MacAlertDismissReceiver`) set `android:exported="false"`.
 
 ---
 
