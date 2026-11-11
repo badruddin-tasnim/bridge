@@ -200,7 +200,7 @@ object BridgeFileTransferManager {
         return EXECUTABLE_EXTENSIONS.contains(ext)
     }
 
-    private fun deriveAesKey(token: String): SecretKeySpec {
+    internal fun deriveAesKey(token: String): SecretKeySpec {
         val digest = MessageDigest.getInstance("SHA-256")
         val keyBytes = digest.digest((token + ":bridge-file-encryption").toByteArray(Charsets.UTF_8))
         return SecretKeySpec(keyBytes, "AES")
@@ -228,7 +228,7 @@ object BridgeFileTransferManager {
     private val pausedIds = ConcurrentHashMap.newKeySet<String>()
     private val cancelledIds = ConcurrentHashMap.newKeySet<String>()
 
-    private val mainHandler = Handler(Looper.getMainLooper())
+    private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
     private val transferExecutor = Executors.newCachedThreadPool()
     private val hashExecutor = Executors.newSingleThreadExecutor()
 
@@ -1382,7 +1382,7 @@ object BridgeFileTransferManager {
         }
     }
 
-    private fun sanitizeFileName(raw: String): String {
+    internal fun sanitizeFileName(raw: String): String {
         val base = File(raw).name
             .replace("\u0000", "")
             .replace("/", "_")
