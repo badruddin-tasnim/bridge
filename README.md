@@ -103,6 +103,11 @@ You can install Bridge by downloading the pre-built binaries from [**GitHub Rele
    - The Bridge icon will appear in your top menu bar.
 3. **Install on Android:**
    - Open **`Bridge-v1.3.1-Android.apk`** on your Android phone to install the app.
+   - **Android 14–16 Google Play Protect Notice:** Because Bridge uses `BIND_NOTIFICATION_LISTENER_SERVICE` and `BIND_ACCESSIBILITY_SERVICE`, Play Protect's sideload fraud protection on newer Android devices may block opening the APK from a browser or file manager (*"App blocked to protect your device"*). If that happens, install from your Mac using **ADB** instead (Option 2 below):
+     ```bash
+     adb install -r /tmp/Bridge-Android.apk
+     ```
+   - **Android 13+ Restricted Settings:** If **Accessibility** or **Notification Access** appears grayed out after sideloading, open **Settings → Apps → Bridge → ⋮ (top right) → Allow restricted settings**, then enable the permissions.
 
 ---
 
@@ -216,25 +221,24 @@ Pairing your devices is fast, private, and requires zero account creation:
 
 ## 🔒 Security, Privacy & Architecture Transparency
 
-Bridge is built from the ground up to be **100% private, local, and auditable**.
+Bridge is built to be **100% local, zero-cloud, and auditable** (see [SECURITY.md](SECURITY.md) for current details and planned protocol hardening).
 
-### 1. Zero-Knowledge Nonce-Hashed Authentication
-* Pairing codes are **never transmitted in plaintext** across the network.
-* Handshake authentication uses a challenge-response scheme:
+### 1. Salted Challenge-Response Authentication & Transport Model
+* **Android pairing handshake:** The Android client authenticates using a salted SHA-256 challenge-response instead of sending the 6-digit pairing code directly:
   $$\text{Proof} = \text{SHA-256}(\text{"bridge-hello:"} + \text{PairingCode} + \text{":"} + \text{ClientNonce})$$
-* Mutual authentication: The Mac verifies the client's proof and responds with a matching salted welcome proof before any data socket is authorized.
+  The Mac verifies the proof and replies with a matching `welcome` proof before authorizing the session.
+* **Current threat model (Trusted Local Wi-Fi):** Control messages on `TCP :8765` (clipboard text/images, notifications, and file-transfer control tokens) currently run over an unencrypted local TCP socket, while file-transfer data streams are encrypted with `AES-256-GCM` using a `SHA-256`-derived session token. **TLS transport encryption and PAKE / high-entropy pairing authentication are planned for `v1.4.0`** (so until then, only use Bridge on trusted private networks/hotspots).
 
 ### 2. Brute-Force & Denial-of-Service Defense
-* **Per-IP Exponential Lockout:** 5 failed handshake attempts from an IP results in an immediate 15-second lockout, doubling on each subsequent violation up to 240 seconds.
-* **Global Rate-Limiting:** Coordinated attempts trigger a 30-second global handshake halt.
-* **Anti-Replay Nonce Caching:** Prevents replay attacks by invalidating reused authentication nonces.
+* **Per-IP Exponential Lockout:** 5 failed handshake attempts from an IP within 60 seconds trigger an immediate 60-second lockout, doubling exponentially on consecutive violations up to 960 seconds. *(Global lockout enforcement across IPs and removal of a legacy server fallback are scheduled for `v1.3.2`.)*
+* **Anti-Replay Nonce Caching:** Caches the most recent 256 handshake nonces to reject replayed `hello` packets.
 * **Unauthenticated Handshake Timeout:** Connections that do not authenticate within 8 seconds are automatically dropped.
-* **Bounded Buffers:** Unauthenticated connections are restricted to 8 KB max payload size to eliminate buffer overflow and socket exhaustion attacks.
+* **Bounded Buffers:** Unauthenticated connections are restricted to 8 KB max payload size (and max 4 concurrent unauthenticated sockets) to mitigate memory exhaustion and socket DoS.
 
 ### 3. Local Network Boundary Enforcement
 * Bridge rejects connections originating from public or non-private IP addresses.
-* Only local LAN addresses (RFC 1918: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, link-local `169.254.0.0/16`, and loopback) are accepted.
-* Pairing secrets are stored with strict POSIX `0600` permissions (`~/.bridge_pairing_code`).
+* Only local LAN addresses (RFC 1918: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, link-local `169.254.0.0/16`, CGNAT `100.64.0.0/10`, and loopback/link-local IPv6) are accepted.
+* Pairing codes on macOS are stored with strict POSIX `0600` permissions (`~/.bridge_pairing_code`).
 
 ### 4. Transparent Permission Usage
 
