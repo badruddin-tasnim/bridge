@@ -9,7 +9,7 @@
 A lightweight, native open-source bridge linking your **Android phone** and your **Mac** over your local Wi-Fi network—with zero cloud accounts, zero telemetry, and zero latency.
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-v1.3.1-C8F135?style=for-the-badge&labelColor=0E0F12" alt="Version 1.3.1" />
+  <img src="https://img.shields.io/badge/Version-v1.3.2-C8F135?style=for-the-badge&labelColor=0E0F12" alt="Version 1.3.2" />
   <img src="https://img.shields.io/badge/Android-Kotlin-C8F135?style=for-the-badge&logo=android&logoColor=C8F135&labelColor=0E0F12" alt="Android Kotlin" />
   <img src="https://img.shields.io/badge/macOS-Swift_%26_SwiftUI-C8F135?style=for-the-badge&logo=apple&logoColor=C8F135&labelColor=0E0F12" alt="macOS Swift" />
   <img src="https://img.shields.io/badge/Network-100%25_Local_LAN-181B20?style=for-the-badge&labelColor=0E0F12&color=C8F135" alt="100% Local LAN" />
@@ -17,7 +17,7 @@ A lightweight, native open-source bridge linking your **Android phone** and your
 </p>
 
 <p align="center">
-  <a href="#-whats-new-in-v131">What's New in v1.3.1</a> •
+  <a href="#-whats-new-in-v132">What's New in v1.3.2</a> •
   <a href="#-key-features">Key Features</a> •
   <a href="#-getting-started">Getting Started</a> •
   <a href="#-pairing--multi-device-connection">Pairing & Multi-Device</a> •
@@ -45,13 +45,13 @@ A lightweight, native open-source bridge linking your **Android phone** and your
 
 ---
 
-## ⚡ What's New in v1.3.1
+## ⚡ What's New in v1.3.2
 
-Bridge **v1.3.1** focuses on bug fixes and privacy polish:
+Bridge **v1.3.2** brings macOS 13.0+ compatibility, UI polish, signed Android release builds, and security hardening:
 
-- **Latest Message First in macOS Notifications** — Stacked chat banners on macOS now preview the newest incoming message when collapsed while keeping older messages visible when expanded.
-- **Clean Disconnect & Unpair Sync** — Added a dedicated **Disconnect** / **Connect** button on Android, fixed the unpaired state (`No device paired`), and synchronized remote unpairing so macOS resets directly to the pairing screen.
-- **Hidden IP Addresses by Default** — Masked IP addresses in the macOS menu bar with dots (`•••.•••.•••`) and added a small eye icon toggle to reveal or hide them on click.
+- **macOS 13.0+ Compatibility & Animated Popover** — Built with an explicit `-target` (`macOS 13.0+`) for the main app and extensions so releases run on macOS Ventura and newer, plus smooth fade-and-slide menu bar popover open/close animations.
+- **Signed & R8-Minified Android Release APKs** — Official release APKs are now built with `assembleRelease`, minified with R8, signed with Bridge's dedicated Android release certificate, and accompanied by `SHA256SUMS.txt` verification instructions.
+- **Security & Stability Hardening** — Enforced global handshake lockout (`globalLockoutUntil`), removed the legacy plaintext `code` login fallback, restricted `FileTransferActionReceiver` (`android:exported="false"`), and aligned documentation with the current codebase.
 
 ---
 
@@ -94,15 +94,15 @@ You can install Bridge by downloading the pre-built binaries from [**GitHub Rele
 
 ### Option 1: Direct Download
 
-1. Download the latest **`v1.3.1`** release assets from [**Releases**](../../releases):
-   - 💻 **`Bridge-v1.3.1-macOS.zip`** — Native macOS Menu Bar App (`macOS 13.0+`)
-   - 📱 **`Bridge-v1.3.1-Android.apk`** — Native Android App (`Android 8.0+`)
+1. Download the latest **`v1.3.2`** release assets from [**Releases**](../../releases):
+   - 💻 **`Bridge-v1.3.2-macOS.zip`** — Native macOS Menu Bar App (`macOS 13.0+`)
+   - 📱 **`Bridge-v1.3.2-Android.apk`** — Native Android App (`Android 8.0+`)
 2. **Install on macOS:**
-   - Unzip `Bridge-v1.3.1-macOS.zip` and move **`Bridge.app`** into `/Applications`.
+   - Unzip `Bridge-v1.3.2-macOS.zip` and move **`Bridge.app`** into `/Applications`.
    - Launch **`Bridge.app`**. *(If macOS Gatekeeper prompts on first launch, right-click `Bridge.app` → **Open**, or run `xattr -cr /Applications/Bridge.app && open /Applications/Bridge.app` in Terminal).*
    - The Bridge icon will appear in your top menu bar.
 3. **Install on Android:**
-   - Open **`Bridge-v1.3.1-Android.apk`** on your Android phone to install the app.
+   - Open **`Bridge-v1.3.2-Android.apk`** on your Android phone to install the app.
    - **Android 14–16 Google Play Protect Notice:** Because Bridge uses `BIND_NOTIFICATION_LISTENER_SERVICE` and `BIND_ACCESSIBILITY_SERVICE`, Play Protect's sideload fraud protection on newer Android devices may block opening the APK from a browser or file manager (*"App blocked to protect your device"*). If that happens, install from your Mac using **ADB** instead (Option 2 below):
      ```bash
      adb install -r /tmp/Bridge-Android.apk
@@ -115,13 +115,13 @@ You can install Bridge by downloading the pre-built binaries from [**GitHub Rele
 
 ```bash
 # 1. Download & launch the macOS Menu Bar app
-curl -L -o /tmp/Bridge-macOS.zip "https://github.com/badruddin-tasnim/bridge/releases/download/v1.3.1/Bridge-v1.3.1-macOS.zip"
+curl -L -o /tmp/Bridge-macOS.zip "https://github.com/badruddin-tasnim/bridge/releases/download/v1.3.2/Bridge-v1.3.2-macOS.zip"
 unzip -q -o /tmp/Bridge-macOS.zip -d /Applications
 xattr -cr /Applications/Bridge.app
 open /Applications/Bridge.app
 
 # 2. Download & install the Android APK over ADB
-curl -L -o /tmp/Bridge-Android.apk "https://github.com/badruddin-tasnim/bridge/releases/download/v1.3.1/Bridge-v1.3.1-Android.apk"
+curl -L -o /tmp/Bridge-Android.apk "https://github.com/badruddin-tasnim/bridge/releases/download/v1.3.2/Bridge-v1.3.2-Android.apk"
 adb install -r /tmp/Bridge-Android.apk
 ```
 
@@ -154,7 +154,7 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 ### Verify Release Downloads
 
-All official release assets include `SHA256SUMS.txt` on the GitHub Release page. Starting after `v1.3.1`, release APKs are also signed with Bridge's dedicated Android release certificate:
+All official release assets include `SHA256SUMS.txt` on the GitHub Release page. Starting in `v1.3.2`, release APKs are also signed with Bridge's dedicated Android release certificate:
 
 ```bash
 # 1. Verify archive & APK checksums against SHA256SUMS.txt
