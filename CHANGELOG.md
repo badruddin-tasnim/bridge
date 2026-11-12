@@ -6,6 +6,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.3.2] - 2026-11-12
+
 ### Added
 - Signed, R8-minified Android release APK builds (`assembleRelease`) in [`.github/workflows/release.yml`](.github/workflows/release.yml) and [`android-app/app/build.gradle.kts`](android-app/app/build.gradle.kts).
 - Release verification instructions and Android APK signing certificate SHA-256 fingerprint in [`README.md`](README.md).
@@ -59,7 +61,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Initial public release of Bridge for Android and macOS.
 - Two-way local-network text clipboard synchronization, Bonjour (`_clipboardsync._tcp`) discovery, and 6-digit / QR pairing.
 
-[Unreleased]: https://github.com/badruddin-tasnim/bridge/compare/v1.3.1...HEAD
+[Unreleased]: https://github.com/badruddin-tasnim/bridge/compare/v1.3.2...HEAD
+[1.3.2]: https://github.com/badruddin-tasnim/bridge/compare/v1.3.1...v1.3.2
 [1.3.1]: https://github.com/badruddin-tasnim/bridge/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/badruddin-tasnim/bridge/compare/v1.2...v1.3.0
 [1.2]: https://github.com/badruddin-tasnim/bridge/compare/v1.1.1...v1.2
