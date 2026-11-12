@@ -8,7 +8,6 @@ APP_PATH="${1:-${MAC_APP_DIR}/Bridge.app}"
 OUT_DMG="${2:-${MAC_APP_DIR}/Bridge-macOS.dmg}"
 VOLUME_NAME="Bridge"
 BG_SRC="${MAC_APP_DIR}/Resources/dmg/dmg-background.tiff"
-VOL_ICON_SRC="${MAC_APP_DIR}/Resources/Bridge.icns"
 FALLBACK_DS_STORE="${MAC_APP_DIR}/Resources/dmg/DS_Store"
 
 if [[ ! -d "${APP_PATH}" ]]; then
@@ -109,15 +108,6 @@ then
   echo "Warning: Finder AppleScript styling skipped or timed out; applying fallback .DS_Store layout"
   if [[ -f "${FALLBACK_DS_STORE}" ]]; then
     cp "${FALLBACK_DS_STORE}" "${MOUNT_POINT}/.DS_Store"
-  fi
-fi
-
-# Apply volume icon after Finder styling so Finder `update` does not clear `.VolumeIcon.icns`.
-if [[ -f "${VOL_ICON_SRC}" ]]; then
-  cp "${VOL_ICON_SRC}" "${MOUNT_POINT}/.VolumeIcon.icns"
-  if command -v SetFile >/dev/null 2>&1; then
-    SetFile -a C "${MOUNT_POINT}" || true
-    SetFile -a V "${MOUNT_POINT}/.VolumeIcon.icns" || true
   fi
 fi
 
