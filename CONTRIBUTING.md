@@ -11,7 +11,7 @@ Bridge is structured as a native multi-platform repository:
 ### 1. macOS Menu Bar App (`mac-app/`)
 - **Stack:** Swift, SwiftUI, AppKit (`NSPopover` + `NSStatusItem`), `CryptoKit` (AES-GCM), `Network.framework` (`NWListener`), UserNotifications, UniformTypeIdentifiers.
 - **Extensions:** Finder Quick Action (`BridgeQuickAction.appex`) and macOS Share Extension (`BridgeShare.appex`).
-- **Requirements:** macOS 11.0+ and Xcode Command Line Tools (`xcode-select --install`).
+- **Requirements:** macOS 13.0+ and Xcode Command Line Tools (`xcode-select --install`).
 - **Build & Run:**
   ```bash
   cd mac-app
