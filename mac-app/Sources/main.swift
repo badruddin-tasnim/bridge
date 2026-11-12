@@ -73,6 +73,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private var isAnimatingClose = false
     private var isFinishingAnimatedClose = false
     private var closeGeneration = 0
+
+    // .stationary keeps the popover in place during Show Desktop ("click wallpaper
+    // to reveal desktop") and Mission Control while it fades out after an outside
+    // click; .ignoresCycle restores the default _NSPopoverWindow has on its own.
+    private static let popoverWindowBehavior: NSWindow.CollectionBehavior = [
+        .canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary
+    ]
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         registerCustomFonts()
@@ -169,7 +176,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             pop.contentSize = newSize
         }
         if let window = controller.view.window {
-            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+            window.collectionBehavior = Self.popoverWindowBehavior
             window.backgroundColor = NSColor(red: 0x12 / 255.0, green: 0x14 / 255.0, blue: 0x18 / 255.0, alpha: 1.0)
         }
     }
@@ -219,7 +226,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
 
         if let window = pop.contentViewController?.view.window {
-            window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+            window.collectionBehavior = Self.popoverWindowBehavior
             window.backgroundColor = NSColor(red: 0x12 / 255.0, green: 0x14 / 255.0, blue: 0x18 / 255.0, alpha: 1.0)
             window.makeKeyAndOrderFront(nil)
             window.orderFrontRegardless()
