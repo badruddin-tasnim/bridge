@@ -1,6 +1,7 @@
-.PHONY: all clean run install
+.PHONY: all clean run install dmg
 
 APP_NAME = Bridge.app
+DMG_NAME ?= Bridge-macOS.dmg
 CONTENTS = $(APP_NAME)/Contents
 MACOS = $(CONTENTS)/MacOS
 RESOURCES = $(CONTENTS)/Resources
@@ -22,7 +23,13 @@ $(APP_NAME): $(SWIFT_SOURCES) Info.plist ShareExtension/Info.plist ShareExtensio
 	@mkdir -p $(MACOS) $(RESOURCES) $(SHARE_APPEX)/Contents/MacOS $(SHARE_APPEX)/Contents/Resources $(QUICK_APPEX)/Contents/MacOS $(QUICK_APPEX)/Contents/Resources
 	@cp Info.plist $(CONTENTS)/Info.plist
 	@cp -R Resources/* $(RESOURCES)/ 2>/dev/null || true
-	@rm -rf $(RESOURCES)/QuickAction 2>/dev/null || true
+	@rm -rf $(RESOURCES)/QuickAction $(RESOURCES)/Bridge.icon $(RESOURCES)/dmg 2>/dev/null || true
+	@ACTOOL=$$(xcrun --find actool 2>/dev/null || ls /Applications/Xcode*.app/Contents/Developer/usr/bin/actool 2>/dev/null | head -n 1); \
+	if [ -n "$$ACTOOL" ] && [ -d Resources/Bridge.icon ]; then \
+		mkdir -p .build-icon; \
+		"$$ACTOOL" Resources/Bridge.icon --compile .build-icon --platform macosx --minimum-deployment-target $(MACOS_MIN) --app-icon Bridge --output-partial-info-plist .build-icon/partial.plist >/dev/null 2>&1 && cp .build-icon/Assets.car $(RESOURCES)/Assets.car || true; \
+		rm -rf .build-icon; \
+	fi
 	swiftc $(SWIFT_SOURCES) -o $(MACOS)/Bridge -framework AppKit -framework SwiftUI -framework Network -framework CryptoKit -framework CoreImage -framework CoreText -framework UserNotifications -framework ApplicationServices -framework UniformTypeIdentifiers $(SWIFT_TARGET) -O
 	@cp ShareExtension/Info.plist $(SHARE_APPEX)/Contents/Info.plist
 	@cp Resources/Bridge.icns $(SHARE_APPEX)/Contents/Resources/Bridge.icns 2>/dev/null || true
@@ -35,7 +42,6 @@ $(APP_NAME): $(SWIFT_SOURCES) Info.plist ShareExtension/Info.plist ShareExtensio
 	@codesign --force --sign - --entitlements ShareExtension/BridgeShare.entitlements --identifier com.link.bridge.share $(SHARE_APPEX)
 	@codesign --force --sign - --entitlements ShareExtension/BridgeShare.entitlements --identifier com.link.bridge.quickaction $(QUICK_APPEX)
 	@codesign --force --sign - --identifier com.link.bridge -r='designated => identifier "com.link.bridge"' $(APP_NAME)
-	@swift -e 'import AppKit; if let img = NSImage(contentsOfFile: "Resources/Bridge.icns") { NSWorkspace.shared.setIcon(img, forFile: "Bridge.app", options: []) }' 2>/dev/null || true
 	@/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f $(APP_NAME) 2>/dev/null || true
 	@echo "Built $(APP_NAME) successfully!"
 
@@ -53,7 +59,6 @@ install: $(APP_NAME)
 	@codesign --force --sign - --entitlements ShareExtension/BridgeShare.entitlements --identifier com.link.bridge.share /Applications/$(APP_NAME)/Contents/PlugIns/BridgeShare.appex
 	@codesign --force --sign - --entitlements ShareExtension/BridgeShare.entitlements --identifier com.link.bridge.quickaction /Applications/$(APP_NAME)/Contents/PlugIns/BridgeQuickAction.appex
 	@codesign --force --sign - --identifier com.link.bridge -r='designated => identifier "com.link.bridge"' /Applications/$(APP_NAME)
-	@swift -e 'import AppKit; if let img = NSImage(contentsOfFile: "Resources/Bridge.icns") { NSWorkspace.shared.setIcon(img, forFile: "/Applications/Bridge.app", options: []) }' 2>/dev/null || true
 	@/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f /Applications/$(APP_NAME) 2>/dev/null || true
 	@pluginkit -a /Applications/$(APP_NAME)/Contents/PlugIns/BridgeShare.appex 2>/dev/null || true
 	@pluginkit -e use -i com.link.bridge.share 2>/dev/null || true
@@ -73,8 +78,11 @@ install: $(APP_NAME)
 	@touch /Applications/$(APP_NAME)
 	@echo "Installed Bridge to /Applications/Bridge.app and registered Finder right-click Quick Action & Share Extension"
 
+dmg: $(APP_NAME)
+	@./scripts/make-dmg.sh "$(APP_NAME)" "$(DMG_NAME)"
+
 clean:
-	rm -rf $(APP_NAME) .build-tests
+	rm -rf $(APP_NAME) .build-tests .build-icon *.dmg
 
 .PHONY: test
 test:

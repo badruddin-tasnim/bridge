@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+- macOS `.dmg` drag-to-Applications installer (`Bridge-vX.Y.Z-macOS.dmg`) with custom dark-and-green branding (`mac-app/scripts/make-dmg.sh`, `make dmg` target, and release/CI workflows) replacing the `.zip` archive.
+- Adaptive Liquid Glass / Dark Icons bundle (`mac-app/Resources/Bridge.icon` + `Assets.car`) so `Bridge.app` renders its green glyph on a dark background in macOS Dark Icons appearance instead of monochrome black-on-black.
+
+### Fixed
+- Removed the `NSWorkspace.shared.setIcon` `.icns` Finder override from [`mac-app/Makefile`](mac-app/Makefile) so macOS renders the `Assets.car` adaptive icon cleanly while keeping `Bridge.icns` as fallback.
+
 ## [1.3.2] - 2026-11-12
 
 ### Added

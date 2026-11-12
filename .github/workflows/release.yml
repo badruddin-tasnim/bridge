@@ -85,18 +85,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Build & Package Bridge.app
+      - name: Build & Package Bridge.app (.dmg)
         run: |
           TAG_NAME="${{ github.event.inputs.tag || github.ref_name }}"
           cd mac-app
           make clean && make
-          ditto -c -k --sequesterRsrc --keepParent Bridge.app "../Bridge-${TAG_NAME}-macOS.zip"
+          codesign --verify --deep --strict Bridge.app
+          make dmg DMG_NAME="../Bridge-${TAG_NAME}-macOS.dmg"
 
       - name: Upload macOS asset
         uses: actions/upload-artifact@v4
         with:
           name: release-macos
-          path: Bridge-*-macOS.zip
+          path: Bridge-*-macOS.dmg
 
   publish-release:
     name: Publish GitHub Release
@@ -121,5 +122,5 @@ jobs:
           generate_release_notes: true
           files: |
             dist/Bridge-*-Android.apk
-            dist/Bridge-*-macOS.zip
+            dist/Bridge-*-macOS.dmg
             dist/SHA256SUMS.txt
