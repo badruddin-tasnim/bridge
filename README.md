@@ -94,15 +94,15 @@ You can install Bridge by downloading the pre-built binaries from [**GitHub Rele
 
 ### Option 1: Direct Download
 
-1. Download the latest **`v1.3.2`** release assets from [**Releases**](../../releases):
-   - 💻 **`Bridge-v1.3.2-macOS.zip`** — Native macOS Menu Bar App (`macOS 13.0+`)
-   - 📱 **`Bridge-v1.3.2-Android.apk`** — Native Android App (`Android 8.0+`)
+1. Download the latest release assets from [**Releases**](../../releases):
+   - 💻 **`Bridge-v*-macOS.dmg`** — Native macOS Menu Bar App (`macOS 13.0+`)
+   - 📱 **`Bridge-v*-Android.apk`** — Native Android App (`Android 8.0+`)
 2. **Install on macOS:**
-   - Unzip `Bridge-v1.3.2-macOS.zip` and move **`Bridge.app`** into `/Applications`.
+   - Double-click the downloaded **`.dmg`** file and drag **`Bridge.app`** into the **Applications** folder in the installer window.
    - Launch **`Bridge.app`**. *(If macOS Gatekeeper prompts on first launch, right-click `Bridge.app` → **Open**, or run `xattr -cr /Applications/Bridge.app && open /Applications/Bridge.app` in Terminal).*
    - The Bridge icon will appear in your top menu bar.
 3. **Install on Android:**
-   - Open **`Bridge-v1.3.2-Android.apk`** on your Android phone to install the app.
+   - Open the downloaded **`.apk`** on your Android phone to install the app.
    - **Android 14–16 Google Play Protect Notice:** Because Bridge uses `BIND_NOTIFICATION_LISTENER_SERVICE` and `BIND_ACCESSIBILITY_SERVICE`, Play Protect's sideload fraud protection on newer Android devices may block opening the APK from a browser or file manager (*"App blocked to protect your device"*). If that happens, install from your Mac using **ADB** instead (Option 2 below):
      ```bash
      adb install -r /tmp/Bridge-Android.apk
@@ -114,14 +114,18 @@ You can install Bridge by downloading the pre-built binaries from [**GitHub Rele
 ### Option 2: Install via Command Line (CLI)
 
 ```bash
-# 1. Download & launch the macOS Menu Bar app
-curl -L -o /tmp/Bridge-macOS.zip "https://github.com/badruddin-tasnim/bridge/releases/download/v1.3.2/Bridge-v1.3.2-macOS.zip"
-unzip -q -o /tmp/Bridge-macOS.zip -d /Applications
+TAG=$(curl -fsSL https://api.github.com/repos/badruddin-tasnim/bridge/releases/latest | grep -m1 '"tag_name"' | cut -d'"' -f4)
+
+# 1. Download, install, and launch the macOS Menu Bar app
+curl -L -o /tmp/Bridge-macOS.dmg "https://github.com/badruddin-tasnim/bridge/releases/download/${TAG}/Bridge-${TAG}-macOS.dmg"
+hdiutil attach -nobrowse -quiet /tmp/Bridge-macOS.dmg
+rm -rf /Applications/Bridge.app && cp -R /Volumes/Bridge/Bridge.app /Applications/Bridge.app
+hdiutil detach /Volumes/Bridge -quiet
 xattr -cr /Applications/Bridge.app
 open /Applications/Bridge.app
 
 # 2. Download & install the Android APK over ADB
-curl -L -o /tmp/Bridge-Android.apk "https://github.com/badruddin-tasnim/bridge/releases/download/v1.3.2/Bridge-v1.3.2-Android.apk"
+curl -L -o /tmp/Bridge-Android.apk "https://github.com/badruddin-tasnim/bridge/releases/download/${TAG}/Bridge-${TAG}-Android.apk"
 adb install -r /tmp/Bridge-Android.apk
 ```
 
@@ -142,6 +146,7 @@ cd mac-app
 make clean && make
 make install   # Installs Bridge.app to /Applications/Bridge.app
 make run       # Launches Bridge in your menu bar
+make dmg       # Packages a drag-to-Applications Bridge-macOS.dmg installer
 ```
 
 #### Build Android App

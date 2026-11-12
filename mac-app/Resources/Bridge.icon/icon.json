@@ -1,0 +1,61 @@
+{
+  "fill": {
+    "solid": "srgb:0.78431,0.94510,0.20784,1.00000"
+  },
+  "fill-specializations": [
+    {
+      "value": {
+        "solid": "srgb:0.78431,0.94510,0.20784,1.00000"
+      }
+    },
+    {
+      "appearance": "dark",
+      "value": {
+        "solid": "srgb:0.07059,0.07843,0.09412,1.00000"
+      }
+    }
+  ],
+  "groups": [
+    {
+      "layers": [
+        {
+          "image-name": "glyph-green.png",
+          "name": "Bridge Glyph Dark",
+          "opacity-specializations": [
+            {
+              "value": 0.0
+            },
+            {
+              "appearance": "dark",
+              "value": 1.0
+            },
+            {
+              "appearance": "tinted",
+              "value": 1.0
+            }
+          ]
+        },
+        {
+          "image-name": "glyph-black.png",
+          "name": "Bridge Glyph Light",
+          "opacity-specializations": [
+            {
+              "value": 1.0
+            },
+            {
+              "appearance": "dark",
+              "value": 0.0
+            },
+            {
+              "appearance": "tinted",
+              "value": 0.0
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "supported-platforms": {
+    "squares": "shared"
+  }
+}
