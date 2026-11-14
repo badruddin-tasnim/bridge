@@ -259,7 +259,12 @@ Bridge is built to be **100% local, zero-cloud, and auditable** (see [SECURITY.m
 * Only local LAN addresses (RFC 1918: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, link-local `169.254.0.0/16`, CGNAT `100.64.0.0/10`, and loopback/link-local IPv6) are accepted.
 * Pairing codes on macOS are stored with strict POSIX `0600` permissions (`~/.bridge_pairing_code`).
 
-### 4. Transparent Permission Usage
+### 4. File Transfer & Archive Extraction Safeguards
+* **Protected Session Tokens & Data-Socket Auth Proofs:** Per-transfer 256-bit `token` values travel exclusively inside the AES-256-GCM encrypted `:8765` control channel, and dedicated data sockets authenticate using a one-way SHA-256 binder (`computeDataSocketAuth`) instead of exposing the raw token.
+* **Executable & Script Confirmation Guard:** Even when incoming file auto-accept is enabled, both macOS and Android always prompt for manual confirmation before accepting executable, script, bundle, or shortcut files (`.app`, `.command`, `.workflow`, `.scpt`, `.sh`, `.py`, `.jar`, `.webloc`, `.apk`, `.dmg`, `.pkg`, `.exe`, `.dylib`, etc.) as well as folder archives.
+* **Path Traversal & Symlink Protection:** Incoming filenames and archive entries are sanitized (`sanitizeFileName`), and folder archive extraction rejects symbolic links to prevent symlink escapes.
+
+### 5. Transparent Permission Usage
 
 | Permission | Exact Purpose in Bridge | Source Reference |
 | :--- | :--- | :--- |
