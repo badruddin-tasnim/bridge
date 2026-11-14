@@ -118,13 +118,19 @@ public class BridgeNotificationManager: NSObject, ObservableObject, UNUserNotifi
         }
     }
 
+    private var hasAppBundleContext: Bool {
+        Bundle.main.bundleIdentifier != nil
+    }
+
     private func setupUNNotificationCenter() {
+        guard hasAppBundleContext else { return }
         let center = UNUserNotificationCenter.current()
         center.delegate = self
         checkNotificationAuth()
     }
 
     public func checkNotificationAuth() {
+        guard hasAppBundleContext else { return }
         let center = UNUserNotificationCenter.current()
         center.getNotificationSettings { [weak self] settings in
             DispatchQueue.main.async {
@@ -139,6 +145,7 @@ public class BridgeNotificationManager: NSObject, ObservableObject, UNUserNotifi
     }
 
     public func requestAuthorization() {
+        guard hasAppBundleContext else { return }
         let center = UNUserNotificationCenter.current()
         center.requestAuthorization(options: [.alert, .sound, .badge]) { [weak self] granted, error in
             DispatchQueue.main.async {
@@ -156,6 +163,7 @@ public class BridgeNotificationManager: NSObject, ObservableObject, UNUserNotifi
     }
 
     private func setupMacNotificationObserver() {
+        guard hasAppBundleContext else { return }
         AXNotificationObserver.shared.onNotificationCaptured = { [weak self] notif in
             guard let self = self, self.isEffectiveMacForwardEnabled else { return }
             self.sendNotificationToPhone(notif)

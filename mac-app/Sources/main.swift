@@ -148,28 +148,32 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         controller.view.layoutSubtreeIfNeeded()
         let fitting = controller.view.fittingSize
         
-        let targetHeight: CGFloat
+        let rawTargetHeight: CGFloat
         if fitting.height > 150 {
-            targetHeight = ceil(fitting.height)
+            rawTargetHeight = ceil(fitting.height)
         } else {
             let isPaired = model.isConnected || model.pairedDevice != nil
             let notifCount = BridgeNotificationManager.shared.activeNotifications.count
             if !isPaired {
-                targetHeight = 494
+                rawTargetHeight = 494
             } else if model.selectedTab == .devices && model.showPairingSection {
-                targetHeight = 658
+                rawTargetHeight = 658
             } else if model.selectedTab == .devices {
                 let devCount = max(1, model.connectedDevicesList.count)
-                targetHeight = 240 + CGFloat(devCount) * 75.0
+                rawTargetHeight = 240 + CGFloat(devCount) * 75.0
             } else if model.selectedTab == .files {
                 let txCount = BridgeFileTransferManager.shared.transfers.count
-                targetHeight = txCount == 0 ? 310 : min(340 + CGFloat(txCount) * 70.0, 580.0)
+                rawTargetHeight = txCount == 0 ? 310 : min(340 + CGFloat(txCount) * 70.0, 580.0)
             } else if model.selectedTab == .settings {
-                targetHeight = 460
+                rawTargetHeight = 460
             } else {
-                targetHeight = notifCount == 0 ? 444 : min(444 + CGFloat(notifCount) * 85.0, 620.0)
+                rawTargetHeight = notifCount == 0 ? 444 : min(444 + CGFloat(notifCount) * 85.0, 620.0)
             }
         }
+
+        let screenVisibleHeight = (statusItem?.button?.window?.screen ?? NSScreen.main)?.visibleFrame.height ?? 800
+        let maxAllowedHeight = max(420, floor(screenVisibleHeight - 36))
+        let targetHeight = min(rawTargetHeight, maxAllowedHeight)
         
         let newSize = NSSize(width: 380, height: targetHeight)
         if pop.contentSize != newSize {

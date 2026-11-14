@@ -871,6 +871,22 @@ struct BridgeMenuView: View {
         fileTransferManager.transfers.filter { $0.status.isActive }.count
     }
 
+    private var notificationCardsList: some View {
+        VStack(spacing: 8) {
+            ForEach(notifManager.activeNotifications) { notif in
+                NotificationCardView(notification: notif, manager: notifManager)
+            }
+        }
+    }
+
+    private var fileTransferCardsList: some View {
+        VStack(spacing: 8) {
+            ForEach(fileTransferManager.transfers) { item in
+                FileTransferCardView(item: item, manager: fileTransferManager)
+            }
+        }
+    }
+
     var body: some View {
         VStack(spacing: 12) {
             // Header Bar
@@ -1466,23 +1482,16 @@ struct BridgeMenuView: View {
                                 }
                                 .padding(.horizontal, 4)
 
-                                if notifManager.activeNotifications.count <= 2 {
-                                    VStack(spacing: 8) {
-                                        ForEach(notifManager.activeNotifications) { notif in
-                                            NotificationCardView(notification: notif, manager: notifManager)
-                                        }
-                                    }
-                                } else {
+                                ViewThatFits(in: .vertical) {
+                                    notificationCardsList
+
                                     ScrollView(.vertical, showsIndicators: true) {
-                                        VStack(spacing: 8) {
-                                            ForEach(notifManager.activeNotifications) { notif in
-                                                NotificationCardView(notification: notif, manager: notifManager)
-                                            }
-                                        }
-                                        .padding(.trailing, 2)
+                                        notificationCardsList
+                                            .padding(.trailing, 2)
                                     }
                                     .frame(height: 280)
                                 }
+                                .frame(maxHeight: 280)
                             }
                         }
                     }
@@ -1648,23 +1657,16 @@ struct BridgeMenuView: View {
                             }
                             .padding(.horizontal, 4)
 
-                            if fileTransferManager.transfers.count <= 3 {
-                                VStack(spacing: 8) {
-                                    ForEach(fileTransferManager.transfers) { item in
-                                        FileTransferCardView(item: item, manager: fileTransferManager)
-                                    }
-                                }
-                            } else {
+                            ViewThatFits(in: .vertical) {
+                                fileTransferCardsList
+
                                 ScrollView(.vertical, showsIndicators: true) {
-                                    VStack(spacing: 8) {
-                                        ForEach(fileTransferManager.transfers) { item in
-                                            FileTransferCardView(item: item, manager: fileTransferManager)
-                                        }
-                                    }
-                                    .padding(.trailing, 2)
+                                    fileTransferCardsList
+                                        .padding(.trailing, 2)
                                 }
                                 .frame(height: 220)
                             }
+                            .frame(maxHeight: 220)
                         }
                     }
                 }

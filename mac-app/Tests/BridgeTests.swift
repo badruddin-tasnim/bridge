@@ -1,4 +1,6 @@
 import Foundation
+import AppKit
+import SwiftUI
 import CryptoKit
 
 private var failureCount = 0
@@ -225,12 +227,75 @@ private func runHandshakeGateTests() {
     expect(!globalGate.isRateLimited(ip: "192.168.2.250", now: 4005), "Expected reset() to clear global lockout")
 }
 
+private func containsScrollView(_ view: NSView) -> Bool {
+    if view is NSScrollView { return true }
+    return view.subviews.contains(where: containsScrollView)
+}
+
+private func runNotificationScrollLayoutTests() {
+    let model = BridgeModel(startServer: false)
+    model.isConnected = true
+    model.pairedDevice = "Galaxy"
+    model.selectedTab = .notifications
+
+    let notifManager = BridgeNotificationManager.shared
+    let originalNotifications = notifManager.activeNotifications
+    defer {
+        notifManager.activeNotifications = originalNotifications
+        StatusDotTicker.shared.stop()
+    }
+
+    // 1. Single short notification stays compact without forcing full 280pt ScrollView height
+    notifManager.activeNotifications = [
+        BridgeNotification(id: "short-1", app: "Messages", title: "Alice", text: "On my way!")
+    ]
+    let shortHost = NSHostingController(rootView: BridgeMenuView(model: model))
+    let shortWin = NSWindow(contentViewController: shortHost)
+    shortWin.setFrame(NSRect(x: 0, y: 0, width: 380, height: 600), display: false)
+    shortHost.view.layoutSubtreeIfNeeded()
+    let shortHeight = shortHost.view.fittingSize.height
+
+    // 2. Single very long notification (8 multi-line stacked messages + reply + actions)
+    //    must cap at the 280pt ScrollView height so the popover never overflows/displaces.
+    let stackedMessages = (1...8).map { idx in
+        BridgeMessageItem(
+            text: "Message \(idx): This is a multi-line group chat notification body that would otherwise stretch the menu bar popover past the screen height.",
+            timestamp: Int64(1700000000000 + idx),
+            sender: "Member \(idx)"
+        )
+    }
+    notifManager.activeNotifications = [
+        BridgeNotification(
+            id: "long-1",
+            app: "WhatsApp",
+            title: "Pioneers (23 messages)",
+            text: stackedMessages.last?.text,
+            actions: [
+                BridgeNotificationAction(id: 0, title: "Reply", hasInput: true, placeholder: "Reply"),
+                BridgeNotificationAction(id: 1, title: "Mark as read"),
+                BridgeNotificationAction(id: 2, title: "Mute")
+            ],
+            messages: stackedMessages
+        )
+    ]
+    let longHost = NSHostingController(rootView: BridgeMenuView(model: model))
+    let longWin = NSWindow(contentViewController: longHost)
+    longWin.setFrame(NSRect(x: 0, y: 0, width: 380, height: 600), display: false)
+    longHost.view.layoutSubtreeIfNeeded()
+    let longHeight = longHost.view.fittingSize.height
+
+    expect(shortHeight < longHeight, "Short notification popover (\(shortHeight)) should be shorter than capped long notification popover (\(longHeight))")
+    expect(longHeight <= 600, "Single long notification must be capped by ScrollView instead of overflowing (got \(longHeight))")
+    expect(containsScrollView(longHost.view), "Single long notification exceeding 280pt must render inside NSScrollView")
+}
+
 @main
 struct BridgeTestRunner {
     static func main() {
         runLocalIpTests()
         runCryptoAndAuthHelperTests()
         runHandshakeGateTests()
+        runNotificationScrollLayoutTests()
         do {
             try runPayloadAndVersionTests()
             try runFileTransferSecurityTests()

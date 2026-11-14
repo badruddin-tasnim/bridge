@@ -82,7 +82,7 @@ class BridgeModel: ObservableObject {
     private static let keyLastCheckAt = "bridge_update_last_check_at"
     private static let keyPairedDevice = "bridge_paired_device_name"
     
-    init() {
+    init(startServer: Bool = true) {
         self.rawCode = server.pairingCode
         if rawCode.count == 6 {
             self.formattedCode = "\(rawCode.prefix(3)) \(rawCode.suffix(3))"
@@ -97,7 +97,9 @@ class BridgeModel: ObservableObject {
         
         updateQrCode()
         setupServerCallbacks()
-        server.start()
+        if startServer {
+            server.start()
+        }
 
         BridgeNotificationManager.shared.$activeNotifications
             .receive(on: DispatchQueue.main)
@@ -113,7 +115,9 @@ class BridgeModel: ObservableObject {
             }
             .store(in: &cancellables)
 
-        startUpdateChecking()
+        if startServer {
+            startUpdateChecking()
+        }
     }
     
     private func setupServerCallbacks() {

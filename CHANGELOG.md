@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Fixed
 - Removed the `NSWorkspace.shared.setIcon` `.icns` Finder override from [`mac-app/Makefile`](mac-app/Makefile) so macOS renders the `Assets.car` adaptive icon cleanly while keeping `Bridge.icns` as fallback.
+- Fixed macOS menu bar popover displacing from beneath the status bar icon when 1–2 long or multi-message notifications arrive by wrapping the notification and transfer lists in `ViewThatFits(in: .vertical)` with a capped `ScrollView` ([`BridgeMenuView.swift`](mac-app/Sources/BridgeMenuView.swift)) and clamping popover height to the screen's visible frame ([`main.swift`](mac-app/Sources/main.swift)).
 
 ## [1.3.2] - 2026-11-12
 
