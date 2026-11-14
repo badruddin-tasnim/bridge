@@ -4,9 +4,9 @@
 
 | Version | Supported | Security Policy |
 | :--- | :---: | :--- |
-| **1.3.x** | :white_check_mark: | Current stable series with AES-256-GCM file transfers, conversation threads, and local-network safeguards. |
-| **1.2.x** | :white_check_mark: | Maintenance release (critical security fixes only). |
-| **< 1.2.0** | :x: | Unsupported. Users should update to v1.3+ for challenge-response pairing and file integrity verification. |
+| **1.3.5+** | :white_check_mark: | Current stable series with 2048-bit SPEKE PAKE authentication, end-to-end AES-256-GCM session & file encryption, and local-network safeguards. |
+| **1.3.0 – 1.3.2** | :x: | Superseded by `v1.3.5`. Upgrade to `v1.3.5+` for SPEKE PAKE and encrypted `:8765` control transport. |
+| **< 1.3.0** | :x: | Unsupported. |
 
 ---
 
@@ -14,36 +14,40 @@
 
 **Bridge** operates on a **100% local, zero-cloud model**: all device communication stays on your local Wi-Fi or personal hotspot with no external servers or telemetry (aside from optional GitHub Releases update checks).
 
-> [!IMPORTANT]
-> **Current Threat Model (Trusted Local Networks):**
-> Control traffic on `TCP :8765` currently runs over a **plaintext local TCP socket** (no TLS yet). Because a 6-digit pairing code has only 900,000 combinations, an attacker on the same Wi-Fi network who captures a `hello` handshake can brute-force the 6-digit code offline or read unencrypted `:8765` control messages (including clipboard text/images, notifications, and `file_offer` / `file_accept` tokens). **TLS transport encryption and PAKE / high-entropy pairing authentication are planned for `v1.4.0`.** Until then, use Bridge only on trusted private networks or a personal hotspot.
+### 1. 2048-Bit SPEKE Password-Authenticated Key Exchange (PAKE)
+- Pairing authentication uses **SPEKE (Simple Password Exponential Key Exchange)** over the **RFC 3526 Group 14 (2048-bit MODP)** safe prime $p = 2q + 1$:
+  - Both peers derive a prime-order Subgroup generator $g = H(\text{"bridge-speke-v1"}, \text{PairingCode}, \text{ClientNonce})^2 \bmod p$ and exchange ephemeral Diffie-Hellman public elements ($A = g^a \bmod p$, $B = g^b \bmod p$).
+  - Neither the 6-digit pairing code nor any static hash of it is ever transmitted before Diffie-Hellman key agreement, preventing offline brute-force recovery of the 6-digit code from recorded handshakes and providing **Perfect Forward Secrecy (PFS)**.
+  - Public group elements are validated in $[2, p - 2]$ to reject small-subgroup and trivial-element attacks, and mutual transcript key-confirmation proofs (`auth` and `welcome`) are verified in constant time before any session data is accepted.
 
-### 1. Challenge-Response Mutual Authentication
-- The Android client authenticates using a salted SHA-256 challenge-response rather than sending the 6-digit pairing code:
-  $$\text{Proof} = \text{SHA-256}(\text{"bridge-hello:"} + \text{PairingCode} + \text{":"} + \text{ClientNonce})$$
-- The Mac verifies the proof in constant time and returns a matching `welcome` proof before authorizing session messages. Legacy unhashed plaintext `code` handshakes are rejected.
+### 2. End-to-End AES-256-GCM Session Encryption (`TCP :8765`)
+- Upon completing the SPEKE handshake, Bridge derives independent 256-bit directional keys (`c2sKey` for Android $\to$ Mac and `s2cKey` for Mac $\to$ Android).
+- Every post-handshake message on `TCP :8765` (clipboard text, clipboard images, mirrored notifications, inline replies, settings sync, and file-transfer control headers) is encapsulated in an authenticated **AES-256-GCM** frame (`{"type":"enc","seq":<u64>,"d":"<base64(iv + ciphertext + tag)>"}`):
+  - **96-bit IV:** 4-byte CSPRNG salt + 8-byte big-endian monotonic sequence number (`seq`).
+  - **AAD:** Binds both direction and sequence number (`"bridge-v1:<direction>:<seq>"`) with a 128-bit authentication tag, preventing tampering, direction reflection, out-of-order injection, and replay.
+  - Any unencrypted post-handshake packet is rejected immediately and terminates the connection.
 
-### 2. Local Network Boundary Enforcement
+### 3. Local Network Boundary Enforcement
 - Bridge accepts connections **only from private/local network ranges** (RFC 1918: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, link-local `169.254.0.0/16`, CGNAT `100.64.0.0/10`, loopback, and IPv6 `fe80:`/`fc`/`fd`).
 - Any connection attempt originating from a public WAN IP address is rejected.
 - Pairing codes on macOS are stored with POSIX `0600` permissions (`~/.bridge_pairing_code`).
 
-### 3. Brute-Force & Denial-of-Service Defense
+### 4. Brute-Force & Denial-of-Service Defense
 - **Per-IP Exponential Lockout:** 5 failed handshake attempts from an IP within 60 seconds trigger a 60-second lockout, doubling exponentially on consecutive violations up to 960 seconds (`16x`).
-- **Global Handshake Rate-Limiting:** 10 failed handshake attempts across all IPs within 60 seconds trigger a 30-second global handshake lockout.
+- **Global Handshake Rate-Limiting:** 10 failed handshake attempts across all IPs within 60 seconds trigger a 30-second global handshake lockout (`globalLockoutUntil`).
 - **Anti-Replay Nonce Caching:** Caches up to 256 recent `clientNonce` values to reject replayed `hello` packets.
-- **Unauthenticated Handshake Timeout:** Unauthenticated sockets that do not complete a handshake within 8 seconds are disconnected.
+- **Unauthenticated Handshake Timeout:** Unauthenticated sockets that do not complete the SPEKE handshake within 8 seconds are disconnected.
 - **Memory & Connection Bounds:** Unauthenticated sockets are limited to 8 KB buffers and 4 concurrent unauthenticated connections (8 total concurrent connections).
 
-### 4. Encrypted File & Folder Transfers
-- **AES-256-GCM Framing:** File chunks and folder archives are encrypted on dedicated data sockets using **AES-256-GCM** (256-bit key derived via `SHA-256(token + ":bridge-file-encryption")`) with a fresh 12-byte random IV/nonce per 64 KB frame and 128-bit authentication tags.
-  - *Note:* Because the per-transfer `token` is currently sent inside `file_offer`/`file_accept` over `:8765`, confidentiality against a passive network sniffer depends on adding TLS in `v1.4.0`.
+### 5. Encrypted File & Folder Transfers
+- **Protected Session Token & Data-Socket Auth Proof:** Per-transfer 256-bit `token` values are exchanged exclusively inside the AES-256-GCM encrypted `:8765` control channel. When connecting to the dedicated transfer TCP socket, the client never transmits the raw `token`; instead it presents a one-way binder `auth = SHA-256("bridge-file-auth-v1:" + token + ":" + id + ":" + offset)` verified in constant time.
+- **AES-256-GCM Chunk Framing:** File chunks and folder archives are encrypted on the dedicated data socket using **AES-256-GCM** (`SHA-256(token + ":bridge-file-encryption")`) with a fresh 12-byte random IV/nonce per 64 KB frame and 128-bit authentication tags.
 - **SHA-256 Integrity Digests:** Completed transfers verify SHA-256 checksums before moving files out of `.part` staging files.
-- **Path Traversal Protection:** Incoming filenames and archive entries are sanitized (`sanitizeFileName`), stripping path separators (`/` and `\`), control characters, null bytes, and leading dots.
-- **Executable Guard & Save Location:** Both platforms prompt for confirmation before accepting listed executable extensions (`.sh`, `.app`, `.dmg`, `.pkg`, `.apk`, `.exe`, etc.) even when auto-accept is enabled (note: folder archives currently bypass the per-file executable check).
+- **Path Traversal & Symlink Protection:** Incoming filenames and archive entries are sanitized (`sanitizeFileName`), stripping path separators (`/` and `\`), control characters, null bytes, and leading dots. Folder archive extraction rejects symbolic links to prevent symlink escapes.
+- **Executable Guard & Save Location:** Auto-accepting incoming non-executable files from an authenticated paired device is enabled by default and can be toggled off at any time in Settings (`autoAcceptIncomingFiles`). Even when auto-accept is enabled, both platforms always require manual confirmation for executable, script, bundle, and shortcut extensions (`.app`, `.command`, `.workflow`, `.scpt`, `.sh`, `.py`, `.jar`, `.webloc`, `.apk`, `.dmg`, `.pkg`, `.exe`, etc.) as well as folder archives.
 - **OS Metadata Filtering:** System metadata files (`.DS_Store`, `__MACOSX`, `Thumbs.db`, `.Trashes`, `.Spotlight-V100`, `._*`) are skipped during folder packaging.
 
-### 5. Private Content Protection & Android Manifest Hardening
+### 6. Private Content Protection & Android Manifest Hardening
 - Clipboard text and notification bodies are not logged in normal sync paths (using truncated SHA-256 hashes for clipboard diagnostics).
 - `android:allowBackup="false"` prevents cloud backup extraction of local preferences.
 - Internal receivers and helper components (including `FileTransferActionReceiver` and `MacAlertDismissReceiver`) set `android:exported="false"`.

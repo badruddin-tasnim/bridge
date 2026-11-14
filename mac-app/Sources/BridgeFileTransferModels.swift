@@ -149,9 +149,13 @@ class FileTransferItem: ObservableObject, Identifiable {
     }
 
     static let executableExtensions: Set<String> = [
-        "sh", "command", "bash", "zsh", "app", "pkg", "dmg", "workflow", "action",
-        "apk", "dex", "jar", "class", "exe", "bat", "cmd", "msi", "vbs", "ps1",
-        "bin", "tool", "py", "rb"
+        "sh", "command", "bash", "zsh", "csh", "ksh", "fish",
+        "app", "pkg", "mpkg", "dmg", "workflow", "action",
+        "scpt", "scptd", "applescript", "webloc", "url", "inetloc",
+        "apk", "dex", "jar", "class",
+        "exe", "bat", "cmd", "msi", "msp", "vbs", "wsf", "hta", "ps1", "com", "scr", "pif", "cpl", "gadget",
+        "bin", "tool", "run", "elf", "py", "rb", "pl", "php", "js", "mjs",
+        "dylib", "so", "bundle", "kext", "prefpane", "qlgenerator", "mdimporter", "saver", "xpc"
     ]
 
     var isExecutable: Bool {

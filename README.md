@@ -9,7 +9,7 @@
 A lightweight, native open-source bridge linking your **Android phone** and your **Mac** over your local Wi-Fi network—with zero cloud accounts, zero telemetry, and zero latency.
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-v1.3.2-C8F135?style=for-the-badge&labelColor=0E0F12" alt="Version 1.3.2" />
+  <img src="https://img.shields.io/badge/Version-v1.3.5-C8F135?style=for-the-badge&labelColor=0E0F12" alt="Version 1.3.5" />
   <img src="https://img.shields.io/badge/Android-Kotlin-C8F135?style=for-the-badge&logo=android&logoColor=C8F135&labelColor=0E0F12" alt="Android Kotlin" />
   <img src="https://img.shields.io/badge/macOS-Swift_%26_SwiftUI-C8F135?style=for-the-badge&logo=apple&logoColor=C8F135&labelColor=0E0F12" alt="macOS Swift" />
   <img src="https://img.shields.io/badge/Network-100%25_Local_LAN-181B20?style=for-the-badge&labelColor=0E0F12&color=C8F135" alt="100% Local LAN" />
@@ -17,11 +17,11 @@ A lightweight, native open-source bridge linking your **Android phone** and your
 </p>
 
 <p align="center">
-  <a href="#-whats-new-in-v132">What's New in v1.3.2</a> •
+  <a href="#-whats-new-in-v135">What's New in v1.3.5</a> •
   <a href="#-key-features">Key Features</a> •
   <a href="#-getting-started">Getting Started</a> •
   <a href="#-pairing--multi-device-connection">Pairing & Multi-Device</a> •
-  <a href="#-security-privacy--permissions-transparency">Security & Privacy</a>
+  <a href="#-security-privacy--architecture-transparency">Security & Privacy</a>
 </p>
 
 <table align="center">
@@ -45,13 +45,13 @@ A lightweight, native open-source bridge linking your **Android phone** and your
 
 ---
 
-## ⚡ What's New in v1.3.2
+## ⚡ What's New in v1.3.5
 
-Bridge **v1.3.2** brings macOS 13.0+ compatibility, UI polish, signed Android release builds, and security hardening:
+Bridge **v1.3.5** introduces end-to-end encrypted local control transport, 2048-bit SPEKE PAKE authentication, and macOS menu bar UI stability fixes:
 
-- **macOS 13.0+ Compatibility & Animated Popover** — Built with an explicit `-target` (`macOS 13.0+`) for the main app and extensions so releases run on macOS Ventura and newer, plus smooth fade-and-slide menu bar popover open/close animations.
-- **Signed & R8-Minified Android Release APKs** — Official release APKs are now built with `assembleRelease`, minified with R8, signed with Bridge's dedicated Android release certificate, and accompanied by `SHA256SUMS.txt` verification instructions.
-- **Security & Stability Hardening** — Enforced global handshake lockout (`globalLockoutUntil`), removed the legacy plaintext `code` login fallback, restricted `FileTransferActionReceiver` (`android:exported="false"`), and aligned documentation with the current codebase.
+- **2048-Bit SPEKE PAKE Handshake** — Replaced the static salted SHA-256 pairing challenge with a 2048-bit **SPEKE (Simple Password Exponential Key Exchange)** over RFC 3526 Group 14 (`hello` $\to$ `challenge` $\to$ `auth` $\to$ `welcome`), preventing offline brute-force recovery of the 6-digit pairing code from captured handshakes and providing Perfect Forward Secrecy (PFS).
+- **End-to-End AES-256-GCM Session Transport (`TCP :8765`)** — All post-handshake control and sync traffic (clipboard text/images, mirrored notifications, inline replies, settings sync, and file-transfer control headers) is now encrypted with directional **AES-256-GCM** session keys, monotonic sequence numbers, and AAD direction binding.
+- **Hardened File Sharing & Menu Bar Popover Scroll Fix** — Expanded executable/script/bundle extension guards (`.command`, `.workflow`, `.scpt`, `.py`, `.jar`, `.webloc`, etc.), symlink rejection during archive extraction, and hashed data-socket auth proofs (`computeDataSocketAuth`), plus fixed the macOS menu bar popover displacing when long multi-message notifications arrive (`ViewThatFits` + screen height clamping).
 
 ---
 
@@ -90,48 +90,63 @@ Bridge **v1.3.2** brings macOS 13.0+ compatibility, UI polish, signed Android re
 
 ## 🚀 Getting Started
 
-You can install Bridge by downloading the pre-built binaries from [**GitHub Releases**](../../releases), using terminal commands, or building from source.
+You can install Bridge from [**GitHub Releases**](../../releases), via terminal commands (`adb` / `curl`), or by building from source.
 
-### Option 1: Direct Download
+### 1. Install on macOS (`macOS 13.0+`)
 
-1. Download the latest release assets from [**Releases**](../../releases):
-   - 💻 **`Bridge-v*-macOS.dmg`** — Native macOS Menu Bar App (`macOS 13.0+`)
-   - 📱 **`Bridge-v*-Android.apk`** — Native Android App (`Android 8.0+`)
-2. **Install on macOS:**
-   - Double-click the downloaded **`.dmg`** file and drag **`Bridge.app`** into the **Applications** folder in the installer window.
-   - Launch **`Bridge.app`**. *(If macOS Gatekeeper prompts on first launch, right-click `Bridge.app` → **Open**, or run `xattr -cr /Applications/Bridge.app && open /Applications/Bridge.app` in Terminal).*
-   - The Bridge icon will appear in your top menu bar.
-3. **Install on Android:**
-   - Open the downloaded **`.apk`** on your Android phone to install the app.
-   - **Android 14–16 Google Play Protect Notice:** Because Bridge uses `BIND_NOTIFICATION_LISTENER_SERVICE` and `BIND_ACCESSIBILITY_SERVICE`, Play Protect's sideload fraud protection on newer Android devices may block opening the APK from a browser or file manager (*"App blocked to protect your device"*). If that happens, install from your Mac using **ADB** instead (Option 2 below):
-     ```bash
-     adb install -r /tmp/Bridge-Android.apk
-     ```
-   - **Android 13+ Restricted Settings:** If **Accessibility** or **Notification Access** appears grayed out after sideloading, open **Settings → Apps → Bridge → ⋮ (top right) → Allow restricted settings**, then enable the permissions.
+**Option A — Drag-and-Drop `.dmg` Installer (Recommended):**
+1. Download **`Bridge-v*-macOS.dmg`** from the latest [**GitHub Release**](../../releases).
+2. Double-click the downloaded **`.dmg`** file and drag **`Bridge.app`** into the **Applications** folder in the installer window, then eject the **Bridge** installer drive.
+3. Launch **`Bridge.app`**. *(If macOS Gatekeeper prompts on first launch, right-click `Bridge.app` → **Open**, or run `xattr -cr /Applications/Bridge.app && open /Applications/Bridge.app` in Terminal).*
+4. The Bridge icon will appear in your top menu bar.
 
----
-
-### Option 2: Install via Command Line (CLI)
-
+**Option B — Install via Terminal (CLI):**
 ```bash
 TAG=$(curl -fsSL https://api.github.com/repos/badruddin-tasnim/bridge/releases/latest | grep -m1 '"tag_name"' | cut -d'"' -f4)
-
-# 1. Download, install, and launch the macOS Menu Bar app
 curl -L -o /tmp/Bridge-macOS.dmg "https://github.com/badruddin-tasnim/bridge/releases/download/${TAG}/Bridge-${TAG}-macOS.dmg"
 hdiutil attach -nobrowse -quiet /tmp/Bridge-macOS.dmg
 rm -rf /Applications/Bridge.app && cp -R /Volumes/Bridge/Bridge.app /Applications/Bridge.app
 hdiutil detach /Volumes/Bridge -quiet
 xattr -cr /Applications/Bridge.app
 open /Applications/Bridge.app
-
-# 2. Download & install the Android APK over ADB
-curl -L -o /tmp/Bridge-Android.apk "https://github.com/badruddin-tasnim/bridge/releases/download/${TAG}/Bridge-${TAG}-Android.apk"
-adb install -r /tmp/Bridge-Android.apk
 ```
 
 ---
 
-### Option 3: Build from Source
+### 2. Install on Android (`Android 8.0+`)
+
+> [!IMPORTANT]
+> **Why Android 14–16 Users Should Install via USB (`adb`):**
+> Bridge is a 100% open-source, non-Play utility that requires `BIND_NOTIFICATION_LISTENER_SERVICE` (to mirror notifications and send inline replies) and `BIND_ACCESSIBILITY_SERVICE` (to detect clipboard copy events in the background on Android 10+).
+>
+> On **Android 14, 15, and 16**, Google Play Protect's *Enhanced Fraud Protection* automatically blocks **any** non-Play APK downloaded from a web browser or file manager that declares these two permissions (*"App blocked to protect your device"*), and hides the *"Install anyway"* button. Installing over **USB with `adb`** from your Mac is the official Android developer installation path—it bypasses the browser sideload block **and** automatically unlocks Android 13+'s *"Restricted settings"* for Accessibility and Notification Access.
+
+#### Method A: Install via USB & ADB from Your Mac *(Required on Android 14–16, Recommended for All)*
+
+1. **Enable USB Debugging on your Android phone:**
+   - Open **Settings → About phone** and tap **Build number** 7 times until *"You are now a developer!"* appears.
+   - Open **Settings → System → Developer options** (or **Additional settings → Developer options**) and enable **USB debugging**.
+2. **Connect your phone to your Mac via USB cable** and tap **Allow** on the *"Allow USB debugging?"* prompt on your phone.
+3. **Run the following commands in your Mac Terminal:**
+   ```bash
+   # Install adb if you don't already have it
+   brew install --cask android-platform-tools
+
+   # Download the latest Bridge Android APK and install over USB
+   TAG=$(curl -fsSL https://api.github.com/repos/badruddin-tasnim/bridge/releases/latest | grep -m1 '"tag_name"' | cut -d'"' -f4)
+   curl -L -o /tmp/Bridge-Android.apk "https://github.com/badruddin-tasnim/bridge/releases/download/${TAG}/Bridge-${TAG}-Android.apk"
+   adb install -r /tmp/Bridge-Android.apk
+   ```
+
+#### Method B: Direct APK Download on Phone *(Android 8–13 & Devices Without Play Protect Sideload Block)*
+
+1. Download **`Bridge-v*-Android.apk`** from [**GitHub Releases**](../../releases) directly on your Android phone.
+2. Open the downloaded **`.apk`** file to install it. *(If Play Protect shows a standard warning dialog, tap **More details → Install anyway**).*
+3. **Android 13 Restricted Settings:** If **Accessibility** or **Notification Access** appears grayed out after installing the APK directly, open **Settings → Apps → Bridge → ⋮ (top right) → Allow restricted settings**, then enable the permissions.
+
+---
+
+### 3. Build from Source
 
 <details>
 <summary><b>Click to expand build instructions (Swift & Gradle)</b></summary>
@@ -226,13 +241,11 @@ Pairing your devices is fast, private, and requires zero account creation:
 
 ## 🔒 Security, Privacy & Architecture Transparency
 
-Bridge is built to be **100% local, zero-cloud, and auditable** (see [SECURITY.md](SECURITY.md) for current details and planned protocol hardening).
+Bridge is built to be **100% local, zero-cloud, and auditable** (see [SECURITY.md](SECURITY.md) for full cryptographic specifications).
 
-### 1. Salted Challenge-Response Authentication & Transport Model
-* **Android pairing handshake:** The Android client authenticates using a salted SHA-256 challenge-response instead of sending the 6-digit pairing code directly:
-  $$\text{Proof} = \text{SHA-256}(\text{"bridge-hello:"} + \text{PairingCode} + \text{":"} + \text{ClientNonce})$$
-  The Mac verifies the proof and replies with a matching `welcome` proof before authorizing the session.
-* **Current threat model (Trusted Local Wi-Fi):** Control messages on `TCP :8765` (clipboard text/images, notifications, and file-transfer control tokens) currently run over an unencrypted local TCP socket, while file-transfer data streams are encrypted with `AES-256-GCM` using a `SHA-256`-derived session token. **TLS transport encryption and PAKE / high-entropy pairing authentication are planned for `v1.4.0`** (so until then, only use Bridge on trusted private networks/hotspots).
+### 1. 2048-Bit SPEKE PAKE Authentication & End-to-End AES-256-GCM Transport
+* **Zero-knowledge PAKE handshake (`BridgeSpeke`):** Devices authenticate using a 2048-bit **SPEKE (Simple Password Exponential Key Exchange)** over RFC 3526 Group 14 ($p = 2q + 1$). Neither the 6-digit pairing code nor any static hash of it is sent before Diffie-Hellman key agreement, preventing offline brute-force attacks against recorded handshakes and providing **Perfect Forward Secrecy (PFS)**.
+* **Encrypted control & data channels (`BridgeSessionCipher`):** All post-handshake traffic on `TCP :8765` (clipboard text/images, notifications, inline replies, settings sync, and file-transfer control messages) is encrypted with directional **AES-256-GCM** keys, monotonic 64-bit sequence numbers, and AAD direction binding. File-transfer data streams are likewise encrypted with **AES-256-GCM** and authenticated via one-way SHA-256 data-socket proofs (`computeDataSocketAuth`).
 
 ### 2. Brute-Force & Denial-of-Service Defense
 * **Per-IP Exponential Lockout:** 5 failed handshake attempts from an IP within 60 seconds trigger an immediate 60-second lockout, doubling exponentially on consecutive violations up to 960 seconds.
@@ -246,7 +259,12 @@ Bridge is built to be **100% local, zero-cloud, and auditable** (see [SECURITY.m
 * Only local LAN addresses (RFC 1918: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`, link-local `169.254.0.0/16`, CGNAT `100.64.0.0/10`, and loopback/link-local IPv6) are accepted.
 * Pairing codes on macOS are stored with strict POSIX `0600` permissions (`~/.bridge_pairing_code`).
 
-### 4. Transparent Permission Usage
+### 4. File Transfer & Archive Extraction Safeguards
+* **Protected Session Tokens & Data-Socket Auth Proofs:** Per-transfer 256-bit `token` values travel exclusively inside the AES-256-GCM encrypted `:8765` control channel, and dedicated data sockets authenticate using a one-way SHA-256 binder (`computeDataSocketAuth`) instead of exposing the raw token.
+* **Executable & Script Confirmation Guard:** Even when incoming file auto-accept is enabled, both macOS and Android always prompt for manual confirmation before accepting executable, script, bundle, or shortcut files (`.app`, `.command`, `.workflow`, `.scpt`, `.sh`, `.py`, `.jar`, `.webloc`, `.apk`, `.dmg`, `.pkg`, `.exe`, `.dylib`, etc.) as well as folder archives.
+* **Path Traversal & Symlink Protection:** Incoming filenames and archive entries are sanitized (`sanitizeFileName`), and folder archive extraction rejects symbolic links to prevent symlink escapes.
+
+### 5. Transparent Permission Usage
 
 | Permission | Exact Purpose in Bridge | Source Reference |
 | :--- | :--- | :--- |

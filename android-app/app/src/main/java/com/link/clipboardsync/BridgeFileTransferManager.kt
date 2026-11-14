@@ -192,7 +192,13 @@ object BridgeFileTransferManager {
     }
 
     private val EXECUTABLE_EXTENSIONS = setOf(
-        "apk", "sh", "command", "app", "dmg", "pkg", "exe", "bat", "cmd", "bin", "jar", "dex", "so", "vbs", "msi"
+        "apk", "sh", "bash", "zsh", "csh", "ksh", "fish", "command", "app", "dmg", "pkg", "mpkg",
+        "exe", "bat", "cmd", "bin", "jar", "class", "dex", "so", "vbs", "msi", "msp", "wsf",
+        "hta", "ps1", "com", "scr", "pif", "cpl", "gadget", "tool", "run", "elf",
+        "workflow", "action", "scpt", "scptd", "applescript",
+        "py", "rb", "pl", "php", "js", "mjs",
+        "webloc", "url", "inetloc",
+        "dylib", "bundle", "kext", "prefpane", "qlgenerator", "mdimporter", "saver", "xpc"
     )
 
     fun isExecutable(fileName: String): Boolean {
@@ -204,6 +210,10 @@ object BridgeFileTransferManager {
         val digest = MessageDigest.getInstance("SHA-256")
         val keyBytes = digest.digest((token + ":bridge-file-encryption").toByteArray(Charsets.UTF_8))
         return SecretKeySpec(keyBytes, "AES")
+    }
+
+    internal fun computeDataSocketAuth(token: String, transferId: String, offset: Long): String {
+        return ClipboardPayload.computeSHA256("bridge-file-auth-v1:$token:$transferId:$offset")
     }
 
     private fun readFully(input: InputStream, buffer: ByteArray, length: Int): Boolean {
@@ -501,7 +511,7 @@ object BridgeFileTransferManager {
                 activeSockets[item.id] = s
 
                 val header = JSONObject().apply {
-                    put("token", token)
+                    put("auth", computeDataSocketAuth(token, item.id, offset))
                     put("id", item.id)
                     put("offset", offset)
                 }.toString() + "\n"
@@ -785,7 +795,7 @@ object BridgeFileTransferManager {
                 activeSockets[item.id] = s
 
                 val header = JSONObject().apply {
-                    put("token", token)
+                    put("auth", computeDataSocketAuth(token, item.id, offset))
                     put("id", item.id)
                     put("offset", offset)
                 }.toString() + "\n"
