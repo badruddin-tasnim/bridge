@@ -129,7 +129,7 @@ class BridgeFileTransferManager: ObservableObject {
 
     private init() {
         if UserDefaults.standard.object(forKey: Self.keyAutoAcceptFiles) == nil {
-            self.autoAcceptIncomingFiles = true
+            self.autoAcceptIncomingFiles = false
         } else {
             self.autoAcceptIncomingFiles = UserDefaults.standard.bool(forKey: Self.keyAutoAcceptFiles)
         }
@@ -143,6 +143,10 @@ class BridgeFileTransferManager: ObservableObject {
         let keyData = (token + ":bridge-file-encryption").data(using: .utf8) ?? Data()
         let hash = SHA256.hash(data: keyData)
         return SymmetricKey(data: hash)
+    }
+
+    static func computeDataSocketAuth(token: String, transferId: String, offset: Int64) -> String {
+        return computeSHA256("bridge-file-auth-v1:\(token):\(transferId):\(offset)")
     }
 
     // MARK: - Public Outgoing API (Mac -> Android)
@@ -346,15 +350,23 @@ class BridgeFileTransferManager: ObservableObject {
             guard let self = self else { return }
             guard var currentSession = self.activeSessions[item.id],
                   let dict = try? JSONSerialization.jsonObject(with: headerJson) as? [String: Any],
-                  let clientToken = dict["token"] as? String,
+                  let clientAuth = (dict["auth"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
                   let clientId = dict["id"] as? String,
-                  clientId == item.id,
-                  constantTimeEquals(clientToken, currentSession.token) else {
+                  clientId == item.id else {
                 conn.cancel()
                 return
             }
 
             let offset = (dict["offset"] as? NSNumber)?.int64Value ?? 0
+            let expectedAuth = Self.computeDataSocketAuth(
+                token: currentSession.token,
+                transferId: item.id,
+                offset: offset
+            )
+            guard offset >= 0, constantTimeEquals(clientAuth, expectedAuth) else {
+                conn.cancel()
+                return
+            }
             let readUrl = item.tempArchiveUrl ?? item.sourceUrl
             guard let sourceUrl = readUrl,
                   let fh = try? FileHandle(forReadingFrom: sourceUrl) else {
@@ -677,16 +689,24 @@ class BridgeFileTransferManager: ObservableObject {
             guard let self = self else { return }
             guard var currentSession = self.activeSessions[item.id],
                   let dict = try? JSONSerialization.jsonObject(with: headerJson) as? [String: Any],
-                  let clientToken = dict["token"] as? String,
+                  let clientAuth = (dict["auth"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
                   let clientId = dict["id"] as? String,
                   clientId == item.id,
-                  constantTimeEquals(clientToken, currentSession.token),
                   let partUrl = item.partUrl else {
                 conn.cancel()
                 return
             }
 
             let offset = (dict["offset"] as? NSNumber)?.int64Value ?? 0
+            let expectedAuth = Self.computeDataSocketAuth(
+                token: currentSession.token,
+                transferId: item.id,
+                offset: offset
+            )
+            guard offset >= 0, constantTimeEquals(clientAuth, expectedAuth) else {
+                conn.cancel()
+                return
+            }
             if offset == 0 || !FileManager.default.fileExists(atPath: partUrl.path) {
                 FileManager.default.createFile(atPath: partUrl.path, contents: nil)
             }
@@ -1586,14 +1606,21 @@ class BridgeFileTransferManager: ObservableObject {
             return false
         }
 
-        // Zip Slip defense: verify all extracted entries stay within tempExtractDir
-        guard let enumerator = FileManager.default.enumerator(at: tempExtractDir, includingPropertiesForKeys: nil) else {
+        // Zip Slip & symlink defense: verify all extracted entries stay within tempExtractDir and contain no symlinks
+        guard let enumerator = FileManager.default.enumerator(
+            at: tempExtractDir,
+            includingPropertiesForKeys: [.isSymbolicLinkKey]
+        ) else {
             try? FileManager.default.removeItem(at: tempExtractDir)
             return false
         }
         let canonicalBase = tempExtractDir.resolvingSymlinksInPath().path
         var metadataUrlsToRemove: [URL] = []
         for case let fileUrl as URL in enumerator {
+            if (try? fileUrl.resourceValues(forKeys: [.isSymbolicLinkKey]))?.isSymbolicLink == true {
+                try? FileManager.default.removeItem(at: tempExtractDir)
+                return false
+            }
             let canonicalFile = fileUrl.resolvingSymlinksInPath().path
             if !canonicalFile.hasPrefix(canonicalBase) {
                 try? FileManager.default.removeItem(at: tempExtractDir)

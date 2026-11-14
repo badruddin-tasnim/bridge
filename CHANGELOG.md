@@ -6,13 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.3.5] - 2026-11-14
+
 ### Added
-- macOS `.dmg` drag-to-Applications installer (`Bridge-vX.Y.Z-macOS.dmg`) with custom dark-and-green branding (`mac-app/scripts/make-dmg.sh`, `make dmg` target, and release/CI workflows) replacing the `.zip` archive.
+- **2048-Bit SPEKE PAKE Handshake:** Replaced the static salted SHA-256 pairing challenge with a 2048-bit **SPEKE (Simple Password Exponential Key Exchange)** over the RFC 3526 Group 14 safe prime (`hello` $\to$ `challenge` $\to$ `auth` $\to$ `welcome`) in [`BridgeServer.swift`](mac-app/Sources/BridgeServer.swift) and [`NetworkSyncClient.kt`](android-app/app/src/main/java/com/link/clipboardsync/NetworkSyncClient.kt), preventing offline brute-force recovery of the 6-digit pairing code from captured handshakes and providing Perfect Forward Secrecy.
+- **End-to-End AES-256-GCM Session Transport (`TCP :8765`):** Encrypted all post-handshake traffic on port `8765` (clipboard text/images, notifications, inline replies, settings sync, and file-transfer control messages) with directional **AES-256-GCM** keys, monotonic 64-bit sequence numbers, and AAD direction binding (`BridgeSessionCipher`).
+- macOS `.dmg` drag-to-Applications installer (`Bridge-vX.Y.Z-macOS.dmg`) with custom dark-and-green branding and external drive volume icon (`mac-app/scripts/make-dmg.sh`, `make dmg` target, and release/CI workflows) replacing the `.zip` archive.
 - Adaptive Liquid Glass / Dark Icons bundle (`mac-app/Resources/Bridge.icon` + `Assets.car`) so `Bridge.app` renders its green glyph on a dark background in macOS Dark Icons appearance instead of monochrome black-on-black.
 
 ### Fixed
+- Fixed macOS menu bar popover displacing from beneath the status bar icon when 1–2 long or multi-message notifications arrive by wrapping the notification and transfer lists in `ViewThatFits(in: .vertical)` with a capped `ScrollView` ([`BridgeMenuView.swift`](mac-app/Sources/BridgeMenuView.swift)) and clamping popover height to the screen's visible frame ([`main.swift`](mac-app/Sources/main.swift)) ([#19](https://github.com/badruddin-tasnim/bridge/pull/19)).
 - Removed the `NSWorkspace.shared.setIcon` `.icns` Finder override from [`mac-app/Makefile`](mac-app/Makefile) so macOS renders the `Assets.car` adaptive icon cleanly while keeping `Bridge.icns` as fallback.
-- Fixed macOS menu bar popover displacing from beneath the status bar icon when 1–2 long or multi-message notifications arrive by wrapping the notification and transfer lists in `ViewThatFits(in: .vertical)` with a capped `ScrollView` ([`BridgeMenuView.swift`](mac-app/Sources/BridgeMenuView.swift)) and clamping popover height to the screen's visible frame ([`main.swift`](mac-app/Sources/main.swift)).
+
+### Security
+- Resolved all 7 security findings tracked in [#9](https://github.com/badruddin-tasnim/bridge/issues/9):
+  - Encrypted all `:8765` control and sync traffic with **AES-256-GCM** (`BridgeSessionCipher`) and rejected any unencrypted post-handshake messages.
+  - Upgraded pairing authentication to **2048-bit SPEKE PAKE** (`BridgeSpeke`) so the 6-digit pairing code cannot be brute-forced offline from a recorded handshake.
+  - Protected file-transfer `token` values inside the encrypted `:8765` channel and replaced raw token transmission on the secondary data socket with a one-way SHA-256 auth proof (`computeDataSocketAuth`).
+  - Changed `autoAcceptIncomingFiles` default to `false` on both macOS and Android, expanded `executableExtensions` coverage (`.command`, `.workflow`, `.scpt`, `.py`, `.jar`, `.webloc`, `.dylib`, etc.), and rejected symbolic links during folder archive extraction.
+  - Updated [`SECURITY.md`](SECURITY.md) and [`README.md`](README.md) to reflect the `v1.3.5` cryptographic protocol.
 
 ## [1.3.2] - 2026-11-12
 
@@ -69,7 +81,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Initial public release of Bridge for Android and macOS.
 - Two-way local-network text clipboard synchronization, Bonjour (`_clipboardsync._tcp`) discovery, and 6-digit / QR pairing.
 
-[Unreleased]: https://github.com/badruddin-tasnim/bridge/compare/v1.3.2...HEAD
+[Unreleased]: https://github.com/badruddin-tasnim/bridge/compare/v1.3.5...HEAD
+[1.3.5]: https://github.com/badruddin-tasnim/bridge/compare/v1.3.2...v1.3.5
 [1.3.2]: https://github.com/badruddin-tasnim/bridge/compare/v1.3.1...v1.3.2
 [1.3.1]: https://github.com/badruddin-tasnim/bridge/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/badruddin-tasnim/bridge/compare/v1.2...v1.3.0

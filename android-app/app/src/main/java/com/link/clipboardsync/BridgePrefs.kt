@@ -92,9 +92,9 @@ object BridgePrefs {
         prefs(context).edit().putBoolean(KEY_PHONE_VIBRATE_ENABLED, enabled).apply()
     }
 
-    // Synced Setting: Auto-accept incoming files from paired Mac
+    // Synced Setting: Auto-accept incoming files from paired Mac (defaults to false for security)
     fun isAutoAcceptFilesEnabled(context: Context): Boolean =
-        prefs(context).getBoolean(KEY_AUTO_ACCEPT_FILES, true)
+        prefs(context).getBoolean(KEY_AUTO_ACCEPT_FILES, false)
 
     fun setAutoAcceptFilesEnabled(context: Context, enabled: Boolean, updateTimestamp: Boolean = true) {
         val editor = prefs(context).edit().putBoolean(KEY_AUTO_ACCEPT_FILES, enabled)

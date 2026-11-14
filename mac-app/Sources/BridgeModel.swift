@@ -393,7 +393,8 @@ class BridgeModel: ObservableObject {
                         for asset in assets {
                             if let name = asset["name"] as? String,
                                let downloadUrl = asset["browser_download_url"] as? String,
-                               name.lowercased().contains("macos") && name.lowercased().hasSuffix(".zip") {
+                               name.lowercased().contains("macos") &&
+                               (name.lowercased().hasSuffix(".dmg") || name.lowercased().hasSuffix(".zip")) {
                                 targetUrl = downloadUrl
                                 break
                             }

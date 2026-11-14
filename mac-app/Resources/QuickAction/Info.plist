@@ -9,7 +9,7 @@
 	<key>CFBundleName</key>
 	<string>Share with Bridge</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.3.2</string>
+	<string>1.3.5</string>
 	<key>NSServices</key>
 	<array>
 		<dict>

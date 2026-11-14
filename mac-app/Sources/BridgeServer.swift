@@ -144,6 +144,430 @@ func getPrimaryIPv4Address() -> String? {
     return nil
 }
 
+// MARK: - 2048-Bit Safe-Prime SPEKE & AES-256-GCM Session Transport Security
+
+struct BigUInt2048: Equatable {
+    var limbs: [UInt32]
+
+    init(_ limbs: [UInt32]) {
+        var trimmed = limbs
+        while let last = trimmed.last, last == 0 {
+            trimmed.removeLast()
+        }
+        self.limbs = trimmed
+    }
+
+    init(bigEndianBytes: [UInt8]) {
+        var words: [UInt32] = []
+        var i = bigEndianBytes.count
+        while i > 0 {
+            let start = max(0, i - 4)
+            var word: UInt32 = 0
+            for j in start..<i {
+                word = (word << 8) | UInt32(bigEndianBytes[j])
+            }
+            words.append(word)
+            i = start
+        }
+        self.init(words)
+    }
+
+    init?(hex: String) {
+        let clean = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !clean.isEmpty, clean.count <= 512 else { return nil }
+        let padded = (clean.count % 2 == 0) ? clean : ("0" + clean)
+        var bytes: [UInt8] = []
+        bytes.reserveCapacity(padded.count / 2)
+        var idx = padded.startIndex
+        while idx < padded.endIndex {
+            let next = padded.index(idx, offsetBy: 2)
+            guard let b = UInt8(padded[idx..<next], radix: 16) else { return nil }
+            bytes.append(b)
+            idx = next
+        }
+        self.init(bigEndianBytes: bytes)
+    }
+
+    func toBigEndianBytes(minLength: Int = 256) -> [UInt8] {
+        var out: [UInt8] = []
+        out.reserveCapacity(limbs.count * 4)
+        for i in stride(from: limbs.count - 1, through: 0, by: -1) {
+            let w = limbs[i]
+            out.append(UInt8((w >> 24) & 0xFF))
+            out.append(UInt8((w >> 16) & 0xFF))
+            out.append(UInt8((w >> 8) & 0xFF))
+            out.append(UInt8(w & 0xFF))
+        }
+        while out.count > 1 && out.first == 0 {
+            out.removeFirst()
+        }
+        if out.count < minLength {
+            out = [UInt8](repeating: 0, count: minLength - out.count) + out
+        }
+        return out
+    }
+
+    func toHex(minByteLength: Int = 256) -> String {
+        return toBigEndianBytes(minLength: minByteLength).map { String(format: "%02x", $0) }.joined()
+    }
+
+    static func compare(_ a: [UInt32], _ b: [UInt32]) -> Int {
+        if a.count != b.count { return a.count < b.count ? -1 : 1 }
+        for i in stride(from: a.count - 1, through: 0, by: -1) {
+            if a[i] != b[i] { return a[i] < b[i] ? -1 : 1 }
+        }
+        return 0
+    }
+
+    static func add(_ a: [UInt32], _ b: [UInt32]) -> [UInt32] {
+        let count = max(a.count, b.count)
+        var out = [UInt32](repeating: 0, count: count + 1)
+        var carry: UInt64 = 0
+        for i in 0..<count {
+            let av = i < a.count ? UInt64(a[i]) : 0
+            let bv = i < b.count ? UInt64(b[i]) : 0
+            let sum = av + bv + carry
+            out[i] = UInt32(truncatingIfNeeded: sum)
+            carry = sum >> 32
+        }
+        out[count] = UInt32(truncatingIfNeeded: carry)
+        while let last = out.last, last == 0 { out.removeLast() }
+        return out
+    }
+
+    static func subtract(_ a: [UInt32], _ b: [UInt32]) -> [UInt32] {
+        var out = a
+        var borrow: Int64 = 0
+        for i in 0..<out.count {
+            let bv = i < b.count ? Int64(b[i]) : 0
+            let diff = Int64(out[i]) - bv - borrow
+            if diff < 0 {
+                out[i] = UInt32(truncatingIfNeeded: diff + (1 << 32))
+                borrow = 1
+            } else {
+                out[i] = UInt32(truncatingIfNeeded: diff)
+                borrow = 0
+            }
+        }
+        while let last = out.last, last == 0 { out.removeLast() }
+        return out
+    }
+
+    static func multiply(_ a: [UInt32], _ b: [UInt32]) -> [UInt32] {
+        if a.isEmpty || b.isEmpty { return [] }
+        var out = [UInt32](repeating: 0, count: a.count + b.count)
+        out.withUnsafeMutableBufferPointer { outBuf in
+            a.withUnsafeBufferPointer { aBuf in
+                b.withUnsafeBufferPointer { bBuf in
+                    for i in 0..<aBuf.count {
+                        let ai = UInt64(aBuf[i])
+                        var carry: UInt64 = 0
+                        for j in 0..<bBuf.count {
+                            let prod = ai * UInt64(bBuf[j]) + UInt64(outBuf[i + j]) + carry
+                            outBuf[i + j] = UInt32(truncatingIfNeeded: prod)
+                            carry = prod >> 32
+                        }
+                        outBuf[i + bBuf.count] = UInt32(truncatingIfNeeded: carry)
+                    }
+                }
+            }
+        }
+        while let last = out.last, last == 0 { out.removeLast() }
+        return out
+    }
+
+    static func mod(_ a: [UInt32], _ m: [UInt32]) -> [UInt32] {
+        var r = a
+        while let last = r.last, last == 0 { r.removeLast() }
+        let n = m.count
+        guard n > 0 else { return [] }
+
+        while compare(r, m) >= 0 {
+            let shift = r.count - n
+            if shift > 0 {
+                let topHigh = UInt64(r[r.count - 1])
+                let q = max(1, topHigh)
+                let wordShift = shift - 1
+                r.withUnsafeMutableBufferPointer { rBuf in
+                    m.withUnsafeBufferPointer { mBuf in
+                        var borrow: Int64 = 0
+                        for i in 0..<n {
+                            let prod = q * UInt64(mBuf[i])
+                            let prodLo = Int64(prod & 0xFFFF_FFFF)
+                            let prodHi = Int64(prod >> 32)
+                            let cur = Int64(rBuf[i + wordShift]) - prodLo - borrow
+                            if cur < 0 {
+                                let k = (-cur + 0xFFFF_FFFF) >> 32
+                                rBuf[i + wordShift] = UInt32(truncatingIfNeeded: cur + (k << 32))
+                                borrow = prodHi + k
+                            } else {
+                                rBuf[i + wordShift] = UInt32(truncatingIfNeeded: cur)
+                                borrow = prodHi
+                            }
+                        }
+                        var idx = n + wordShift
+                        while borrow > 0 && idx < rBuf.count {
+                            let cur = Int64(rBuf[idx]) - borrow
+                            if cur < 0 {
+                                rBuf[idx] = UInt32(truncatingIfNeeded: cur + (1 << 32))
+                                borrow = 1
+                            } else {
+                                rBuf[idx] = UInt32(truncatingIfNeeded: cur)
+                                borrow = 0
+                            }
+                            idx += 1
+                        }
+                    }
+                }
+                while let last = r.last, last == 0 { r.removeLast() }
+            } else {
+                r = subtract(r, m)
+            }
+        }
+        return r
+    }
+
+    static func modPow(base: BigUInt2048, exponent: BigUInt2048, modulus: BigUInt2048) -> BigUInt2048 {
+        let m = modulus.limbs
+        let b1 = mod(base.limbs, m)
+        if b1.isEmpty { return BigUInt2048([]) }
+        if exponent.limbs.isEmpty { return BigUInt2048([1]) }
+
+        var table = [[UInt32]](repeating: [], count: 16)
+        table[0] = [1]
+        table[1] = b1
+        for k in 2..<16 {
+            table[k] = mod(multiply(table[k - 1], b1), m)
+        }
+
+        var result: [UInt32] = [1]
+        let expBytes = exponent.toBigEndianBytes(minLength: 1)
+        for byte in expBytes {
+            let hi = Int(byte >> 4)
+            for _ in 0..<4 { result = mod(multiply(result, result), m) }
+            if hi != 0 { result = mod(multiply(result, table[hi]), m) }
+
+            let lo = Int(byte & 0x0F)
+            for _ in 0..<4 { result = mod(multiply(result, result), m) }
+            if lo != 0 { result = mod(multiply(result, table[lo]), m) }
+        }
+        return BigUInt2048(result)
+    }
+}
+
+enum BridgeSpeke {
+    // RFC 3526 Group 14 (2048-bit MODP Safe Prime p = 2q + 1)
+    static let pHex =
+        "FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD1" +
+        "29024E088A67CC74020BBEA63B139B22514A08798E3404DD" +
+        "EF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245" +
+        "E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7ED" +
+        "EE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3D" +
+        "C2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F" +
+        "83655D23DCA3AD961C62F356208552BB9ED529077096966D" +
+        "670C354E4ABC9804F1746C08CA18217C32905E462E36CE3B" +
+        "E39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9" +
+        "DE2BCBF6955817183995497CEA956AE515D2261898FA0510" +
+        "15728E5A8AACAA68FFFFFFFFFFFFFFFF"
+
+    static let prime = BigUInt2048(hex: pHex)!
+    static let primeMinusTwo = BigUInt2048(BigUInt2048.subtract(prime.limbs, [2]))
+    static let primeMinusThree = BigUInt2048(BigUInt2048.subtract(prime.limbs, [3]))
+    static let two = BigUInt2048([2])
+
+    struct SessionMaterial {
+        let clientProof: String
+        let serverProof: String
+        let c2sKey: SymmetricKey
+        let s2cKey: SymmetricKey
+        let c2sKeyHex: String
+        let s2cKeyHex: String
+    }
+
+    static func generateNonce() -> String {
+        var bytes = [UInt8](repeating: 0, count: 16)
+        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        return bytes.map { String(format: "%02x", $0) }.joined()
+    }
+
+    static func generatePrivateScalar() -> BigUInt2048 {
+        var bytes = [UInt8](repeating: 0, count: 32)
+        _ = SecRandomCopyBytes(kSecRandomDefault, bytes.count, &bytes)
+        bytes[0] |= 0x80
+        return BigUInt2048(bigEndianBytes: bytes)
+    }
+
+    static func deriveGenerator(pairingCode: String, clientNonce: String) -> BigUInt2048 {
+        let cleanCode = pairingCode.replacingOccurrences(of: " ", with: "").replacingOccurrences(of: "-", with: "")
+        var blocks: [UInt8] = []
+        blocks.reserveCapacity(256)
+        for i in 0..<8 {
+            let input = Data("bridge-speke-v1:\(cleanCode):\(clientNonce):\(i)".utf8)
+            blocks.append(contentsOf: SHA256.hash(data: input))
+        }
+        let rawH = BigUInt2048(bigEndianBytes: blocks)
+        let hMod = BigUInt2048.mod(rawH.limbs, primeMinusThree.limbs)
+        let h = BigUInt2048(BigUInt2048.add(hMod, [2]))
+        return BigUInt2048.modPow(base: h, exponent: two, modulus: prime)
+    }
+
+    static func computePublicElement(generator: BigUInt2048, privateScalar: BigUInt2048) -> String {
+        let pub = BigUInt2048.modPow(base: generator, exponent: privateScalar, modulus: prime)
+        return pub.toHex(minByteLength: 256)
+    }
+
+    static func isValidPublicElement(_ hex: String) -> Bool {
+        guard let element = BigUInt2048(hex: hex) else { return false }
+        return BigUInt2048.compare(element.limbs, two.limbs) >= 0 &&
+               BigUInt2048.compare(element.limbs, primeMinusTwo.limbs) <= 0
+    }
+
+    static func computeSharedSecret(peerPublicHex: String, privateScalar: BigUInt2048) -> String? {
+        guard isValidPublicElement(peerPublicHex),
+              let peerPub = BigUInt2048(hex: peerPublicHex) else {
+            return nil
+        }
+        let shared = BigUInt2048.modPow(base: peerPub, exponent: privateScalar, modulus: prime)
+        guard BigUInt2048.compare(shared.limbs, two.limbs) >= 0 &&
+              BigUInt2048.compare(shared.limbs, primeMinusTwo.limbs) <= 0 else {
+            return nil
+        }
+        return shared.toHex(minByteLength: 256)
+    }
+
+    static func deriveSessionMaterial(
+        sharedSecretHex: String,
+        pairingCode: String,
+        clientNonce: String,
+        serverNonce: String,
+        clientPublicHex: String,
+        serverPublicHex: String
+    ) -> SessionMaterial {
+        let cleanCode = pairingCode.replacingOccurrences(of: " ", with: "").replacingOccurrences(of: "-", with: "")
+        let normSecret = sharedSecretHex.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let normClientPub = clientPublicHex.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let normServerPub = serverPublicHex.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+
+        let transcript = "bridge-speke-transcript-v1:\(clientNonce):\(serverNonce):\(normClientPub):\(normServerPub)"
+        let rootHex = computeSHA256("\(normSecret):\(cleanCode):\(transcript)")
+        let clientProof = computeSHA256("bridge-client-confirm:\(rootHex):\(transcript)")
+        let serverProof = computeSHA256("bridge-server-confirm:\(rootHex):\(transcript)")
+
+        let c2sDigest = SHA256.hash(data: Data("bridge-c2s-key:\(rootHex):\(transcript)".utf8))
+        let s2cDigest = SHA256.hash(data: Data("bridge-s2c-key:\(rootHex):\(transcript)".utf8))
+        let c2sKeyHex = c2sDigest.map { String(format: "%02x", $0) }.joined()
+        let s2cKeyHex = s2cDigest.map { String(format: "%02x", $0) }.joined()
+
+        return SessionMaterial(
+            clientProof: clientProof,
+            serverProof: serverProof,
+            c2sKey: SymmetricKey(data: c2sDigest),
+            s2cKey: SymmetricKey(data: s2cDigest),
+            c2sKeyHex: c2sKeyHex,
+            s2cKeyHex: s2cKeyHex
+        )
+    }
+}
+
+final class BridgeSessionCipher {
+    private let sendKey: SymmetricKey
+    private let receiveKey: SymmetricKey
+    private let sendDirection: String
+    private let receiveDirection: String
+    private let lock = NSLock()
+    private var sendSeq: UInt64 = 0
+    private var expectedReceiveSeq: UInt64 = 1
+
+    init(
+        sendKey: SymmetricKey,
+        receiveKey: SymmetricKey,
+        sendDirection: String,
+        receiveDirection: String
+    ) {
+        self.sendKey = sendKey
+        self.receiveKey = receiveKey
+        self.sendDirection = sendDirection
+        self.receiveDirection = receiveDirection
+    }
+
+    func seal(_ plaintext: Data, saltOverride: [UInt8]? = nil) -> Data? {
+        lock.lock()
+        defer { lock.unlock() }
+
+        sendSeq += 1
+        let seq = sendSeq
+
+        var iv = Data(capacity: 12)
+        if let salt = saltOverride, salt.count == 4 {
+            iv.append(contentsOf: salt)
+        } else {
+            var randomPrefix = [UInt8](repeating: 0, count: 4)
+            _ = SecRandomCopyBytes(kSecRandomDefault, randomPrefix.count, &randomPrefix)
+            iv.append(contentsOf: randomPrefix)
+        }
+        var seqBig = seq.bigEndian
+        withUnsafeBytes(of: &seqBig) { iv.append(contentsOf: $0) }
+
+        let aad = Data("bridge-v1:\(sendDirection):\(seq)".utf8)
+        guard let nonce = try? AES.GCM.Nonce(data: iv),
+              let sealed = try? AES.GCM.seal(plaintext, using: sendKey, nonce: nonce, authenticating: aad),
+              let combined = sealed.combined else {
+            return nil
+        }
+
+        let b64 = combined.base64EncodedString()
+        let envelope = "{\"type\":\"enc\",\"seq\":\(seq),\"d\":\"\(b64)\"}"
+        return envelope.data(using: .utf8)
+    }
+
+    func open(jsonObject: [String: Any]) -> Data? {
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard (jsonObject["type"] as? String) == "enc" else {
+            return nil
+        }
+        let seq: UInt64
+        if let num = jsonObject["seq"] as? NSNumber {
+            let val = num.int64Value
+            guard val > 0 else { return nil }
+            seq = UInt64(val)
+        } else if let u = jsonObject["seq"] as? UInt64, u > 0 {
+            seq = u
+        } else if let i = jsonObject["seq"] as? Int, i > 0 {
+            seq = UInt64(i)
+        } else {
+            return nil
+        }
+
+        guard seq == expectedReceiveSeq else {
+            return nil
+        }
+
+        guard let b64 = jsonObject["d"] as? String,
+              let combined = Data(base64Encoded: b64),
+              combined.count > 28 else {
+            return nil
+        }
+
+        let embeddedSeq = combined.subdata(in: 4..<12).withUnsafeBytes {
+            $0.load(as: UInt64.self).bigEndian
+        }
+        guard embeddedSeq == seq else {
+            return nil
+        }
+
+        let aad = Data("bridge-v1:\(receiveDirection):\(seq)".utf8)
+        guard let sealedBox = try? AES.GCM.SealedBox(combined: combined),
+              let plaintext = try? AES.GCM.open(sealedBox, using: receiveKey, authenticating: aad) else {
+            return nil
+        }
+
+        expectedReceiveSeq += 1
+        return plaintext
+    }
+}
+
 // MARK: - Pairing Security Gate
 
 final class BridgeHandshakeGate {
@@ -156,7 +580,11 @@ final class BridgeHandshakeGate {
 
     struct EvaluationResult {
         let authenticated: Bool
+        let challengeIssued: Bool
         let clientNonce: String?
+        let serverNonce: String?
+        let serverPublicHex: String?
+        let sessionMaterial: BridgeSpeke.SessionMaterial?
         let failureReason: FailureReason?
     }
 
@@ -189,30 +617,75 @@ final class BridgeHandshakeGate {
         jsonObject: [String: Any],
         pairingCode: String,
         remoteIp: String,
-        now: TimeInterval = Date().timeIntervalSince1970
+        now: TimeInterval = Date().timeIntervalSince1970,
+        serverNonceOverride: String? = nil,
+        serverScalarOverride: BigUInt2048? = nil
     ) -> EvaluationResult {
         if isRateLimited(ip: remoteIp, now: now) {
-            return EvaluationResult(authenticated: false, clientNonce: nil, failureReason: .rateLimited)
+            return EvaluationResult(
+                authenticated: false,
+                challengeIssued: false,
+                clientNonce: nil,
+                serverNonce: nil,
+                serverPublicHex: nil,
+                sessionMaterial: nil,
+                failureReason: .rateLimited
+            )
         }
 
         let targetCode = pairingCode.replacingOccurrences(of: " ", with: "")
-        let incomingHash = (jsonObject["hash"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
         let clientNonce = (jsonObject["text"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let rawClientPublicHex = (jsonObject["data"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
 
-        guard !incomingHash.isEmpty, clientNonce.count >= 16, clientNonce.count <= 128 else {
+        guard clientNonce.count >= 16,
+              clientNonce.count <= 128,
+              BridgeSpeke.isValidPublicElement(rawClientPublicHex),
+              let clientPub = BigUInt2048(hex: rawClientPublicHex) else {
             recordFailedAttempt(for: remoteIp, now: now)
-            return EvaluationResult(authenticated: false, clientNonce: nil, failureReason: .invalidPayload)
+            return EvaluationResult(
+                authenticated: false,
+                challengeIssued: false,
+                clientNonce: nil,
+                serverNonce: nil,
+                serverPublicHex: nil,
+                sessionMaterial: nil,
+                failureReason: .invalidPayload
+            )
         }
 
         if usedHelloNonces.contains(clientNonce) {
             recordFailedAttempt(for: remoteIp, now: now)
-            return EvaluationResult(authenticated: false, clientNonce: nil, failureReason: .replayedNonce)
+            return EvaluationResult(
+                authenticated: false,
+                challengeIssued: false,
+                clientNonce: nil,
+                serverNonce: nil,
+                serverPublicHex: nil,
+                sessionMaterial: nil,
+                failureReason: .replayedNonce
+            )
         }
 
-        let expectedHash = computeSHA256("bridge-hello:\(targetCode):\(clientNonce)")
-        guard constantTimeEquals(incomingHash, expectedHash) else {
+        let clientPublicHex = clientPub.toHex(minByteLength: 256)
+        let serverNonce = serverNonceOverride ?? BridgeSpeke.generateNonce()
+        let serverScalar = serverScalarOverride ?? BridgeSpeke.generatePrivateScalar()
+        let generator = BridgeSpeke.deriveGenerator(pairingCode: targetCode, clientNonce: clientNonce)
+        let serverPublicHex = BridgeSpeke.computePublicElement(generator: generator, privateScalar: serverScalar)
+
+        guard let sharedSecretHex = BridgeSpeke.computeSharedSecret(
+            peerPublicHex: clientPublicHex,
+            privateScalar: serverScalar
+        ) else {
             recordFailedAttempt(for: remoteIp, now: now)
-            return EvaluationResult(authenticated: false, clientNonce: nil, failureReason: .invalidProof)
+            return EvaluationResult(
+                authenticated: false,
+                challengeIssued: false,
+                clientNonce: nil,
+                serverNonce: nil,
+                serverPublicHex: nil,
+                sessionMaterial: nil,
+                failureReason: .invalidPayload
+            )
         }
 
         usedHelloNonces.insert(clientNonce)
@@ -221,8 +694,83 @@ final class BridgeHandshakeGate {
             let oldest = usedHelloNonceOrder.removeFirst()
             usedHelloNonces.remove(oldest)
         }
+
+        let material = BridgeSpeke.deriveSessionMaterial(
+            sharedSecretHex: sharedSecretHex,
+            pairingCode: targetCode,
+            clientNonce: clientNonce,
+            serverNonce: serverNonce,
+            clientPublicHex: clientPublicHex,
+            serverPublicHex: serverPublicHex
+        )
+
+        return EvaluationResult(
+            authenticated: false,
+            challengeIssued: true,
+            clientNonce: clientNonce,
+            serverNonce: serverNonce,
+            serverPublicHex: serverPublicHex,
+            sessionMaterial: material,
+            failureReason: nil
+        )
+    }
+
+    func evaluateAuth(
+        jsonObject: [String: Any],
+        sessionMaterial: BridgeSpeke.SessionMaterial,
+        clientNonce: String,
+        remoteIp: String,
+        now: TimeInterval = Date().timeIntervalSince1970
+    ) -> EvaluationResult {
+        if isRateLimited(ip: remoteIp, now: now) {
+            return EvaluationResult(
+                authenticated: false,
+                challengeIssued: false,
+                clientNonce: nil,
+                serverNonce: nil,
+                serverPublicHex: nil,
+                sessionMaterial: nil,
+                failureReason: .rateLimited
+            )
+        }
+
+        let incomingProof = (jsonObject["hash"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+        guard !incomingProof.isEmpty else {
+            recordFailedAttempt(for: remoteIp, now: now)
+            return EvaluationResult(
+                authenticated: false,
+                challengeIssued: false,
+                clientNonce: nil,
+                serverNonce: nil,
+                serverPublicHex: nil,
+                sessionMaterial: nil,
+                failureReason: .invalidPayload
+            )
+        }
+
+        guard constantTimeEquals(incomingProof, sessionMaterial.clientProof) else {
+            recordFailedAttempt(for: remoteIp, now: now)
+            return EvaluationResult(
+                authenticated: false,
+                challengeIssued: false,
+                clientNonce: nil,
+                serverNonce: nil,
+                serverPublicHex: nil,
+                sessionMaterial: nil,
+                failureReason: .invalidProof
+            )
+        }
+
         clearFailedAttempts(for: remoteIp)
-        return EvaluationResult(authenticated: true, clientNonce: clientNonce, failureReason: nil)
+        return EvaluationResult(
+            authenticated: true,
+            challengeIssued: false,
+            clientNonce: clientNonce,
+            serverNonce: nil,
+            serverPublicHex: nil,
+            sessionMaterial: sessionMaterial,
+            failureReason: nil
+        )
     }
 
     func recordFailedAttempt(for ip: String, now: TimeInterval) {
@@ -270,10 +818,19 @@ final class BridgeHandshakeGate {
 // MARK: - Bridge Server Engine
 
 class BridgeServer {
+    private struct PendingHandshake {
+        let clientNonce: String
+        let deviceName: String
+        let remoteIp: String
+        let material: BridgeSpeke.SessionMaterial
+    }
+
     let port: NWEndpoint.Port = 8765
     private var listener: NWListener?
     private var connections = [UUID: NWConnection]()
     private var authenticatedConnections = Set<UUID>()
+    private var pendingHandshakes = [UUID: PendingHandshake]()
+    private var sessionCiphers = [UUID: BridgeSessionCipher]()
     private var clientDeviceNames = [UUID: String]()
     private var connectionLastSeen = [UUID: TimeInterval]()
     private var connectionCreatedAt = [UUID: TimeInterval]()
@@ -546,6 +1103,10 @@ class BridgeServer {
     private func removeConnection(id: UUID) {
         connections.removeValue(forKey: id)
         let wasAuthenticated = authenticatedConnections.remove(id) != nil
+        if let abandoned = pendingHandshakes.removeValue(forKey: id), !wasAuthenticated {
+            handshakeGate.recordFailedAttempt(for: abandoned.remoteIp, now: Date().timeIntervalSince1970)
+        }
+        sessionCiphers.removeValue(forKey: id)
         clientDeviceNames.removeValue(forKey: id)
         connectionLastSeen.removeValue(forKey: id)
         connectionCreatedAt.removeValue(forKey: id)
@@ -587,6 +1148,7 @@ class BridgeServer {
     }
 
     private func denyAndDisconnect(_ conn: NWConnection, id: UUID) {
+        pendingHandshakes.removeValue(forKey: id)
         let denied = ClipboardPayload(type: "denied")
         if let data = try? JSONEncoder().encode(denied) {
             var line = data
@@ -601,12 +1163,11 @@ class BridgeServer {
         }
     }
     
-    private func processPayload(_ data: Data, from conn: NWConnection, id: UUID) {
+    private func processPayload(_ rawLineData: Data, from conn: NWConnection, id: UUID) {
         let isAuth = self.authenticatedConnections.contains(id)
 
-        // Fast inspect message type from JSON structure
-        guard let jsonObject = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              let type = jsonObject["type"] as? String else {
+        guard let outerJson = (try? JSONSerialization.jsonObject(with: rawLineData)) as? [String: Any],
+              let outerType = outerJson["type"] as? String else {
             if !isAuth {
                 NSLog("[BridgeSecurity] Disconnecting unauthenticated client due to malformed JSON")
                 conn.cancel()
@@ -614,55 +1175,123 @@ class BridgeServer {
             }
             return
         }
-        
-        if type == "hello" {
+
+        if !isAuth {
             let now = Date().timeIntervalSince1970
             let remoteIp = self.connectionRemoteIp[id] ?? self.extractRemoteIp(from: conn)
-            let result = self.handshakeGate.evaluateHello(
-                jsonObject: jsonObject,
-                pairingCode: self.pairingCode,
-                remoteIp: remoteIp,
-                now: now
-            )
 
-            if result.authenticated, let clientNonce = result.clientNonce {
-                self.authenticatedConnections.insert(id)
-                let rawDevice = (jsonObject["device"] as? String) ?? "Android Device"
-                let sanitizedDevice = String(
-                    rawDevice
-                        .components(separatedBy: .controlCharacters).joined()
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
-                        .prefix(64)
+            if outerType == "hello" {
+                guard self.pendingHandshakes[id] == nil else {
+                    self.handshakeGate.recordFailedAttempt(for: remoteIp, now: now)
+                    self.denyAndDisconnect(conn, id: id)
+                    return
+                }
+
+                let result = self.handshakeGate.evaluateHello(
+                    jsonObject: outerJson,
+                    pairingCode: self.pairingCode,
+                    remoteIp: remoteIp,
+                    now: now
                 )
-                self.clientDeviceNames[id] = sanitizedDevice.isEmpty ? "Android Device" : sanitizedDevice
 
-                let macName = Host.current().localizedName ?? "Mac"
-                let targetCode = self.pairingCode.replacingOccurrences(of: " ", with: "")
-                let welcomeProof = computeSHA256("bridge-welcome:\(targetCode):\(clientNonce)")
-                let welcome = ClipboardPayload(type: "welcome", hash: welcomeProof, name: macName)
-                self.sendDirect(payload: welcome, to: conn)
-                if let settingsStr = BridgeNotificationManager.shared.buildSettingsSyncJson(),
-                   var settingsData = settingsStr.data(using: .utf8) {
-                    settingsData.append(UInt8(ascii: "\n"))
-                    conn.send(content: settingsData, completion: .contentProcessed({ _ in }))
+                if result.challengeIssued,
+                   let clientNonce = result.clientNonce,
+                   let serverNonce = result.serverNonce,
+                   let serverPublicHex = result.serverPublicHex,
+                   let material = result.sessionMaterial {
+                    let rawDevice = (outerJson["device"] as? String) ?? "Android Device"
+                    let sanitizedDevice = String(
+                        rawDevice
+                            .components(separatedBy: .controlCharacters).joined()
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                            .prefix(64)
+                    )
+                    self.pendingHandshakes[id] = PendingHandshake(
+                        clientNonce: clientNonce,
+                        deviceName: sanitizedDevice.isEmpty ? "Android Device" : sanitizedDevice,
+                        remoteIp: remoteIp,
+                        material: material
+                    )
+
+                    let challenge = ClipboardPayload(
+                        type: "challenge",
+                        text: serverNonce,
+                        data: serverPublicHex
+                    )
+                    self.sendPlaintext(payload: challenge, to: conn)
+                } else {
+                    switch result.failureReason {
+                    case .rateLimited:
+                        NSLog("[BridgeSecurity] Denied 'hello' due to rate limit from %@", remoteIp)
+                    case .replayedNonce:
+                        NSLog("[BridgeSecurity] Rejected replayed hello nonce from %@", remoteIp)
+                    case .invalidPayload, .invalidProof, .none:
+                        NSLog("[BridgeSecurity] Invalid SPEKE hello attempt from %@", remoteIp)
+                    }
+                    self.denyAndDisconnect(conn, id: id)
                 }
-                self.notifyUiStatus()
-            } else {
-                switch result.failureReason {
-                case .rateLimited:
-                    NSLog("[BridgeSecurity] Denied 'hello' due to rate limit from %@", remoteIp)
-                case .replayedNonce:
-                    NSLog("[BridgeSecurity] Rejected replayed hello nonce from %@", remoteIp)
-                case .invalidPayload, .invalidProof, .none:
-                    NSLog("[BridgeSecurity] Invalid pairing attempt from %@", remoteIp)
-                }
-                self.denyAndDisconnect(conn, id: id)
+                return
             }
+
+            if outerType == "auth" {
+                guard let pending = self.pendingHandshakes.removeValue(forKey: id) else {
+                    self.handshakeGate.recordFailedAttempt(for: remoteIp, now: now)
+                    self.denyAndDisconnect(conn, id: id)
+                    return
+                }
+
+                let authResult = self.handshakeGate.evaluateAuth(
+                    jsonObject: outerJson,
+                    sessionMaterial: pending.material,
+                    clientNonce: pending.clientNonce,
+                    remoteIp: pending.remoteIp,
+                    now: now
+                )
+
+                if authResult.authenticated {
+                    let cipher = BridgeSessionCipher(
+                        sendKey: pending.material.s2cKey,
+                        receiveKey: pending.material.c2sKey,
+                        sendDirection: "s2c",
+                        receiveDirection: "c2s"
+                    )
+                    self.sessionCiphers[id] = cipher
+                    self.authenticatedConnections.insert(id)
+                    self.clientDeviceNames[id] = pending.deviceName
+
+                    let macName = Host.current().localizedName ?? "Mac"
+                    let welcome = ClipboardPayload(
+                        type: "welcome",
+                        hash: pending.material.serverProof,
+                        name: macName
+                    )
+                    self.sendPlaintext(payload: welcome, to: conn)
+
+                    if let settingsStr = BridgeNotificationManager.shared.buildSettingsSyncJson(),
+                       let settingsData = settingsStr.data(using: .utf8) {
+                        self.sendEncryptedData(settingsData, to: conn, id: id)
+                    }
+                    self.notifyUiStatus()
+                } else {
+                    NSLog("[BridgeSecurity] Invalid SPEKE client auth proof from %@", pending.remoteIp)
+                    self.denyAndDisconnect(conn, id: id)
+                }
+                return
+            }
+
+            NSLog("[BridgeSecurity] Rejected unauthenticated message of type '%@' — disconnecting", outerType)
+            conn.cancel()
+            self.removeConnection(id: id)
             return
         }
-        
-        guard isAuth else {
-            NSLog("[BridgeSecurity] Rejected unauthenticated message of type '%@' — disconnecting", type)
+
+        // Authenticated connections MUST use AES-256-GCM encrypted session frames ("type": "enc")
+        guard outerType == "enc",
+              let cipher = self.sessionCiphers[id],
+              let data = cipher.open(jsonObject: outerJson),
+              let jsonObject = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let type = jsonObject["type"] as? String else {
+            NSLog("[BridgeSecurity] Disconnecting authenticated client due to unencrypted or tampered frame")
             conn.cancel()
             self.removeConnection(id: id)
             return
@@ -682,7 +1311,7 @@ class BridgeServer {
         
         if type == "ping" {
             let pong = ClipboardPayload(type: "pong")
-            self.sendDirect(payload: pong, to: conn)
+            self.sendEncrypted(payload: pong, to: conn, id: id)
             return
         }
 
@@ -777,7 +1406,7 @@ class BridgeServer {
             guard let self = self else { return }
             let unpairPayload = ClipboardPayload(type: "unpair")
             if let conn = self.connections[id] {
-                self.sendDirect(payload: unpairPayload, to: conn)
+                self.sendEncrypted(payload: unpairPayload, to: conn, id: id)
                 self.networkQueue.asyncAfter(deadline: .now() + 0.1) {
                     conn.cancel()
                     self.removeConnection(id: id)
@@ -792,24 +1421,43 @@ class BridgeServer {
         }
     }
     
-    private func sendDirect(payload: ClipboardPayload, to conn: NWConnection) {
+    private func sendPlaintext(payload: ClipboardPayload, to conn: NWConnection) {
         guard let data = try? JSONEncoder().encode(payload) else { return }
         var line = data
         line.append(UInt8(ascii: "\n"))
         conn.send(content: line, completion: .contentProcessed({ _ in }))
     }
+
+    private func sendEncrypted(payload: ClipboardPayload, to conn: NWConnection, id: UUID) {
+        guard let data = try? JSONEncoder().encode(payload) else { return }
+        sendEncryptedData(data, to: conn, id: id)
+    }
+
+    private func sendEncryptedData(
+        _ plainData: Data,
+        to conn: NWConnection,
+        id: UUID,
+        onError: ((NWError?) -> Void)? = nil
+    ) {
+        guard let cipher = sessionCiphers[id],
+              var encryptedLine = cipher.seal(plainData) else {
+            return
+        }
+        encryptedLine.append(UInt8(ascii: "\n"))
+        conn.send(content: encryptedLine, completion: .contentProcessed({ error in
+            onError?(error)
+        }))
+    }
     
     private func broadcastPayload(_ payload: ClipboardPayload) {
         guard !authenticatedConnections.isEmpty else { return }
         guard let data = try? JSONEncoder().encode(payload) else { return }
-        var line = data
-        line.append(UInt8(ascii: "\n"))
         
         networkQueue.async { [weak self] in
             guard let self = self else { return }
             for id in self.authenticatedConnections {
                 if let conn = self.connections[id] {
-                    conn.send(content: line, completion: .contentProcessed({ _ in }))
+                    self.sendEncryptedData(data, to: conn, id: id)
                 }
             }
         }
@@ -817,35 +1465,33 @@ class BridgeServer {
 
     func broadcastRawJson(_ jsonString: String) {
         guard !authenticatedConnections.isEmpty else { return }
-        guard var data = jsonString.data(using: .utf8) else { return }
-        data.append(UInt8(ascii: "\n"))
+        guard let data = jsonString.data(using: .utf8) else { return }
         
         networkQueue.async { [weak self] in
             guard let self = self else { return }
             for id in self.authenticatedConnections {
                 if let conn = self.connections[id] {
-                    conn.send(content: data, completion: .contentProcessed({ _ in }))
+                    self.sendEncryptedData(data, to: conn, id: id)
                 }
             }
         }
     }
 
     func sendRawJson(_ jsonString: String, toDeviceId: UUID?) {
-        guard var data = jsonString.data(using: .utf8) else { return }
-        data.append(UInt8(ascii: "\n"))
+        guard let data = jsonString.data(using: .utf8) else { return }
         
         networkQueue.async { [weak self] in
             guard let self = self else { return }
             if let targetId = toDeviceId {
                 if self.authenticatedConnections.contains(targetId), let conn = self.connections[targetId] {
-                    conn.send(content: data, completion: .contentProcessed({ _ in }))
+                    self.sendEncryptedData(data, to: conn, id: targetId)
                 } else if let firstId = self.authenticatedConnections.first, let conn = self.connections[firstId] {
-                    conn.send(content: data, completion: .contentProcessed({ _ in }))
+                    self.sendEncryptedData(data, to: conn, id: firstId)
                 }
             } else {
                 for id in self.authenticatedConnections {
                     if let conn = self.connections[id] {
-                        conn.send(content: data, completion: .contentProcessed({ _ in }))
+                        self.sendEncryptedData(data, to: conn, id: id)
                     }
                 }
             }
@@ -998,8 +1644,6 @@ class BridgeServer {
     private func checkConnectionsAndSendPing() {
         let ping = ClipboardPayload(type: "ping")
         guard let data = try? JSONEncoder().encode(ping) else { return }
-        var line = data
-        line.append(UInt8(ascii: "\n"))
         
         networkQueue.async { [weak self] in
             guard let self = self else { return }
@@ -1021,12 +1665,12 @@ class BridgeServer {
                 if now - lastSeen > 6.5 {
                     staleIds.append(id)
                 } else if let conn = self.connections[id] {
-                    conn.send(content: line, completion: .contentProcessed({ [weak self, weak conn] error in
+                    self.sendEncryptedData(data, to: conn, id: id) { [weak self, weak conn] error in
                         if error != nil {
                             conn?.cancel()
                             self?.removeConnection(id: id)
                         }
-                    }))
+                    }
                 } else {
                     staleIds.append(id)
                 }
@@ -1043,6 +1687,8 @@ class BridgeServer {
         for (_, conn) in connections { conn.cancel() }
         connections.removeAll()
         authenticatedConnections.removeAll()
+        pendingHandshakes.removeAll()
+        sessionCiphers.removeAll()
         clientDeviceNames.removeAll()
         connectionLastSeen.removeAll()
         connectionCreatedAt.removeAll()

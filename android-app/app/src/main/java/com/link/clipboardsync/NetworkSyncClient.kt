@@ -11,15 +11,225 @@ import java.io.IOException
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.io.PrintWriter
+import java.math.BigInteger
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.nio.ByteBuffer
 import java.security.MessageDigest
 import java.security.SecureRandom
+import java.util.Base64
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import javax.crypto.Cipher
+import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.SecretKeySpec
+
+object BridgeSpeke {
+    // RFC 3526 Group 14 (2048-bit MODP Safe Prime p = 2q + 1)
+    const val P_HEX =
+        "FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD1" +
+        "29024E088A67CC74020BBEA63B139B22514A08798E3404DD" +
+        "EF9519B3CD3A431B302B0A6DF25F14374FE1356D6D51C245" +
+        "E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7ED" +
+        "EE386BFB5A899FA5AE9F24117C4B1FE649286651ECE45B3D" +
+        "C2007CB8A163BF0598DA48361C55D39A69163FA8FD24CF5F" +
+        "83655D23DCA3AD961C62F356208552BB9ED529077096966D" +
+        "670C354E4ABC9804F1746C08CA18217C32905E462E36CE3B" +
+        "E39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9" +
+        "DE2BCBF6955817183995497CEA956AE515D2261898FA0510" +
+        "15728E5A8AACAA68FFFFFFFFFFFFFFFF"
+
+    val PRIME = BigInteger(P_HEX, 16)
+    val TWO: BigInteger = BigInteger.valueOf(2)
+    val PRIME_MINUS_TWO: BigInteger = PRIME.subtract(TWO)
+    val PRIME_MINUS_THREE: BigInteger = PRIME.subtract(BigInteger.valueOf(3))
+    private val secureRandom = SecureRandom()
+    private val hexRegex = Regex("^[0-9a-fA-F]{1,512}$")
+
+    data class KeyPair(
+        val privateScalar: BigInteger,
+        val publicHex: String
+    )
+
+    data class SessionMaterial(
+        val clientProof: String,
+        val serverProof: String,
+        val c2sKey: SecretKeySpec,
+        val s2cKey: SecretKeySpec,
+        val c2sKeyHex: String,
+        val s2cKeyHex: String
+    )
+
+    fun generatePrivateScalar(): BigInteger {
+        val bytes = ByteArray(32)
+        secureRandom.nextBytes(bytes)
+        bytes[0] = (bytes[0].toInt() or 0x80).toByte()
+        return BigInteger(1, bytes)
+    }
+
+    fun generateKeyPair(
+        pairingCode: String,
+        clientNonce: String,
+        scalarOverride: BigInteger? = null
+    ): KeyPair {
+        val scalar = scalarOverride ?: generatePrivateScalar()
+        val generator = deriveGenerator(pairingCode, clientNonce)
+        val publicHex = computePublicElement(generator, scalar)
+        return KeyPair(privateScalar = scalar, publicHex = publicHex)
+    }
+
+    fun toFixedHex256(value: BigInteger): String {
+        val hex = value.toString(16).lowercase()
+        return if (hex.length >= 512) hex.takeLast(512) else hex.padStart(512, '0')
+    }
+
+    fun deriveGenerator(pairingCode: String, clientNonce: String): BigInteger {
+        val cleanCode = pairingCode.replace(" ", "").replace("-", "").trim()
+        val blocks = ByteArray(256)
+        val md = MessageDigest.getInstance("SHA-256")
+        for (i in 0 until 8) {
+            val digest = md.digest("bridge-speke-v1:$cleanCode:$clientNonce:$i".toByteArray(Charsets.UTF_8))
+            System.arraycopy(digest, 0, blocks, i * 32, 32)
+        }
+        val rawH = BigInteger(1, blocks)
+        val h = rawH.mod(PRIME_MINUS_THREE).add(TWO)
+        return h.modPow(TWO, PRIME)
+    }
+
+    fun computePublicElement(generator: BigInteger, privateScalar: BigInteger): String {
+        return toFixedHex256(generator.modPow(privateScalar, PRIME))
+    }
+
+    fun isValidPublicElement(hex: String?): Boolean {
+        if (hex.isNullOrBlank()) return false
+        val clean = hex.trim()
+        if (!hexRegex.matches(clean)) return false
+        return try {
+            val v = BigInteger(clean, 16)
+            v >= TWO && v <= PRIME_MINUS_TWO
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    fun computeSharedSecret(peerPublicHex: String?, privateScalar: BigInteger): String? {
+        if (!isValidPublicElement(peerPublicHex)) return null
+        val peerPub = BigInteger(peerPublicHex!!.trim(), 16)
+        val shared = peerPub.modPow(privateScalar, PRIME)
+        if (shared < TWO || shared > PRIME_MINUS_TWO) return null
+        return toFixedHex256(shared)
+    }
+
+    fun deriveSessionMaterial(
+        sharedSecretHex: String,
+        pairingCode: String,
+        clientNonce: String,
+        serverNonce: String,
+        clientPublicHex: String,
+        serverPublicHex: String
+    ): SessionMaterial {
+        val cleanCode = pairingCode.replace(" ", "").replace("-", "").trim()
+        val normSecret = BigInteger(sharedSecretHex.trim(), 16).let { toFixedHex256(it) }
+        val normClientPub = BigInteger(clientPublicHex.trim(), 16).let { toFixedHex256(it) }
+        val normServerPub = BigInteger(serverPublicHex.trim(), 16).let { toFixedHex256(it) }
+
+        val transcript = "bridge-speke-transcript-v1:$clientNonce:$serverNonce:$normClientPub:$normServerPub"
+        val rootHex = ClipboardPayload.computeSHA256("$normSecret:$cleanCode:$transcript")
+        val clientProof = ClipboardPayload.computeSHA256("bridge-client-confirm:$rootHex:$transcript")
+        val serverProof = ClipboardPayload.computeSHA256("bridge-server-confirm:$rootHex:$transcript")
+
+        val md = MessageDigest.getInstance("SHA-256")
+        val c2sBytes = md.digest("bridge-c2s-key:$rootHex:$transcript".toByteArray(Charsets.UTF_8))
+        val s2cBytes = md.digest("bridge-s2c-key:$rootHex:$transcript".toByteArray(Charsets.UTF_8))
+        val c2sHex = c2sBytes.joinToString("") { "%02x".format(it) }
+        val s2cHex = s2cBytes.joinToString("") { "%02x".format(it) }
+
+        return SessionMaterial(
+            clientProof = clientProof,
+            serverProof = serverProof,
+            c2sKey = SecretKeySpec(c2sBytes, "AES"),
+            s2cKey = SecretKeySpec(s2cBytes, "AES"),
+            c2sKeyHex = c2sHex,
+            s2cKeyHex = s2cHex
+        )
+    }
+}
+
+class BridgeSessionCipher(
+    private val sendKey: SecretKeySpec,
+    private val receiveKey: SecretKeySpec,
+    private val sendDirection: String,
+    private val receiveDirection: String
+) {
+    private val secureRandom = SecureRandom()
+    private var sendSeq: Long = 0L
+    private var expectedReceiveSeq: Long = 1L
+
+    @Synchronized
+    fun seal(plaintextJson: String, saltOverride: ByteArray? = null): String {
+        return seal(plaintextJson.toByteArray(Charsets.UTF_8), saltOverride)
+    }
+
+    @Synchronized
+    fun seal(plaintext: ByteArray, saltOverride: ByteArray? = null): String {
+        sendSeq += 1L
+        val seq = sendSeq
+
+        val iv = ByteArray(12)
+        if (saltOverride != null && saltOverride.size == 4) {
+            System.arraycopy(saltOverride, 0, iv, 0, 4)
+        } else {
+            val prefix = ByteArray(4)
+            secureRandom.nextBytes(prefix)
+            System.arraycopy(prefix, 0, iv, 0, 4)
+        }
+        ByteBuffer.wrap(iv, 4, 8).putLong(seq)
+
+        val aad = "bridge-v1:$sendDirection:$seq".toByteArray(Charsets.UTF_8)
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, sendKey, GCMParameterSpec(128, iv))
+        cipher.updateAAD(aad)
+        val ciphertextWithTag = cipher.doFinal(plaintext)
+
+        val combined = ByteArray(12 + ciphertextWithTag.size)
+        System.arraycopy(iv, 0, combined, 0, 12)
+        System.arraycopy(ciphertextWithTag, 0, combined, 12, ciphertextWithTag.size)
+
+        val b64 = Base64.getEncoder().encodeToString(combined)
+        return """{"type":"enc","seq":$seq,"d":"$b64"}"""
+    }
+
+    @Synchronized
+    fun open(jsonObject: JSONObject): String? {
+        return try {
+            if (jsonObject.optString("type") != "enc") return null
+            val seq = jsonObject.optLong("seq", -1L)
+            if (seq <= 0L || seq != expectedReceiveSeq) return null
+
+            val b64 = jsonObject.optString("d", "")
+            if (b64.isEmpty()) return null
+            val combined = Base64.getDecoder().decode(b64)
+            if (combined.size <= 28) return null
+
+            val embeddedSeq = ByteBuffer.wrap(combined, 4, 8).long
+            if (embeddedSeq != seq) return null
+
+            val aad = "bridge-v1:$receiveDirection:$seq".toByteArray(Charsets.UTF_8)
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(Cipher.DECRYPT_MODE, receiveKey, GCMParameterSpec(128, combined, 0, 12))
+            cipher.updateAAD(aad)
+            val plaintext = cipher.doFinal(combined, 12, combined.size - 12)
+
+            expectedReceiveSeq += 1L
+            String(plaintext, Charsets.UTF_8)
+        } catch (_: Exception) {
+            null
+        }
+    }
+}
 
 /**
  * Persistent TCP client to the Bridge macOS daemon.
@@ -95,6 +305,7 @@ class NetworkSyncClient(private val context: Context) {
 
     @Volatile private var socket: Socket? = null
     @Volatile private var writer: PrintWriter? = null
+    @Volatile private var sessionCipher: BridgeSessionCipher? = null
     @Volatile private var authenticated = false
     @Volatile private var currentHost: String? = null
     @Volatile private var currentPort: Int = DEFAULT_PORT
@@ -108,7 +319,7 @@ class NetworkSyncClient(private val context: Context) {
     private var discoveryListener: NsdManager.DiscoveryListener? = null
     @Volatile private var isDiscovering = false
 
-    fun isConnected(): Boolean = authenticated && socket?.isClosed == false
+    fun isConnected(): Boolean = authenticated && sessionCipher != null && socket?.isClosed == false
     fun isActivelyConnecting(): Boolean = isRunning.get()
     fun getCurrentHost(): String? = currentHost
 
@@ -175,7 +386,7 @@ class NetworkSyncClient(private val context: Context) {
         readThread = null
         Thread {
             try {
-                writeRaw(ClipboardPayload(type = signalType))
+                writeEncrypted(ClipboardPayload(type = signalType))
                 Thread.sleep(100)
             } catch (ignored: Exception) {}
             disconnectSocket()
@@ -206,12 +417,8 @@ class NetworkSyncClient(private val context: Context) {
                     attempts++
                 }
 
-                val out = writer
-                if (out != null && isConnected()) {
-                    synchronized(this) {
-                        out.println(payload.toJsonString())
-                        out.flush()
-                    }
+                if (isConnected()) {
+                    writeEncrypted(payload)
                     log("Dispatched to Mac: ${payload.hash.take(8)}")
                 } else {
                     log("Send skipped: not connected to Mac")
@@ -235,11 +442,7 @@ class NetworkSyncClient(private val context: Context) {
                     attempts++
                 }
                 if (isConnected()) {
-                    synchronized(this) {
-                        val out = writer ?: return@execute
-                        out.println(jsonString)
-                        out.flush()
-                    }
+                    writeEncrypted(jsonString)
                 }
             } catch (e: Exception) {
                 log("Error sending raw json: ${e.message}")
@@ -247,10 +450,24 @@ class NetworkSyncClient(private val context: Context) {
         }
     }
 
-    private fun writeRaw(payload: ClipboardPayload) {
+    private fun writePlaintext(payload: ClipboardPayload) {
         synchronized(this) {
             writer?.println(payload.toJsonString())
             writer?.flush()
+        }
+    }
+
+    private fun writeEncrypted(payload: ClipboardPayload) {
+        writeEncrypted(payload.toJsonString())
+    }
+
+    private fun writeEncrypted(jsonString: String) {
+        synchronized(this) {
+            val out = writer ?: return
+            val cipher = sessionCipher ?: return
+            val encryptedLine = cipher.seal(jsonString)
+            out.println(encryptedLine)
+            out.flush()
         }
     }
 
@@ -262,7 +479,7 @@ class NetworkSyncClient(private val context: Context) {
         heartbeatTask = heartbeatExecutor.scheduleWithFixedDelay({
             if (isRunning.get() && isConnected()) {
                 try {
-                    writeRaw(ClipboardPayload(type = "ping"))
+                    writeEncrypted(ClipboardPayload(type = "ping"))
                     heartbeatTick++
                     if (heartbeatTick % 3 == 0) {
                         BridgeNotificationListenerService.instance?.syncActiveIdsOnly()
@@ -340,20 +557,24 @@ class NetworkSyncClient(private val context: Context) {
                     synchronized(this) {
                         socket = s
                         writer = out
+                        sessionCipher = null
                         authenticated = false
                     }
 
                     val activeCode = (pairCode ?: "").replace(" ", "").trim()
                     val clientNonce = generateSecureNonce()
-                    val helloHash = ClipboardPayload.computeSHA256("bridge-hello:$activeCode:$clientNonce")
-                    val expectedWelcomeHash = ClipboardPayload.computeSHA256("bridge-welcome:$activeCode:$clientNonce")
+                    val clientKeyPair = BridgeSpeke.generateKeyPair(
+                        pairingCode = activeCode,
+                        clientNonce = clientNonce
+                    )
+                    var pendingMaterial: BridgeSpeke.SessionMaterial? = null
 
-                    // Zero-knowledge pairing handshake: send salted SHA-256 proof instead of plaintext code
-                    writeRaw(
+                    // Step 1 of SPEKE PAKE handshake: send client nonce + ephemeral public key (no password hash on the wire)
+                    writePlaintext(
                         ClipboardPayload(
                             type = "hello",
-                            hash = helloHash,
                             text = clientNonce,
+                            data = clientKeyPair.publicHex,
                             device = "${Build.MANUFACTURER} ${Build.MODEL}"
                         )
                     )
@@ -366,20 +587,60 @@ class NetworkSyncClient(private val context: Context) {
                             val type = jsonObj?.optString("type")
 
                             if (!authenticated) {
-                                // Strict pre-authentication gate: only "welcome" or "denied" allowed before auth
+                                // Strict pre-authentication gate: only "challenge", "welcome", or "denied" allowed before auth
                                 val payload = ClipboardPayload.fromJsonString(trimmed)
                                 when (payload?.type) {
-                                    "welcome" -> {
-                                        if (!constantTimeEquals(payload.hash.lowercase(), expectedWelcomeHash.lowercase())) {
-                                            log("Security: Rejected unverified 'welcome' from $host (failed mutual auth proof)")
-                                            throw SecurityException("Server failed mutual authentication proof")
+                                    "challenge" -> {
+                                        if (pendingMaterial != null) {
+                                            throw SecurityException("Duplicate challenge message from server")
                                         }
-                                        authenticated = true
+                                        val serverNonce = payload.text?.trim() ?: ""
+                                        val serverPublicHex = payload.data?.trim()?.lowercase() ?: ""
+                                        if (serverNonce.length !in 16..128) {
+                                            throw SecurityException("Invalid server nonce in challenge")
+                                        }
+                                        val sharedSecretHex = BridgeSpeke.computeSharedSecret(
+                                            peerPublicHex = serverPublicHex,
+                                            privateScalar = clientKeyPair.privateScalar
+                                        ) ?: throw SecurityException("Invalid SPEKE public key from server")
+
+                                        val material = BridgeSpeke.deriveSessionMaterial(
+                                            sharedSecretHex = sharedSecretHex,
+                                            pairingCode = activeCode,
+                                            clientNonce = clientNonce,
+                                            serverNonce = serverNonce,
+                                            clientPublicHex = clientKeyPair.publicHex,
+                                            serverPublicHex = serverPublicHex
+                                        )
+                                        pendingMaterial = material
+                                        writePlaintext(
+                                            ClipboardPayload(
+                                                type = "auth",
+                                                hash = material.clientProof
+                                            )
+                                        )
+                                    }
+                                    "welcome" -> {
+                                        val material = pendingMaterial
+                                            ?: throw SecurityException("Received welcome before SPEKE challenge")
+                                        if (!constantTimeEquals(payload.hash.lowercase(), material.serverProof.lowercase())) {
+                                            log("Security: Rejected unverified 'welcome' from $host (failed mutual SPEKE auth proof)")
+                                            throw SecurityException("Server failed mutual SPEKE authentication proof")
+                                        }
+                                        synchronized(this) {
+                                            sessionCipher = BridgeSessionCipher(
+                                                sendKey = material.c2sKey,
+                                                receiveKey = material.s2cKey,
+                                                sendDirection = "c2s",
+                                                receiveDirection = "s2c"
+                                            )
+                                            authenticated = true
+                                        }
                                         failedAttempts = 0
                                         macName = (payload.name ?: "Mac").take(64)
                                         BridgePrefs.saveHost(context, host, currentPort)
                                         BridgePrefs.markPaired(context, macName)
-                                        log("Paired with ${payload.name} at $host:$currentPort")
+                                        log("Paired with ${payload.name} at $host:$currentPort (SPEKE + AES-256-GCM)")
                                         notifyPairingResult(true, macName)
                                         notifyConnectionStatusChanged(true, host)
                                         startHeartbeat()
@@ -396,36 +657,47 @@ class NetworkSyncClient(private val context: Context) {
                                         throw SecurityException("Unexpected unauthenticated message from server")
                                     }
                                 }
-                            } else if (type != null && (type.startsWith("notif_") || type == "settings_sync")) {
-                                notifyNotificationPayloadReceived(trimmed)
-                            } else if (type != null && type.startsWith("file_") && jsonObj != null) {
-                                BridgeFileTransferManager.handleControlMessage(context, jsonObj, host)
                             } else {
-                                val payload = ClipboardPayload.fromJsonString(trimmed)
-                                when (payload?.type) {
-                                    "unpair" -> {
-                                        log("Mac initiated unpair.")
-                                        pairCode = null
-                                        BridgePrefs.clearPairing(context)
-                                        BridgeNotificationManager.cancelAllMacAlerts(context)
-                                        isRunning.set(false)
-                                        notifyRemoteUnpair()
-                                        notifyConnectionStatusChanged(false, null)
-                                        break
+                                if (type != "enc" || jsonObj == null) {
+                                    log("Security: Rejected unencrypted post-handshake frame from $host")
+                                    throw SecurityException("Post-handshake message must be encrypted")
+                                }
+                                val decryptedJsonString = sessionCipher?.open(jsonObj)
+                                    ?: throw SecurityException("Failed to decrypt or authenticate session frame from server")
+                                val innerObj = try { JSONObject(decryptedJsonString) } catch (e: Exception) { null }
+                                val innerType = innerObj?.optString("type")
+
+                                if (innerType != null && (innerType.startsWith("notif_") || innerType == "settings_sync")) {
+                                    notifyNotificationPayloadReceived(decryptedJsonString)
+                                } else if (innerType != null && innerType.startsWith("file_") && innerObj != null) {
+                                    BridgeFileTransferManager.handleControlMessage(context, innerObj, host)
+                                } else {
+                                    val payload = ClipboardPayload.fromJsonString(decryptedJsonString)
+                                    when (payload?.type) {
+                                        "unpair" -> {
+                                            log("Mac initiated unpair.")
+                                            pairCode = null
+                                            BridgePrefs.clearPairing(context)
+                                            BridgeNotificationManager.cancelAllMacAlerts(context)
+                                            isRunning.set(false)
+                                            notifyRemoteUnpair()
+                                            notifyConnectionStatusChanged(false, null)
+                                            break
+                                        }
+                                        "sleep" -> {
+                                            log("Mac lid closed / entering sleep.")
+                                            break // Immediately terminate read loop & prepare for reconnect
+                                        }
+                                        "clip", "image" -> notifyPayloadReceived(payload)
+                                        "ping" -> {
+                                            // Acknowledge ping over encrypted channel
+                                            writeEncrypted(ClipboardPayload(type = "pong"))
+                                        }
+                                        "pong" -> {
+                                            // Keepalive ack received
+                                        }
+                                        else -> { /* unknown */ }
                                     }
-                                    "sleep" -> {
-                                        log("Mac lid closed / entering sleep.")
-                                        break // Immediately terminate read loop & prepare for reconnect
-                                    }
-                                    "clip", "image" -> notifyPayloadReceived(payload)
-                                    "ping" -> {
-                                        // Acknowledge ping
-                                        writeRaw(ClipboardPayload(type = "pong"))
-                                    }
-                                    "pong" -> {
-                                        // Keepalive ack received
-                                    }
-                                    else -> { /* unknown */ }
                                 }
                             }
                         }
@@ -468,6 +740,7 @@ class NetworkSyncClient(private val context: Context) {
     private fun disconnectSocket() {
         synchronized(this) {
             authenticated = false
+            sessionCipher = null
             try {
                 writer?.close()
                 socket?.close()

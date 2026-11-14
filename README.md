@@ -9,7 +9,7 @@
 A lightweight, native open-source bridge linking your **Android phone** and your **Mac** over your local Wi-Fi network—with zero cloud accounts, zero telemetry, and zero latency.
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-v1.3.2-C8F135?style=for-the-badge&labelColor=0E0F12" alt="Version 1.3.2" />
+  <img src="https://img.shields.io/badge/Version-v1.3.5-C8F135?style=for-the-badge&labelColor=0E0F12" alt="Version 1.3.5" />
   <img src="https://img.shields.io/badge/Android-Kotlin-C8F135?style=for-the-badge&logo=android&logoColor=C8F135&labelColor=0E0F12" alt="Android Kotlin" />
   <img src="https://img.shields.io/badge/macOS-Swift_%26_SwiftUI-C8F135?style=for-the-badge&logo=apple&logoColor=C8F135&labelColor=0E0F12" alt="macOS Swift" />
   <img src="https://img.shields.io/badge/Network-100%25_Local_LAN-181B20?style=for-the-badge&labelColor=0E0F12&color=C8F135" alt="100% Local LAN" />
@@ -17,11 +17,11 @@ A lightweight, native open-source bridge linking your **Android phone** and your
 </p>
 
 <p align="center">
-  <a href="#-whats-new-in-v132">What's New in v1.3.2</a> •
+  <a href="#-whats-new-in-v135">What's New in v1.3.5</a> •
   <a href="#-key-features">Key Features</a> •
   <a href="#-getting-started">Getting Started</a> •
   <a href="#-pairing--multi-device-connection">Pairing & Multi-Device</a> •
-  <a href="#-security-privacy--permissions-transparency">Security & Privacy</a>
+  <a href="#-security-privacy--architecture-transparency">Security & Privacy</a>
 </p>
 
 <table align="center">
@@ -45,13 +45,13 @@ A lightweight, native open-source bridge linking your **Android phone** and your
 
 ---
 
-## ⚡ What's New in v1.3.2
+## ⚡ What's New in v1.3.5
 
-Bridge **v1.3.2** brings macOS 13.0+ compatibility, UI polish, signed Android release builds, and security hardening:
+Bridge **v1.3.5** introduces end-to-end encrypted local control transport, 2048-bit SPEKE PAKE authentication, and macOS menu bar UI stability fixes:
 
-- **macOS 13.0+ Compatibility & Animated Popover** — Built with an explicit `-target` (`macOS 13.0+`) for the main app and extensions so releases run on macOS Ventura and newer, plus smooth fade-and-slide menu bar popover open/close animations.
-- **Signed & R8-Minified Android Release APKs** — Official release APKs are now built with `assembleRelease`, minified with R8, signed with Bridge's dedicated Android release certificate, and accompanied by `SHA256SUMS.txt` verification instructions.
-- **Security & Stability Hardening** — Enforced global handshake lockout (`globalLockoutUntil`), removed the legacy plaintext `code` login fallback, restricted `FileTransferActionReceiver` (`android:exported="false"`), and aligned documentation with the current codebase.
+- **2048-Bit SPEKE PAKE Handshake** — Replaced the static salted SHA-256 pairing challenge with a 2048-bit **SPEKE (Simple Password Exponential Key Exchange)** over RFC 3526 Group 14 (`hello` $\to$ `challenge` $\to$ `auth` $\to$ `welcome`), preventing offline brute-force recovery of the 6-digit pairing code from captured handshakes and providing Perfect Forward Secrecy (PFS).
+- **End-to-End AES-256-GCM Session Transport (`TCP :8765`)** — All post-handshake control and sync traffic (clipboard text/images, mirrored notifications, inline replies, settings sync, and file-transfer control headers) is now encrypted with directional **AES-256-GCM** session keys, monotonic sequence numbers, and AAD direction binding.
+- **Hardened File Sharing & Menu Bar Popover Scroll Fix** — Incoming file auto-accept now defaults to off (`false`) with expanded executable/script/bundle extension guards and hashed data-socket auth proofs (`computeDataSocketAuth`), plus fixed the macOS menu bar popover displacing when long multi-message notifications arrive (`ViewThatFits` + screen height clamping).
 
 ---
 
@@ -226,13 +226,11 @@ Pairing your devices is fast, private, and requires zero account creation:
 
 ## 🔒 Security, Privacy & Architecture Transparency
 
-Bridge is built to be **100% local, zero-cloud, and auditable** (see [SECURITY.md](SECURITY.md) for current details and planned protocol hardening).
+Bridge is built to be **100% local, zero-cloud, and auditable** (see [SECURITY.md](SECURITY.md) for full cryptographic specifications).
 
-### 1. Salted Challenge-Response Authentication & Transport Model
-* **Android pairing handshake:** The Android client authenticates using a salted SHA-256 challenge-response instead of sending the 6-digit pairing code directly:
-  $$\text{Proof} = \text{SHA-256}(\text{"bridge-hello:"} + \text{PairingCode} + \text{":"} + \text{ClientNonce})$$
-  The Mac verifies the proof and replies with a matching `welcome` proof before authorizing the session.
-* **Current threat model (Trusted Local Wi-Fi):** Control messages on `TCP :8765` (clipboard text/images, notifications, and file-transfer control tokens) currently run over an unencrypted local TCP socket, while file-transfer data streams are encrypted with `AES-256-GCM` using a `SHA-256`-derived session token. **TLS transport encryption and PAKE / high-entropy pairing authentication are planned for `v1.4.0`** (so until then, only use Bridge on trusted private networks/hotspots).
+### 1. 2048-Bit SPEKE PAKE Authentication & End-to-End AES-256-GCM Transport
+* **Zero-knowledge PAKE handshake (`BridgeSpeke`):** Devices authenticate using a 2048-bit **SPEKE (Simple Password Exponential Key Exchange)** over RFC 3526 Group 14 ($p = 2q + 1$). Neither the 6-digit pairing code nor any static hash of it is sent before Diffie-Hellman key agreement, preventing offline brute-force attacks against recorded handshakes and providing **Perfect Forward Secrecy (PFS)**.
+* **Encrypted control & data channels (`BridgeSessionCipher`):** All post-handshake traffic on `TCP :8765` (clipboard text/images, notifications, inline replies, settings sync, and file-transfer control messages) is encrypted with directional **AES-256-GCM** keys, monotonic 64-bit sequence numbers, and AAD direction binding. File-transfer data streams are likewise encrypted with **AES-256-GCM** and authenticated via one-way SHA-256 data-socket proofs (`computeDataSocketAuth`).
 
 ### 2. Brute-Force & Denial-of-Service Defense
 * **Per-IP Exponential Lockout:** 5 failed handshake attempts from an IP within 60 seconds trigger an immediate 60-second lockout, doubling exponentially on consecutive violations up to 960 seconds.
