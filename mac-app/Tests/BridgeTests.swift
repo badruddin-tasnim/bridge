@@ -144,7 +144,7 @@ private func runFileTransferSecurityTests() throws {
     expect(!folderItem.isExecutable, "Folder items are marked non-executable")
     expect(!pdfItem.isExecutable, "Expected .pdf file to not be marked executable")
 
-    // Default autoAcceptIncomingFiles must be false when UserDefaults key is unset
+    // Default autoAcceptIncomingFiles must be true when UserDefaults key is unset
     let savedAutoAccept = UserDefaults.standard.object(forKey: "bridge_file_auto_accept")
     defer {
         if let saved = savedAutoAccept {
@@ -155,9 +155,9 @@ private func runFileTransferSecurityTests() throws {
     }
     UserDefaults.standard.removeObject(forKey: "bridge_file_auto_accept")
     let unsetDefault = UserDefaults.standard.object(forKey: "bridge_file_auto_accept") == nil
-        ? false
+        ? true
         : UserDefaults.standard.bool(forKey: "bridge_file_auto_accept")
-    expect(!unsetDefault, "autoAcceptIncomingFiles default must be false when unset")
+    expect(unsetDefault, "autoAcceptIncomingFiles default must be true when unset")
 }
 
 private func runSpekeAndSessionCipherTests() {

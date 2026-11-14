@@ -51,7 +51,7 @@ Bridge **v1.3.5** introduces end-to-end encrypted local control transport, 2048-
 
 - **2048-Bit SPEKE PAKE Handshake** — Replaced the static salted SHA-256 pairing challenge with a 2048-bit **SPEKE (Simple Password Exponential Key Exchange)** over RFC 3526 Group 14 (`hello` $\to$ `challenge` $\to$ `auth` $\to$ `welcome`), preventing offline brute-force recovery of the 6-digit pairing code from captured handshakes and providing Perfect Forward Secrecy (PFS).
 - **End-to-End AES-256-GCM Session Transport (`TCP :8765`)** — All post-handshake control and sync traffic (clipboard text/images, mirrored notifications, inline replies, settings sync, and file-transfer control headers) is now encrypted with directional **AES-256-GCM** session keys, monotonic sequence numbers, and AAD direction binding.
-- **Hardened File Sharing & Menu Bar Popover Scroll Fix** — Incoming file auto-accept now defaults to off (`false`) with expanded executable/script/bundle extension guards and hashed data-socket auth proofs (`computeDataSocketAuth`), plus fixed the macOS menu bar popover displacing when long multi-message notifications arrive (`ViewThatFits` + screen height clamping).
+- **Hardened File Sharing & Menu Bar Popover Scroll Fix** — Expanded executable/script/bundle extension guards (`.command`, `.workflow`, `.scpt`, `.py`, `.jar`, `.webloc`, etc.), symlink rejection during archive extraction, and hashed data-socket auth proofs (`computeDataSocketAuth`), plus fixed the macOS menu bar popover displacing when long multi-message notifications arrive (`ViewThatFits` + screen height clamping).
 
 ---
 

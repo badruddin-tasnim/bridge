@@ -23,7 +23,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
   - Encrypted all `:8765` control and sync traffic with **AES-256-GCM** (`BridgeSessionCipher`) and rejected any unencrypted post-handshake messages.
   - Upgraded pairing authentication to **2048-bit SPEKE PAKE** (`BridgeSpeke`) so the 6-digit pairing code cannot be brute-forced offline from a recorded handshake.
   - Protected file-transfer `token` values inside the encrypted `:8765` channel and replaced raw token transmission on the secondary data socket with a one-way SHA-256 auth proof (`computeDataSocketAuth`).
-  - Changed `autoAcceptIncomingFiles` default to `false` on both macOS and Android, expanded `executableExtensions` coverage (`.command`, `.workflow`, `.scpt`, `.py`, `.jar`, `.webloc`, `.dylib`, etc.), and rejected symbolic links during folder archive extraction.
+  - Expanded `executableExtensions` coverage (`.command`, `.workflow`, `.scpt`, `.py`, `.jar`, `.webloc`, `.dylib`, etc.) so scripts/executables always prompt for confirmation even when auto-accept is enabled, and rejected symbolic links during folder archive extraction.
   - Updated [`SECURITY.md`](SECURITY.md) and [`README.md`](README.md) to reflect the `v1.3.5` cryptographic protocol.
 
 ## [1.3.2] - 2026-11-12

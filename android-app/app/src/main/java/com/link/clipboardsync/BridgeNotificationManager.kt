@@ -249,7 +249,7 @@ object BridgeNotificationManager {
                     if (json.has("autoAcceptFiles")) {
                         BridgePrefs.setAutoAcceptFilesEnabled(
                             context,
-                            json.optBoolean("autoAcceptFiles", false),
+                            json.optBoolean("autoAcceptFiles", true),
                             updateTimestamp = false
                         )
                     }

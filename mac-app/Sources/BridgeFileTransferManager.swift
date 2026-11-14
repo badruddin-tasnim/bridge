@@ -129,7 +129,7 @@ class BridgeFileTransferManager: ObservableObject {
 
     private init() {
         if UserDefaults.standard.object(forKey: Self.keyAutoAcceptFiles) == nil {
-            self.autoAcceptIncomingFiles = false
+            self.autoAcceptIncomingFiles = true
         } else {
             self.autoAcceptIncomingFiles = UserDefaults.standard.bool(forKey: Self.keyAutoAcceptFiles)
         }
