@@ -90,48 +90,63 @@ Bridge **v1.3.5** introduces end-to-end encrypted local control transport, 2048-
 
 ## 🚀 Getting Started
 
-You can install Bridge by downloading the pre-built binaries from [**GitHub Releases**](../../releases), using terminal commands, or building from source.
+You can install Bridge from [**GitHub Releases**](../../releases), via terminal commands (`adb` / `curl`), or by building from source.
 
-### Option 1: Direct Download
+### 1. Install on macOS (`macOS 13.0+`)
 
-1. Download the latest release assets from [**Releases**](../../releases):
-   - 💻 **`Bridge-v*-macOS.dmg`** — Native macOS Menu Bar App (`macOS 13.0+`)
-   - 📱 **`Bridge-v*-Android.apk`** — Native Android App (`Android 8.0+`)
-2. **Install on macOS:**
-   - Double-click the downloaded **`.dmg`** file and drag **`Bridge.app`** into the **Applications** folder in the installer window.
-   - Launch **`Bridge.app`**. *(If macOS Gatekeeper prompts on first launch, right-click `Bridge.app` → **Open**, or run `xattr -cr /Applications/Bridge.app && open /Applications/Bridge.app` in Terminal).*
-   - The Bridge icon will appear in your top menu bar.
-3. **Install on Android:**
-   - Open the downloaded **`.apk`** on your Android phone to install the app.
-   - **Android 14–16 Google Play Protect Notice:** Because Bridge uses `BIND_NOTIFICATION_LISTENER_SERVICE` and `BIND_ACCESSIBILITY_SERVICE`, Play Protect's sideload fraud protection on newer Android devices may block opening the APK from a browser or file manager (*"App blocked to protect your device"*). If that happens, install from your Mac using **ADB** instead (Option 2 below):
-     ```bash
-     adb install -r /tmp/Bridge-Android.apk
-     ```
-   - **Android 13+ Restricted Settings:** If **Accessibility** or **Notification Access** appears grayed out after sideloading, open **Settings → Apps → Bridge → ⋮ (top right) → Allow restricted settings**, then enable the permissions.
+**Option A — Drag-and-Drop `.dmg` Installer (Recommended):**
+1. Download **`Bridge-v*-macOS.dmg`** from the latest [**GitHub Release**](../../releases).
+2. Double-click the downloaded **`.dmg`** file and drag **`Bridge.app`** into the **Applications** folder in the installer window, then eject the **Bridge** installer drive.
+3. Launch **`Bridge.app`**. *(If macOS Gatekeeper prompts on first launch, right-click `Bridge.app` → **Open**, or run `xattr -cr /Applications/Bridge.app && open /Applications/Bridge.app` in Terminal).*
+4. The Bridge icon will appear in your top menu bar.
 
----
-
-### Option 2: Install via Command Line (CLI)
-
+**Option B — Install via Terminal (CLI):**
 ```bash
 TAG=$(curl -fsSL https://api.github.com/repos/badruddin-tasnim/bridge/releases/latest | grep -m1 '"tag_name"' | cut -d'"' -f4)
-
-# 1. Download, install, and launch the macOS Menu Bar app
 curl -L -o /tmp/Bridge-macOS.dmg "https://github.com/badruddin-tasnim/bridge/releases/download/${TAG}/Bridge-${TAG}-macOS.dmg"
 hdiutil attach -nobrowse -quiet /tmp/Bridge-macOS.dmg
 rm -rf /Applications/Bridge.app && cp -R /Volumes/Bridge/Bridge.app /Applications/Bridge.app
 hdiutil detach /Volumes/Bridge -quiet
 xattr -cr /Applications/Bridge.app
 open /Applications/Bridge.app
-
-# 2. Download & install the Android APK over ADB
-curl -L -o /tmp/Bridge-Android.apk "https://github.com/badruddin-tasnim/bridge/releases/download/${TAG}/Bridge-${TAG}-Android.apk"
-adb install -r /tmp/Bridge-Android.apk
 ```
 
 ---
 
-### Option 3: Build from Source
+### 2. Install on Android (`Android 8.0+`)
+
+> [!IMPORTANT]
+> **Why Android 14–16 Users Should Install via USB (`adb`):**
+> Bridge is a 100% open-source, non-Play utility that requires `BIND_NOTIFICATION_LISTENER_SERVICE` (to mirror notifications and send inline replies) and `BIND_ACCESSIBILITY_SERVICE` (to detect clipboard copy events in the background on Android 10+).
+>
+> On **Android 14, 15, and 16**, Google Play Protect's *Enhanced Fraud Protection* automatically blocks **any** non-Play APK downloaded from a web browser or file manager that declares these two permissions (*"App blocked to protect your device"*), and hides the *"Install anyway"* button. Installing over **USB with `adb`** from your Mac is the official Android developer installation path—it bypasses the browser sideload block **and** automatically unlocks Android 13+'s *"Restricted settings"* for Accessibility and Notification Access.
+
+#### Method A: Install via USB & ADB from Your Mac *(Required on Android 14–16, Recommended for All)*
+
+1. **Enable USB Debugging on your Android phone:**
+   - Open **Settings → About phone** and tap **Build number** 7 times until *"You are now a developer!"* appears.
+   - Open **Settings → System → Developer options** (or **Additional settings → Developer options**) and enable **USB debugging**.
+2. **Connect your phone to your Mac via USB cable** and tap **Allow** on the *"Allow USB debugging?"* prompt on your phone.
+3. **Run the following commands in your Mac Terminal:**
+   ```bash
+   # Install adb if you don't already have it
+   brew install --cask android-platform-tools
+
+   # Download the latest Bridge Android APK and install over USB
+   TAG=$(curl -fsSL https://api.github.com/repos/badruddin-tasnim/bridge/releases/latest | grep -m1 '"tag_name"' | cut -d'"' -f4)
+   curl -L -o /tmp/Bridge-Android.apk "https://github.com/badruddin-tasnim/bridge/releases/download/${TAG}/Bridge-${TAG}-Android.apk"
+   adb install -r /tmp/Bridge-Android.apk
+   ```
+
+#### Method B: Direct APK Download on Phone *(Android 8–13 & Devices Without Play Protect Sideload Block)*
+
+1. Download **`Bridge-v*-Android.apk`** from [**GitHub Releases**](../../releases) directly on your Android phone.
+2. Open the downloaded **`.apk`** file to install it. *(If Play Protect shows a standard warning dialog, tap **More details → Install anyway**).*
+3. **Android 13 Restricted Settings:** If **Accessibility** or **Notification Access** appears grayed out after installing the APK directly, open **Settings → Apps → Bridge → ⋮ (top right) → Allow restricted settings**, then enable the permissions.
+
+---
+
+### 3. Build from Source
 
 <details>
 <summary><b>Click to expand build instructions (Swift & Gradle)</b></summary>
