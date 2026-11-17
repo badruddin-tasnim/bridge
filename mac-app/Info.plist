@@ -24,6 +24,8 @@
     <string>13.0</string>
     <key>LSUIElement</key>
     <true/>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Bridge reads playback info, thumbnails, and sends media controls to your web browsers, Apple Music, Spotify, and VLC when controlling your Mac from your phone.</string>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
     <key>NSDesktopFolderUsageDescription</key>

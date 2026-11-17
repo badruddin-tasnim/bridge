@@ -8,6 +8,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.content.res.ColorStateList
+import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Typeface
 import android.net.ConnectivityManager
@@ -15,8 +16,12 @@ import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
+import android.os.SystemClock
 import android.provider.Settings
+import android.util.Base64
 import android.util.Log
 import android.text.Editable
 import android.text.TextWatcher
@@ -27,9 +32,11 @@ import android.view.animation.OvershootInterpolator
 import android.widget.Button
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
+import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -114,8 +121,43 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
     private lateinit var layoutTroubleshootDetails: LinearLayout
     private lateinit var tvDevicePhoneName: TextView
     private lateinit var tvDeviceMacName: TextView
+    private lateinit var layoutMacBatteryColumn: LinearLayout
+    private lateinit var tvMacBatteryStatus: TextView
+    private lateinit var macBatteryRing: MacBatteryRingView
     private lateinit var tvLiveBadge: TextView
+    private lateinit var btnMacSoundToggle: LinearLayout
+    private lateinit var flMacSoundIcon: FrameLayout
+    private lateinit var ivMacSoundIcon: ImageView
+    private lateinit var tvMacSoundTitle: TextView
+    private lateinit var layoutMacNowPlayingSection: LinearLayout
+    private lateinit var ivMacMediaArtwork: ImageView
+    private lateinit var tvMacMediaApp: TextView
+    private lateinit var tvMacMediaTitle: TextView
+    private lateinit var tvMacMediaArtist: TextView
+    private lateinit var btnMacMediaPrev: ImageButton
+    private lateinit var btnMacMediaRew10: ImageButton
+    private lateinit var btnMacMediaPlayPause: FrameLayout
+    private lateinit var ivMacMediaPlayPause: ImageView
+    private lateinit var btnMacMediaFwd10: ImageButton
+    private lateinit var btnMacMediaNext: ImageButton
+    private lateinit var layoutMacMediaSeekRow: LinearLayout
+    private lateinit var seekBarMacMedia: SeekBar
+    private lateinit var tvMacMediaElapsed: TextView
+    private lateinit var tvMacMediaRemaining: TextView
+    private lateinit var layoutMacMediaVolumeRow: LinearLayout
+    private lateinit var btnMacMediaVolMute: ImageButton
+    private lateinit var seekBarMacVolume: SeekBar
+    private lateinit var tvMacMediaVolumePct: TextView
     private lateinit var btnHeroConnect: Button
+
+    private val macUiHandler by lazy { Handler(Looper.getMainLooper()) }
+    private var isMacMutePending = false
+    private var macMutePendingHint: String? = null
+    private var macMuteTimeoutRunnable: Runnable? = null
+    private var macMediaTickRunnable: Runnable? = null
+    private var isSeekingMacMedia = false
+    private var isDraggingMacVolume = false
+    private var lastRenderedMacArtworkHash: String? = null
 
     // Tab 2: Files Page
     private lateinit var tvFilesTargetMac: TextView
@@ -136,6 +178,8 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
     private lateinit var rowPhoneVibrate: LinearLayout
     private lateinit var switchPhoneVibrate: SwitchCompat
     private lateinit var switchAutoAcceptFiles: SwitchCompat
+    private lateinit var switchCallsOnMac: SwitchCompat
+    private lateinit var tvCallsOnMacPermHint: TextView
     private lateinit var rowSaveLocation: LinearLayout
     private lateinit var tvSaveLocationPath: TextView
     private lateinit var btnResetSaveLocation: TextView
@@ -144,6 +188,8 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
     private lateinit var tvSettingNotifAccessStatus: TextView
     private lateinit var rowSettingAccessibility: LinearLayout
     private lateinit var tvSettingAccessibilityStatus: TextView
+    private lateinit var rowSettingDndAccess: LinearLayout
+    private lateinit var tvSettingDndAccessStatus: TextView
     private lateinit var tvSettingsDeviceMacName: TextView
     private lateinit var tvSettingsDeviceStatus: TextView
     private lateinit var btnToggleConnectMacSettings: Button
@@ -329,6 +375,7 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         updateSetupProgress()
         renderTransfersList()
         updateUI()
+        DeviceStatusMonitor.sendCurrentStatus(this, force = false)
 
         if (!BridgePrefs.isPaired(this)) {
             ClipboardSyncManager.networkClient?.startDiscovery()
@@ -342,6 +389,7 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         BridgeNotificationManager.removeSettingsListener(this)
         BridgeFileTransferManager.removeListener(this)
         UpdateChecker.removeListener(this)
+        stopMacMediaTick()
     }
 
     private fun initViews() {
@@ -398,7 +446,33 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         layoutTroubleshootDetails = findViewById(R.id.layoutTroubleshootDetails)
         tvDevicePhoneName = findViewById(R.id.tvDevicePhoneName)
         tvDeviceMacName = findViewById(R.id.tvDeviceMacName)
+        layoutMacBatteryColumn = findViewById(R.id.layoutMacBatteryColumn)
+        tvMacBatteryStatus = findViewById(R.id.tvMacBatteryStatus)
+        macBatteryRing = findViewById(R.id.macBatteryRing)
         tvLiveBadge = findViewById(R.id.tvLiveBadge)
+        btnMacSoundToggle = findViewById(R.id.btnMacSoundToggle)
+        flMacSoundIcon = findViewById(R.id.flMacSoundIcon)
+        ivMacSoundIcon = findViewById(R.id.ivMacSoundIcon)
+        tvMacSoundTitle = findViewById(R.id.tvMacSoundTitle)
+        layoutMacNowPlayingSection = findViewById(R.id.layoutMacNowPlayingSection)
+        ivMacMediaArtwork = findViewById(R.id.ivMacMediaArtwork)
+        tvMacMediaApp = findViewById(R.id.tvMacMediaApp)
+        tvMacMediaTitle = findViewById(R.id.tvMacMediaTitle)
+        tvMacMediaArtist = findViewById(R.id.tvMacMediaArtist)
+        btnMacMediaPrev = findViewById(R.id.btnMacMediaPrev)
+        btnMacMediaRew10 = findViewById(R.id.btnMacMediaRew10)
+        btnMacMediaPlayPause = findViewById(R.id.btnMacMediaPlayPause)
+        ivMacMediaPlayPause = findViewById(R.id.ivMacMediaPlayPause)
+        btnMacMediaFwd10 = findViewById(R.id.btnMacMediaFwd10)
+        btnMacMediaNext = findViewById(R.id.btnMacMediaNext)
+        layoutMacMediaSeekRow = findViewById(R.id.layoutMacMediaSeekRow)
+        seekBarMacMedia = findViewById(R.id.seekBarMacMedia)
+        tvMacMediaElapsed = findViewById(R.id.tvMacMediaElapsed)
+        tvMacMediaRemaining = findViewById(R.id.tvMacMediaRemaining)
+        layoutMacMediaVolumeRow = findViewById(R.id.layoutMacMediaVolumeRow)
+        btnMacMediaVolMute = findViewById(R.id.btnMacMediaVolMute)
+        seekBarMacVolume = findViewById(R.id.seekBarMacVolume)
+        tvMacMediaVolumePct = findViewById(R.id.tvMacMediaVolumePct)
         btnHeroConnect = findViewById(R.id.btnHeroConnect)
 
         // Tab 2: Files
@@ -424,10 +498,14 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         btnResetSaveLocation = findViewById(R.id.btnResetSaveLocation)
         btnChangeSaveLocation = findViewById(R.id.btnChangeSaveLocation)
         switchAutoAcceptFiles = findViewById(R.id.switchAutoAcceptFiles)
+        switchCallsOnMac = findViewById(R.id.switchCallsOnMac)
+        tvCallsOnMacPermHint = findViewById(R.id.tvCallsOnMacPermHint)
         rowSettingNotifAccess = findViewById(R.id.rowSettingNotifAccess)
         tvSettingNotifAccessStatus = findViewById(R.id.tvSettingNotifAccessStatus)
         rowSettingAccessibility = findViewById(R.id.rowSettingAccessibility)
         tvSettingAccessibilityStatus = findViewById(R.id.tvSettingAccessibilityStatus)
+        rowSettingDndAccess = findViewById(R.id.rowSettingDndAccess)
+        tvSettingDndAccessStatus = findViewById(R.id.tvSettingDndAccessStatus)
         tvSettingsDeviceMacName = findViewById(R.id.tvSettingsDeviceMacName)
         tvSettingsDeviceStatus = findViewById(R.id.tvSettingsDeviceStatus)
         btnToggleConnectMacSettings = findViewById(R.id.btnToggleConnectMacSettings)
@@ -438,6 +516,7 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         styleBridgeSwitch(switchMacNotif)
         styleBridgeSwitch(switchPhoneVibrate)
         styleBridgeSwitch(switchAutoAcceptFiles)
+        styleBridgeSwitch(switchCallsOnMac)
 
         // Screen B
         layoutScreenPairing = findViewById(R.id.layoutScreenPairing)
@@ -655,6 +734,10 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }
 
+        rowSettingDndAccess.setOnClickListener {
+            startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS))
+        }
+
         btnTroubleshootToggle.setOnClickListener {
             if (layoutTroubleshootDetails.visibility == View.VISIBLE) {
                 layoutTroubleshootDetails.visibility = View.GONE
@@ -728,6 +811,20 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
             BridgePrefs.setAutoAcceptFilesEnabled(this, isChecked, updateTimestamp = true)
             BridgeNotificationManager.sendSettingsToMac(this)
             updateSettingsUI()
+        }
+
+        switchCallsOnMac.setOnCheckedChangeListener { _, isChecked ->
+            if (isUpdatingSettingsUi) return@setOnCheckedChangeListener
+            BridgePrefs.setCallsOnMacEnabled(this, isChecked, updateTimestamp = true)
+            if (!isChecked) {
+                PhoneCallMonitor.clearAll()
+            }
+            BridgeNotificationManager.sendSettingsToMac(this)
+            updateSettingsUI()
+        }
+
+        tvCallsOnMacPermHint.setOnClickListener {
+            startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
         }
 
         btnScanQr.setOnClickListener {
@@ -812,6 +909,119 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         btnHeroConnect.setOnClickListener {
             connectSavedMac()
         }
+
+        btnMacSoundToggle.setOnClickListener {
+            val client = ClipboardSyncManager.networkClient
+            if (client?.isConnected() != true || isMacMutePending) return@setOnClickListener
+            val status = client.latestMacSystemStatus ?: return@setOnClickListener
+            if (!status.canToggleMute) return@setOnClickListener
+
+            isMacMutePending = true
+            macMutePendingHint = null
+            renderMacTelemetryAndMedia(true)
+            client.sendRawJson(MacSystemStatus.buildMacControlJson(action = "toggle_mute"))
+
+            macMuteTimeoutRunnable?.let { macUiHandler.removeCallbacks(it) }
+            val timeout = Runnable {
+                if (isMacMutePending) {
+                    isMacMutePending = false
+                    macMutePendingHint = "Mac didn't respond"
+                    renderMacTelemetryAndMedia(ClipboardSyncManager.networkClient?.isConnected() == true)
+                }
+            }
+            macMuteTimeoutRunnable = timeout
+            macUiHandler.postDelayed(timeout, 2500L)
+        }
+
+        btnMacMediaVolMute.setOnClickListener {
+            val client = ClipboardSyncManager.networkClient
+            if (client?.isConnected() != true) return@setOnClickListener
+            client.sendRawJson(MacSystemStatus.buildMacControlJson(action = "toggle_mute"))
+        }
+
+        btnMacMediaPlayPause.setOnClickListener {
+            val client = ClipboardSyncManager.networkClient?.takeIf { it.isConnected() } ?: return@setOnClickListener
+            val current = client.latestMacMediaStatus
+            val action = if (current != null && current.isActive) {
+                if (current.isPlaying) "pause" else "play"
+            } else {
+                "play_pause"
+            }
+            client.sendRawJson(MacMediaStatus.buildMediaActionJson(action = action))
+        }
+
+        btnMacMediaPrev.setOnClickListener {
+            ClipboardSyncManager.networkClient?.takeIf { it.isConnected() }?.sendRawJson(
+                MacMediaStatus.buildMediaActionJson(action = "previous")
+            )
+        }
+
+        btnMacMediaNext.setOnClickListener {
+            ClipboardSyncManager.networkClient?.takeIf { it.isConnected() }?.sendRawJson(
+                MacMediaStatus.buildMediaActionJson(action = "next")
+            )
+        }
+
+        btnMacMediaRew10.setOnClickListener {
+            ClipboardSyncManager.networkClient?.takeIf { it.isConnected() }?.sendRawJson(
+                MacMediaStatus.buildMediaActionJson(action = "seek_delta", deltaMs = -10_000L)
+            )
+        }
+
+        btnMacMediaFwd10.setOnClickListener {
+            ClipboardSyncManager.networkClient?.takeIf { it.isConnected() }?.sendRawJson(
+                MacMediaStatus.buildMediaActionJson(action = "seek_delta", deltaMs = 10_000L)
+            )
+        }
+
+        seekBarMacMedia.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (!fromUser) return
+                val media = ClipboardSyncManager.networkClient?.latestMacMediaStatus ?: return
+                if (media.durationMs > 0L) {
+                    val targetMs = (media.durationMs * progress) / 1000L
+                    tvMacMediaElapsed.text = MacMediaStatus.formatTimeMs(targetMs)
+                    val remMs = (media.durationMs - targetMs).coerceAtLeast(0L)
+                    tvMacMediaRemaining.text = "-${MacMediaStatus.formatTimeMs(remMs)}"
+                }
+            }
+
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {
+                isSeekingMacMedia = true
+            }
+
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {
+                isSeekingMacMedia = false
+                val media = ClipboardSyncManager.networkClient?.latestMacMediaStatus ?: return
+                val progress = seekBar?.progress ?: 0
+                if (media.canSeek && media.durationMs > 0L) {
+                    val targetMs = (media.durationMs * progress) / 1000L
+                    ClipboardSyncManager.networkClient?.takeIf { it.isConnected() }?.sendRawJson(
+                        MacMediaStatus.buildMediaActionJson(action = "seek", positionMs = targetMs)
+                    )
+                }
+            }
+        })
+
+        seekBarMacVolume.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser) {
+                    tvMacMediaVolumePct.text = "${progress}%"
+                }
+            }
+
+            override fun onStartTrackingTouch(seekBar: SeekBar?) {
+                isDraggingMacVolume = true
+            }
+
+            override fun onStopTrackingTouch(seekBar: SeekBar?) {
+                isDraggingMacVolume = false
+                val vol = seekBar?.progress ?: 0
+                ClipboardSyncManager.networkClient?.takeIf { it.isConnected() }?.sendRawJson(
+                    MacMediaStatus.buildMediaActionJson(action = "set_volume", volumePercent = vol)
+                )
+            }
+        })
 
         btnToggleConnectMacSettings.setOnClickListener {
             if (!BridgePrefs.isPaired(this)) return@setOnClickListener
@@ -1036,12 +1246,17 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
             val macEnabled = BridgePrefs.isMacNotifEnabled(this)
             val vibrateEnabled = BridgePrefs.isPhoneVibrateEnabled(this)
             val autoAcceptFiles = BridgePrefs.isAutoAcceptFilesEnabled(this)
+            val callsOnMacEnabled = BridgePrefs.isCallsOnMacEnabled(this)
 
             switchNotifMaster.isChecked = masterEnabled
             switchAndroidNotif.isChecked = androidEnabled
             switchMacNotif.isChecked = macEnabled
             switchPhoneVibrate.isChecked = vibrateEnabled
             switchAutoAcceptFiles.isChecked = autoAcceptFiles
+            switchCallsOnMac.isChecked = callsOnMacEnabled
+
+            val hasNotifPerm = isNotificationServiceEnabled()
+            tvCallsOnMacPermHint.visibility = if (callsOnMacEnabled && !hasNotifPerm) View.VISIBLE else View.GONE
 
             switchAndroidNotif.isEnabled = masterEnabled
             switchMacNotif.isEnabled = masterEnabled
@@ -1079,6 +1294,14 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
             } else {
                 tvSettingAccessibilityStatus.text = "Required"
                 tvSettingAccessibilityStatus.setTextColor(colorCoral)
+            }
+
+            if (PhoneControlManager.hasDndPermission(this)) {
+                tvSettingDndAccessStatus.text = "Active"
+                tvSettingDndAccessStatus.setTextColor(colorLime)
+            } else {
+                tvSettingDndAccessStatus.text = "Setup"
+                tvSettingDndAccessStatus.setTextColor(colorCoral)
             }
 
             val paired = BridgePrefs.isPaired(this)
@@ -1647,7 +1870,9 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
                     btnHeroConnect.setBackgroundResource(R.drawable.bg_button_lime)
                 }
             }
+            renderMacTelemetryAndMedia(connected)
         } else {
+            stopMacMediaTick()
             // Not Paired (Screen B)
             layoutScreenConnected.visibility = View.GONE
             layoutScreenPairing.visibility = if (currentTab == TAB_HOME) View.VISIBLE else View.GONE
@@ -1691,9 +1916,207 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
                 userConnectAttempts = 0
                 wasConnectedBefore = true
                 userManuallyDisconnected = false
+            } else {
+                isMacMutePending = false
+                macMutePendingHint = null
+                macMuteTimeoutRunnable?.let { macUiHandler.removeCallbacks(it) }
             }
             updateUI()
         }
+    }
+
+    override fun onMacStatusReceived(status: MacSystemStatus) {
+        runOnUiThread {
+            isMacMutePending = false
+            macMutePendingHint = null
+            macMuteTimeoutRunnable?.let { macUiHandler.removeCallbacks(it) }
+            renderMacTelemetryAndMedia(ClipboardSyncManager.networkClient?.isConnected() == true)
+        }
+    }
+
+    override fun onMacMediaStatusReceived(status: MacMediaStatus) {
+        runOnUiThread {
+            renderMacTelemetryAndMedia(ClipboardSyncManager.networkClient?.isConnected() == true)
+        }
+    }
+
+    private fun renderMacTelemetryAndMedia(isConnected: Boolean) {
+        if (!::btnMacSoundToggle.isInitialized) return
+        val client = ClipboardSyncManager.networkClient
+        val macStatus = if (isConnected) client?.latestMacSystemStatus else null
+        val mediaStatus = if (isConnected) client?.latestMacMediaStatus else null
+
+        // 1. MacBook battery (right column, omitted when disconnected or desktop Mac with batteryPercent == null)
+        val batteryPct = macStatus?.batteryPercent
+        if (macStatus != null && batteryPct != null) {
+            layoutMacBatteryColumn.visibility = View.VISIBLE
+            macBatteryRing.setBattery(batteryPct, macStatus.isCharging)
+            tvMacBatteryStatus.text = if (macStatus.isCharging) {
+                "⚡ $batteryPct% · Charging"
+            } else {
+                "$batteryPct% charge left"
+            }
+            tvMacBatteryStatus.setTextColor(
+                if (macStatus.isCharging) Color.parseColor("#F5A623")
+                else ContextCompat.getColor(this, R.color.bridge_muted)
+            )
+        } else {
+            layoutMacBatteryColumn.visibility = View.GONE
+        }
+
+        // 2. MAC CONTROLS: Quick Panel Tile (Sound <-> Silent only)
+        val colorInk = ContextCompat.getColor(this, R.color.bridge_ink)
+        val colorText = ContextCompat.getColor(this, R.color.bridge_text)
+        val colorMuted = ContextCompat.getColor(this, R.color.bridge_muted)
+
+        if (!isConnected || macStatus == null) {
+            btnMacSoundToggle.isEnabled = false
+            btnMacSoundToggle.alpha = 0.45f
+            flMacSoundIcon.setBackgroundResource(R.drawable.bg_quick_tile_off)
+            ivMacSoundIcon.setImageResource(R.drawable.ic_mac_sound)
+            ivMacSoundIcon.imageTintList = ColorStateList.valueOf(colorMuted)
+            tvMacSoundTitle.text = "Sound"
+            tvMacSoundTitle.setTextColor(colorMuted)
+        } else {
+            val isMuted = macStatus.isMuted
+            btnMacSoundToggle.isEnabled = macStatus.canToggleMute && !isMacMutePending
+            btnMacSoundToggle.alpha = if (isMacMutePending) 0.65f else 1.0f
+            if (isMuted) {
+                flMacSoundIcon.setBackgroundResource(R.drawable.bg_quick_tile_off)
+                ivMacSoundIcon.setImageResource(R.drawable.ic_mac_silent)
+                ivMacSoundIcon.imageTintList = ColorStateList.valueOf(colorText)
+                tvMacSoundTitle.text = when {
+                    isMacMutePending -> "Updating…"
+                    macMutePendingHint != null -> "No reply"
+                    else -> "Silent"
+                }
+                tvMacSoundTitle.setTextColor(colorText)
+            } else {
+                flMacSoundIcon.setBackgroundResource(R.drawable.bg_quick_tile_lime)
+                ivMacSoundIcon.setImageResource(R.drawable.ic_mac_sound)
+                ivMacSoundIcon.imageTintList = ColorStateList.valueOf(colorInk)
+                tvMacSoundTitle.text = when {
+                    isMacMutePending -> "Updating…"
+                    macMutePendingHint != null -> "No reply"
+                    else -> "Sound"
+                }
+                tvMacSoundTitle.setTextColor(colorText)
+            }
+        }
+
+        // 3. NOW PLAYING · YOUR MAC
+        if (!isConnected || mediaStatus == null || !mediaStatus.isActive) {
+            layoutMacNowPlayingSection.visibility = View.GONE
+            stopMacMediaTick()
+            lastRenderedMacArtworkHash = null
+            ivMacMediaArtwork.setImageDrawable(null)
+            ivMacMediaArtwork.visibility = View.GONE
+            return
+        }
+
+        layoutMacNowPlayingSection.visibility = View.VISIBLE
+        tvMacMediaApp.text = mediaStatus.appName.ifBlank { "Mac Audio" }
+        tvMacMediaTitle.text = mediaStatus.title
+        if (mediaStatus.artist.isBlank()) {
+            tvMacMediaArtist.visibility = View.GONE
+        } else {
+            tvMacMediaArtist.visibility = View.VISIBLE
+            tvMacMediaArtist.text = mediaStatus.artist
+        }
+
+        // Artwork decode cached by hash
+        if (mediaStatus.artworkBase64 != null && mediaStatus.artworkHash != null) {
+            if (mediaStatus.artworkHash != lastRenderedMacArtworkHash || ivMacMediaArtwork.visibility != View.VISIBLE) {
+                try {
+                    val bytes = Base64.decode(mediaStatus.artworkBase64, Base64.DEFAULT)
+                    val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                    if (bmp != null) {
+                        ivMacMediaArtwork.setImageBitmap(bmp)
+                        ivMacMediaArtwork.visibility = View.VISIBLE
+                        ivMacMediaArtwork.requestLayout()
+                        lastRenderedMacArtworkHash = mediaStatus.artworkHash
+                    }
+                } catch (_: Exception) {
+                    ivMacMediaArtwork.visibility = View.GONE
+                }
+            }
+        } else {
+            lastRenderedMacArtworkHash = null
+            ivMacMediaArtwork.setImageDrawable(null)
+            ivMacMediaArtwork.visibility = View.GONE
+        }
+
+        // Transport controls (optical play balance is baked into ic_media_play)
+        if (mediaStatus.isPlaying) {
+            ivMacMediaPlayPause.setImageResource(R.drawable.ic_media_pause)
+        } else {
+            ivMacMediaPlayPause.setImageResource(R.drawable.ic_media_play)
+        }
+        ivMacMediaPlayPause.translationX = 0f
+        btnMacMediaPrev.visibility = if (mediaStatus.canSkipPrevious) View.VISIBLE else View.GONE
+        btnMacMediaNext.visibility = if (mediaStatus.canSkipNext) View.VISIBLE else View.GONE
+        val showSeek = mediaStatus.canSeek && mediaStatus.durationMs > 0L
+        btnMacMediaRew10.visibility = if (showSeek) View.VISIBLE else View.GONE
+        btnMacMediaFwd10.visibility = if (showSeek) View.VISIBLE else View.GONE
+        layoutMacMediaSeekRow.visibility = if (showSeek) View.VISIBLE else View.GONE
+
+        if (showSeek) {
+            updateMacMediaProgressViews(mediaStatus)
+            if (mediaStatus.isPlaying) {
+                startMacMediaTick()
+            } else {
+                stopMacMediaTick()
+            }
+        } else {
+            stopMacMediaTick()
+        }
+
+        // Mac Output Volume slider
+        if (macStatus != null && macStatus.canControlVolume) {
+            layoutMacMediaVolumeRow.visibility = View.VISIBLE
+            btnMacMediaVolMute.setImageResource(
+                if (macStatus.isMuted) R.drawable.ic_mac_silent else R.drawable.ic_mac_sound
+            )
+            if (!isDraggingMacVolume) {
+                seekBarMacVolume.progress = macStatus.volumePercent
+                tvMacMediaVolumePct.text = "${macStatus.volumePercent}%"
+            }
+        } else {
+            layoutMacMediaVolumeRow.visibility = View.GONE
+        }
+    }
+
+    private fun updateMacMediaProgressViews(mediaStatus: MacMediaStatus) {
+        if (isSeekingMacMedia || !mediaStatus.canSeek || mediaStatus.durationMs <= 0L) return
+        val estMs = mediaStatus.estimatedPositionMs(SystemClock.elapsedRealtime())
+        val progress = ((estMs.toDouble() / mediaStatus.durationMs.toDouble()) * 1000.0).toInt().coerceIn(0, 1000)
+        seekBarMacMedia.progress = progress
+        tvMacMediaElapsed.text = MacMediaStatus.formatTimeMs(estMs)
+        val remMs = (mediaStatus.durationMs - estMs).coerceAtLeast(0L)
+        tvMacMediaRemaining.text = "-${MacMediaStatus.formatTimeMs(remMs)}"
+    }
+
+    private fun startMacMediaTick() {
+        if (macMediaTickRunnable != null) return
+        val runnable = object : Runnable {
+            override fun run() {
+                val client = ClipboardSyncManager.networkClient
+                val media = client?.latestMacMediaStatus
+                if (client?.isConnected() == true && media != null && media.isActive && media.isPlaying && media.canSeek && media.durationMs > 0L) {
+                    updateMacMediaProgressViews(media)
+                    macUiHandler.postDelayed(this, 1000L)
+                } else {
+                    macMediaTickRunnable = null
+                }
+            }
+        }
+        macMediaTickRunnable = runnable
+        macUiHandler.postDelayed(runnable, 1000L)
+    }
+
+    private fun stopMacMediaTick() {
+        macMediaTickRunnable?.let { macUiHandler.removeCallbacks(it) }
+        macMediaTickRunnable = null
     }
 
     override fun onConnectionFailed(consecutiveFailures: Int) {
@@ -1734,6 +2157,18 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
                 showPairingNote(msg, BannerStyle.ERROR)
                 updateUI()
             }
+        }
+    }
+
+    override fun onRemoteDisconnect() {
+        runOnUiThread {
+            isConnectingState = false
+            userManuallyDisconnected = true
+            wasConnectedBefore = false
+            consecutiveFailures = 0
+            userConnectAttempts = 0
+            updateSettingsUI()
+            updateUI()
         }
     }
 

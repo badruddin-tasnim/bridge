@@ -66,18 +66,26 @@ class BridgeNotificationListenerService : NotificationListenerService() {
         super.onListenerConnected()
         instance = this
         Log.i(TAG, "Bridge Notification Listener connected.")
+        PhoneMediaManager.startObserving(this)
         syncActiveNotifications()
     }
 
     override fun onListenerDisconnected() {
         super.onListenerDisconnected()
         instance = null
+        PhoneMediaManager.stopObserving(this)
+        PhoneCallMonitor.clearAll()
         actionCache.clear()
         rawKeyMap.clear()
         lastSeenTextByNormKey.clear()
         messageHistoryByNormKey.clear()
         lastInboxLinesByNormKey.clear()
         Log.i(TAG, "Bridge Notification Listener disconnected.")
+    }
+
+    override fun onInterruptionFilterChanged(interruptionFilter: Int) {
+        super.onInterruptionFilterChanged(interruptionFilter)
+        DeviceStatusMonitor.sendCurrentStatus(this, force = false)
     }
 
     private fun shouldDeduplicatePost(dedupeKey: String): Boolean {
@@ -101,7 +109,6 @@ class BridgeNotificationListenerService : NotificationListenerService() {
 
     private fun processNotificationPosted(sbn: StatusBarNotification?, isFullSync: Boolean) {
         if (sbn == null) return
-        if (!BridgePrefs.isNotificationSyncEnabled(this)) return
 
         val pkg = sbn.packageName ?: return
         if (pkg == packageName) return // Don't mirror Bridge's own notifications
@@ -112,6 +119,15 @@ class BridgeNotificationListenerService : NotificationListenerService() {
         }
 
         val notif = sbn.notification ?: return
+        // Route live incoming/active calls to PhoneCallMonitor (independent of general notification sync)
+        if ((notif.flags and Notification.FLAG_GROUP_SUMMARY) == 0 &&
+            PhoneCallMonitor.handleCallNotificationPosted(this, sbn)
+        ) {
+            return
+        }
+
+        if (!BridgePrefs.isNotificationSyncEnabled(this)) return
+
         val rawKey = sbn.key ?: return
         val normKey = normalizeKey(rawKey)
         rawKeyMap[normKey] = rawKey
@@ -411,6 +427,7 @@ class BridgeNotificationListenerService : NotificationListenerService() {
 
     private fun handleNotificationRemoved(sbn: StatusBarNotification?) {
         if (sbn == null) return
+        PhoneCallMonitor.handleCallNotificationRemoved(sbn)
         val rawKey = sbn.key ?: return
         val normKey = normalizeKey(rawKey)
         val now = System.currentTimeMillis()

@@ -288,4 +288,225 @@ class BridgeCoreUnitTest {
         assertNull(NotificationActionRequest.fromJson(JSONObject("""{"id":"","actionId":0}""")))
         assertNull(NotificationDismissRequest.fromJson(JSONObject("""{"id":""}""")))
     }
+
+    @Test
+    fun deviceStatusMonitor_buildsBatteryStatusJson() {
+        val json = JSONObject(
+            DeviceStatusMonitor.buildDeviceStatusJson(
+                DeviceStatusMonitor.BatterySnapshot(level = 45, isCharging = false)
+            )
+        )
+        assertEquals("device_status", json.getString("type"))
+        assertEquals(45, json.getInt("batteryLevel"))
+        assertFalse(json.getBoolean("isCharging"))
+
+        val chargingJson = JSONObject(
+            DeviceStatusMonitor.buildDeviceStatusJson(
+                DeviceStatusMonitor.BatterySnapshot(level = 20, isCharging = true)
+            )
+        )
+        assertEquals(20, chargingJson.getInt("batteryLevel"))
+        assertTrue(chargingJson.getBoolean("isCharging"))
+
+        val fullJson = JSONObject(
+            DeviceStatusMonitor.buildDeviceStatusJson(
+                DeviceStatusMonitor.DeviceSnapshot(
+                    batteryLevel = 72,
+                    isCharging = false,
+                    ringerMode = "vibrate",
+                    isDndEnabled = true,
+                    hasDndPermission = true,
+                    isRingingPhone = true
+                )
+            )
+        )
+        assertEquals("device_status", fullJson.getString("type"))
+        assertEquals(72, fullJson.getInt("batteryLevel"))
+        assertFalse(fullJson.getBoolean("isCharging"))
+        assertEquals("vibrate", fullJson.getString("ringerMode"))
+        assertTrue(fullJson.getBoolean("isDndEnabled"))
+        assertTrue(fullJson.getBoolean("hasDndPermission"))
+        assertTrue(fullJson.getBoolean("isRingingPhone"))
+    }
+
+    @Test
+    fun phoneMediaManager_buildsMediaStatusJson() {
+        val activeJson = JSONObject(
+            PhoneMediaManager.buildMediaStatusJson(
+                PhoneMediaManager.MediaSnapshot(
+                    isActive = true,
+                    isPlaying = true,
+                    title = "Surrender",
+                    artist = "KIDPUNK",
+                    album = "Surrender",
+                    appName = "Spotify",
+                    durationMs = 176000L,
+                    positionMs = 28000L,
+                    playbackSpeed = 1.0f,
+                    volumeIndex = 10,
+                    maxVolume = 15,
+                    canSeek = true,
+                    canSkipNext = true,
+                    canSkipPrevious = false,
+                    canControlVolume = true,
+                    artworkHash = "abc123",
+                    artworkBase64 = "ZmFrZQ=="
+                )
+            )
+        )
+        assertEquals("media_status", activeJson.getString("type"))
+        assertTrue(activeJson.getBoolean("isActive"))
+        assertTrue(activeJson.getBoolean("isPlaying"))
+        assertEquals("Surrender", activeJson.getString("title"))
+        assertEquals("KIDPUNK", activeJson.getString("artist"))
+        assertEquals("Spotify", activeJson.getString("appName"))
+        assertEquals(176000L, activeJson.getLong("durationMs"))
+        assertEquals(28000L, activeJson.getLong("positionMs"))
+        assertEquals(10, activeJson.getInt("volumeIndex"))
+        assertEquals(15, activeJson.getInt("maxVolume"))
+        assertTrue(activeJson.getBoolean("canSeek"))
+        assertTrue(activeJson.getBoolean("canSkipNext"))
+        assertFalse(activeJson.getBoolean("canSkipPrevious"))
+        assertTrue(activeJson.getBoolean("canControlVolume"))
+        assertEquals("ZmFrZQ==", activeJson.getString("artworkBase64"))
+
+        val inactiveJson = JSONObject(
+            PhoneMediaManager.buildMediaStatusJson(
+                PhoneMediaManager.MediaSnapshot(
+                    isActive = false,
+                    volumeIndex = 4,
+                    maxVolume = 15
+                )
+            )
+        )
+        assertFalse(inactiveJson.getBoolean("isActive"))
+        assertFalse(inactiveJson.has("artworkBase64"))
+        assertEquals(4, inactiveJson.getInt("volumeIndex"))
+    }
+
+    @Test
+    fun phoneCallMonitor_buildsCallEventJson() {
+        val ringingJson = JSONObject(
+            PhoneCallMonitor.buildCallEventJson(
+                callId = "call_key_1",
+                state = "ringing",
+                callerName = "Alex",
+                appName = "Phone",
+                canAnswer = true,
+                canDecline = true,
+                iconBase64 = "aWNvbg=="
+            )
+        )
+        assertEquals("call_event", ringingJson.getString("type"))
+        assertEquals("call_key_1", ringingJson.getString("callId"))
+        assertEquals("ringing", ringingJson.getString("state"))
+        assertEquals("Alex", ringingJson.getString("callerName"))
+        assertEquals("Phone", ringingJson.getString("appName"))
+        assertTrue(ringingJson.getBoolean("canAnswer"))
+        assertTrue(ringingJson.getBoolean("canDecline"))
+        assertEquals("aWNvbg==", ringingJson.getString("icon"))
+
+        val endedJson = JSONObject(
+            PhoneCallMonitor.buildCallEventJson(
+                callId = "call_key_1",
+                state = "ended",
+                callerName = "Alex",
+                appName = "Phone",
+                canAnswer = false,
+                canDecline = false,
+                iconBase64 = null
+            )
+        )
+        assertEquals("ended", endedJson.getString("state"))
+        assertFalse(endedJson.has("icon"))
+    }
+
+    @Test
+    fun phoneControlManager_generatesFindPhoneBeaconPcm() {
+        val pcm = PhoneControlManager.generateFindPhoneBeaconPcm(sampleRate = 24000)
+        assertEquals(30000, pcm.size)
+        assertTrue(pcm.any { it.toInt() != 0 })
+        assertEquals(0, pcm.last().toInt())
+    }
+
+    @Test
+    fun macSystemStatus_parsesMacBookAndDesktopBatteriesAndBuildsControlJson() {
+        val macBook = MacSystemStatus.fromJson(
+            JSONObject()
+                .put("type", "mac_status")
+                .put("batteryPercent", 84)
+                .put("isCharging", true)
+                .put("isMuted", false)
+                .put("volumePercent", 65)
+                .put("canToggleMute", true)
+                .put("canControlVolume", true)
+        )
+        assertEquals(84, macBook.batteryPercent)
+        assertTrue(macBook.isCharging)
+        assertFalse(macBook.isMuted)
+        assertEquals(65, macBook.volumePercent)
+
+        val desktopMac = MacSystemStatus.fromJson(
+            JSONObject()
+                .put("type", "mac_status")
+                .put("isCharging", false)
+                .put("isMuted", true)
+                .put("volumePercent", 0)
+        )
+        assertNull(desktopMac.batteryPercent)
+        assertTrue(desktopMac.isMuted)
+
+        val toggleCmd = JSONObject(MacSystemStatus.buildMacControlJson(action = "toggle_mute"))
+        assertEquals("mac_control", toggleCmd.getString("type"))
+        assertEquals("toggle_mute", toggleCmd.getString("action"))
+    }
+
+    @Test
+    fun macMediaStatus_parsesReusesArtworkInterpolatesAndBuildsActionJson() {
+        val first = MacMediaStatus.fromJson(
+            JSONObject()
+                .put("type", "mac_media_status")
+                .put("isActive", true)
+                .put("isPlaying", true)
+                .put("title", "Midnight City")
+                .put("artist", "M83")
+                .put("appName", "Spotify")
+                .put("durationMs", 243000L)
+                .put("positionMs", 40000L)
+                .put("playbackSpeed", 1.0)
+                .put("canSeek", true)
+                .put("canSkipNext", true)
+                .put("canSkipPrevious", true)
+                .put("artworkHash", "hash_m83")
+                .put("artworkBase64", "AQID"),
+            previous = null,
+            receivedAtElapsedMs = 1000L
+        )
+        assertTrue(first.isActive)
+        assertEquals("AQID", first.artworkBase64)
+        assertEquals(45000L, first.estimatedPositionMs(6000L))
+        assertEquals("1:05", MacMediaStatus.formatTimeMs(65000L))
+
+        val followUp = MacMediaStatus.fromJson(
+            JSONObject()
+                .put("type", "mac_media_status")
+                .put("isActive", true)
+                .put("isPlaying", false)
+                .put("title", "Midnight City")
+                .put("appName", "Spotify")
+                .put("durationMs", 243000L)
+                .put("positionMs", 50000L)
+                .put("canSeek", true)
+                .put("artworkHash", "hash_m83"),
+            previous = first,
+            receivedAtElapsedMs = 8000L
+        )
+        assertEquals("AQID", followUp.artworkBase64)
+        assertEquals(50000L, followUp.estimatedPositionMs(20000L))
+
+        val seekCmd = JSONObject(MacMediaStatus.buildMediaActionJson(action = "seek", positionMs = 90000L))
+        assertEquals("mac_media_action", seekCmd.getString("type"))
+        assertEquals("seek", seekCmd.getString("action"))
+        assertEquals(90000L, seekCmd.getLong("positionMs"))
+    }
 }

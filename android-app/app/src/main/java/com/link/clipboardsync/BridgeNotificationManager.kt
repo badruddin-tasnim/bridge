@@ -92,6 +92,7 @@ object BridgeNotificationManager {
                 put("androidNotifEnabled", BridgePrefs.isAndroidNotifEnabled(context))
                 put("macNotifEnabled", BridgePrefs.isMacNotifEnabled(context))
                 put("autoAcceptFiles", BridgePrefs.isAutoAcceptFilesEnabled(context))
+                put("callsOnMacEnabled", BridgePrefs.isCallsOnMacEnabled(context))
                 put("updatedAt", BridgePrefs.getSettingsUpdatedAt(context))
             }
             client.sendRawJson(json.toString())
@@ -252,6 +253,17 @@ object BridgeNotificationManager {
                             json.optBoolean("autoAcceptFiles", true),
                             updateTimestamp = false
                         )
+                    }
+                    if (json.has("callsOnMacEnabled")) {
+                        val enabled = json.optBoolean("callsOnMacEnabled", true)
+                        BridgePrefs.setCallsOnMacEnabled(
+                            context,
+                            enabled,
+                            updateTimestamp = false
+                        )
+                        if (!enabled) {
+                            PhoneCallMonitor.clearAll()
+                        }
                     }
                     if (remoteUpdatedAt > 0L) {
                         BridgePrefs.setSettingsUpdatedAt(context, remoteUpdatedAt)

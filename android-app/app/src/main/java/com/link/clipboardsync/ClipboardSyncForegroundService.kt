@@ -76,6 +76,7 @@ class ClipboardSyncForegroundService : Service(), NetworkSyncClient.SyncListener
 
         ClipboardSyncManager.init(this)
         ClipboardSyncManager.networkClient?.addListener(this)
+        DeviceStatusMonitor.register(this)
         BridgeNotificationManager.init(this)
         UpdateChecker.startPeriodicChecks(this)
     }
@@ -246,6 +247,8 @@ class ClipboardSyncForegroundService : Service(), NetworkSyncClient.SyncListener
         super.onDestroy()
         isRunning = false
         try { wifiLock?.release() } catch (ignored: Exception) {}
+        PhoneControlManager.stopRinging(this)
+        DeviceStatusMonitor.unregister(this)
         ClipboardSyncManager.networkClient?.removeListener(this)
     }
 }

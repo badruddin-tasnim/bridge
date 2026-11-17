@@ -203,6 +203,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private func showPopover(forceBringToFront: Bool = false) {
         guard let button = statusItem?.button, let pop = popover else { return }
         BridgeNotificationManager.shared.checkNotificationAuth()
+        model.refreshLaunchAtLoginStatus()
         model.checkForUpdates(forceNetwork: false)
         applyPopoverSize()
 

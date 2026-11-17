@@ -48,6 +48,15 @@ public class BridgeNotificationManager: NSObject, ObservableObject, UNUserNotifi
         }
     }
 
+    @Published public var isCallsOnMacEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(isCallsOnMacEnabled, forKey: "bridge_calls_on_mac_enabled")
+            if !isApplyingRemoteSettings {
+                recordLocalSettingsChangeAndSync()
+            }
+        }
+    }
+
     // Mac-Only Settings
     @Published public var isSoundEnabled: Bool {
         didSet { UserDefaults.standard.set(isSoundEnabled, forKey: "bridge_notif_sound_enabled") }
@@ -75,6 +84,7 @@ public class BridgeNotificationManager: NSObject, ObservableObject, UNUserNotifi
         self.isMirroringEnabled = UserDefaults.standard.object(forKey: "bridge_notif_mirroring_enabled") as? Bool ?? true
         self.isSoundEnabled = UserDefaults.standard.object(forKey: "bridge_notif_sound_enabled") as? Bool ?? true
         self.isMacAlertsForwardingEnabled = UserDefaults.standard.object(forKey: "bridge_mac_alerts_forwarding") as? Bool ?? true
+        self.isCallsOnMacEnabled = UserDefaults.standard.object(forKey: "bridge_calls_on_mac_enabled") as? Bool ?? true
 
         super.init()
 
@@ -102,6 +112,7 @@ public class BridgeNotificationManager: NSObject, ObservableObject, UNUserNotifi
             "androidNotifEnabled": isMirroringEnabled,
             "macNotifEnabled": isMacAlertsForwardingEnabled,
             "autoAcceptFiles": BridgeFileTransferManager.shared.autoAcceptIncomingFiles,
+            "callsOnMacEnabled": isCallsOnMacEnabled,
             "updatedAt": settingsUpdatedAt
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: payload),
@@ -241,6 +252,9 @@ public class BridgeNotificationManager: NSObject, ObservableObject, UNUserNotifi
             BridgeFileTransferManager.shared.isApplyingRemoteSettings = true
             BridgeFileTransferManager.shared.autoAcceptIncomingFiles = autoAccept
             BridgeFileTransferManager.shared.isApplyingRemoteSettings = false
+        }
+        if let callsOnMac = json["callsOnMacEnabled"] as? Bool {
+            self.isCallsOnMacEnabled = callsOnMac
         }
         isApplyingRemoteSettings = false
         NSLog("[BridgeNotif] Applied remote settings_sync: master=\(isMasterNotificationsEnabled), android=\(isMirroringEnabled), mac=\(isMacAlertsForwardingEnabled), autoAcceptFiles=\(BridgeFileTransferManager.shared.autoAcceptIncomingFiles)")
