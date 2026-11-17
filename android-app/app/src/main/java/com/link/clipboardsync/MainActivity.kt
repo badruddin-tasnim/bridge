@@ -121,8 +121,6 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
     private lateinit var layoutTroubleshootDetails: LinearLayout
     private lateinit var tvDevicePhoneName: TextView
     private lateinit var tvDeviceMacName: TextView
-    private lateinit var layoutMacBatteryColumn: LinearLayout
-    private lateinit var tvMacBatteryStatus: TextView
     private lateinit var macBatteryRing: MacBatteryRingView
     private lateinit var tvLiveBadge: TextView
     private lateinit var btnMacSoundToggle: LinearLayout
@@ -446,8 +444,6 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         layoutTroubleshootDetails = findViewById(R.id.layoutTroubleshootDetails)
         tvDevicePhoneName = findViewById(R.id.tvDevicePhoneName)
         tvDeviceMacName = findViewById(R.id.tvDeviceMacName)
-        layoutMacBatteryColumn = findViewById(R.id.layoutMacBatteryColumn)
-        tvMacBatteryStatus = findViewById(R.id.tvMacBatteryStatus)
         macBatteryRing = findViewById(R.id.macBatteryRing)
         tvLiveBadge = findViewById(R.id.tvLiveBadge)
         btnMacSoundToggle = findViewById(R.id.btnMacSoundToggle)
@@ -1946,22 +1942,13 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         val macStatus = if (isConnected) client?.latestMacSystemStatus else null
         val mediaStatus = if (isConnected) client?.latestMacMediaStatus else null
 
-        // 1. MacBook battery (right column, omitted when disconnected or desktop Mac with batteryPercent == null)
+        // 1. MacBook battery pill (right side, omitted when disconnected or desktop Mac with batteryPercent == null)
         val batteryPct = macStatus?.batteryPercent
         if (macStatus != null && batteryPct != null) {
-            layoutMacBatteryColumn.visibility = View.VISIBLE
+            macBatteryRing.visibility = View.VISIBLE
             macBatteryRing.setBattery(batteryPct, macStatus.isCharging)
-            tvMacBatteryStatus.text = if (macStatus.isCharging) {
-                "⚡ $batteryPct% · Charging"
-            } else {
-                "$batteryPct% charge left"
-            }
-            tvMacBatteryStatus.setTextColor(
-                if (macStatus.isCharging) Color.parseColor("#F5A623")
-                else ContextCompat.getColor(this, R.color.bridge_muted)
-            )
         } else {
-            layoutMacBatteryColumn.visibility = View.GONE
+            macBatteryRing.visibility = View.GONE
         }
 
         // 2. MAC CONTROLS: Quick Panel Tile (Sound <-> Silent only)

@@ -623,6 +623,51 @@ private func runBatteryAndDeviceCardTests() {
     let cardHeight = host.view.fittingSize.height
     expect(cardHeight > 250 && cardHeight < 750, "Device card list fitting height should be valid (got \(cardHeight))")
 
+    // Expanding Add Another Phone expands only the bottom portion cleanly within screen bounds
+    model.showPairingSection = true
+    host.rootView = BridgeMenuView(model: model)
+    host.view.layoutSubtreeIfNeeded()
+    let expandedHeight = host.view.fittingSize.height
+    let screenHeight = NSScreen.main?.visibleFrame.height ?? 860
+    expect(expandedHeight <= screenHeight, "Devices tab with Add Another Phone expanded must stay within screen height (got \(expandedHeight), screen \(screenHeight))")
+
+    // Single device + active Now Playing + Add Another Phone stays stable without jumping off screen
+    model.connectedDevicesList = [
+        ConnectedDeviceInfo(
+            id: UUID(),
+            name: "Samsung SM-A525F",
+            ip: "192.168.1.40",
+            isConnected: true,
+            batteryLevel: 79,
+            isCharging: false,
+            mediaInfo: MediaPlaybackInfo.from(
+                jsonObject: [
+                    "type": "media_status",
+                    "isActive": true,
+                    "isPlaying": false,
+                    "title": "Test Video",
+                    "artist": "Channel",
+                    "appName": "YouTube",
+                    "durationMs": Int64(240_000),
+                    "positionMs": Int64(10_000),
+                    "volumeIndex": 6,
+                    "maxVolume": 15,
+                    "canSeek": true,
+                    "canSkipNext": true,
+                    "canSkipPrevious": true,
+                    "canControlVolume": true
+                ],
+                previous: nil,
+                receivedAtUptime: ProcessInfo.processInfo.systemUptime
+            )
+        )
+    ]
+    host.rootView = BridgeMenuView(model: model)
+    host.view.layoutSubtreeIfNeeded()
+    let expandedMediaHeight = host.view.fittingSize.height
+    expect(expandedMediaHeight <= screenHeight, "Single device + Now Playing + Add Another Phone must fit within screen height (got \(expandedMediaHeight), screen \(screenHeight))")
+    model.showPairingSection = false
+
     // 3. BatteryRingView keeps identical layout dimensions across Charging / charge left / Battery unavailable
     let ringCharging = NSHostingController(rootView: BatteryRingView(level: 80, isCharging: true, isStale: false))
     let ringDischarging = NSHostingController(rootView: BatteryRingView(level: 80, isCharging: false, isStale: false))

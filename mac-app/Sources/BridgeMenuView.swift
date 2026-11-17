@@ -92,6 +92,10 @@ struct BatteryRingView: View {
     let isCharging: Bool
     let isStale: Bool
 
+    private let ringSize: CGFloat = 38
+    private let ringStroke: CGFloat = 3.8
+    private let badgeSize: CGFloat = 15
+
     private var hasValidLevel: Bool {
         level != nil && !isStale
     }
@@ -102,7 +106,7 @@ struct BatteryRingView: View {
 
     private var ringColor: Color {
         guard hasValidLevel else {
-            return BridgeColors.line2.opacity(0.65)
+            return BridgeColors.line2.opacity(0.75)
         }
         if isCharging {
             return BridgeColors.amber
@@ -110,25 +114,18 @@ struct BatteryRingView: View {
         return clampedLevel <= 15 ? BridgeColors.coral : BridgeColors.lime
     }
 
-    private var captionText: String {
-        guard hasValidLevel else {
-            return "Battery\nunavailable"
-        }
-        return isCharging ? "\(clampedLevel)%\nCharging" : "\(clampedLevel)%\ncharge left"
-    }
-
     var body: some View {
-        VStack(spacing: 4) {
+        ZStack(alignment: .center) {
             ZStack {
                 Circle()
-                    .stroke(BridgeColors.line2.opacity(0.65), lineWidth: 3.2)
+                    .stroke(BridgeColors.line2.opacity(0.75), lineWidth: ringStroke)
 
                 if hasValidLevel {
                     Circle()
                         .trim(from: 0, to: CGFloat(clampedLevel) / 100.0)
                         .stroke(
                             ringColor,
-                            style: StrokeStyle(lineWidth: 3.2, lineCap: .round)
+                            style: StrokeStyle(lineWidth: ringStroke, lineCap: .round)
                         )
                         .rotationEffect(.degrees(-90))
                         .animation(.easeInOut(duration: 0.25), value: clampedLevel)
@@ -137,29 +134,33 @@ struct BatteryRingView: View {
 
                 if !hasValidLevel {
                     Text("--")
-                        .font(.custom("DMMono-Medium", size: 11))
+                        .font(.custom("DMMono-Medium", size: 11.5))
                         .foregroundColor(BridgeColors.muted)
-                } else if isCharging {
-                    Image(systemName: "bolt.fill")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundColor(BridgeColors.amber)
                 } else {
                     Text("\(clampedLevel)")
-                        .font(.custom("DMMono-Bold", size: 11.5))
+                        .font(.custom("PlusJakartaSans-SemiBold", size: clampedLevel == 100 ? 11 : 12.5))
                         .foregroundColor(BridgeColors.text)
+                        .offset(y: isCharging ? 2.5 : 0)
                 }
             }
-            .frame(width: 34, height: 34)
+            .frame(width: ringSize, height: ringSize)
+            .offset(y: 3)
 
-            Text(captionText)
-                .font(.custom("PlusJakartaSans-Regular", size: 9.5))
-                .foregroundColor(BridgeColors.muted)
-                .multilineTextAlignment(.center)
-                .lineSpacing(1)
-                .lineLimit(2)
-                .frame(width: 62, height: 24, alignment: .top)
+            if hasValidLevel && isCharging {
+                ZStack {
+                    Circle()
+                        .fill(BridgeColors.amber)
+                    Image(systemName: "bolt.fill")
+                        .font(.system(size: 8.5, weight: .bold))
+                        .foregroundColor(.white)
+                }
+                .frame(width: badgeSize, height: badgeSize)
+                .offset(y: -(ringSize / 2) + 3)
+                .transition(.scale.combined(with: .opacity))
+            }
         }
-        .frame(width: 62)
+        .frame(width: 44, height: 48)
+        .animation(.easeInOut(duration: 0.2), value: isCharging)
     }
 }
 
@@ -1328,6 +1329,419 @@ struct BridgeMenuView: View {
     }
 
     @ViewBuilder
+    private func pairingCardView(isAddingAnotherPhone: Bool) -> some View {
+        let qrSize: CGFloat = isAddingAnotherPhone ? 148 : 176
+        VStack(spacing: isAddingAnotherPhone ? 10 : 12) {
+            Text(isAddingAnotherPhone ? "ADD ANOTHER PHONE" : "PAIR YOUR PHONE")
+                .font(.custom("DMMono-Regular", size: 11))
+                .foregroundColor(BridgeColors.muted)
+                .kerning(1.54)
+                .padding(.top, 2)
+
+            // Off-white QR tile
+            ZStack {
+                RoundedRectangle(cornerRadius: 18)
+                    .fill(BridgeColors.text)
+                    .frame(width: qrSize, height: qrSize)
+
+                if let qrImg = model.qrCodeImage {
+                    Image(nsImage: qrImg)
+                        .interpolation(.none)
+                        .resizable()
+                        .scaledToFit()
+                        .padding(isAddingAnotherPhone ? 10 : 12)
+                        .frame(width: qrSize, height: qrSize)
+                }
+            }
+
+            VStack(spacing: 3) {
+                Text("Open Bridge on your Android phone and scan this QR code to connect.")
+                    .font(.custom("PlusJakartaSans-Regular", size: 12.5))
+                    .foregroundColor(BridgeColors.soft)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 8)
+
+                if isAddingAnotherPhone {
+                    Text("Your existing phone will remain connected while pairing another phone.")
+                        .font(.custom("PlusJakartaSans-Regular", size: 11.5))
+                        .foregroundColor(BridgeColors.muted)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 10)
+                        .padding(.top, 1)
+                }
+            }
+
+            // Rule
+            Rectangle()
+                .fill(BridgeColors.line)
+                .frame(height: 1)
+                .padding(.horizontal, 4)
+
+            // 6-digit code area with PAIRING CODE label
+            VStack(spacing: 4) {
+                Text("PAIRING CODE")
+                    .font(.custom("DMMono-Regular", size: 10))
+                    .foregroundColor(BridgeColors.muted)
+                    .kerning(1.2)
+
+                HStack(spacing: 12) {
+                    Text(model.formattedCode)
+                        .font(.custom("DMMono-Medium", size: isAddingAnotherPhone ? 27 : 30))
+                        .foregroundColor(BridgeColors.lime)
+                        .kerning(1.8)
+
+                    Button(action: {
+                        model.copyPairingCode()
+                    }) {
+                        Text(model.copiedNotice ? "Copied" : "Copy")
+                            .font(.custom("PlusJakartaSans-Medium", size: 13.5))
+                            .foregroundColor(model.copiedNotice ? BridgeColors.ink : BridgeColors.text)
+                            .frame(minWidth: 80, minHeight: isAddingAnotherPhone ? 38 : 44)
+                            .background(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(model.copiedNotice ? BridgeColors.lime : Color.clear)
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(model.copiedNotice ? BridgeColors.lime : BridgeColors.line2, lineWidth: 1)
+                            )
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.bottom, 2)
+        }
+        .padding(isAddingAnotherPhone ? 15 : 18)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 22)
+                .fill(BridgeColors.panel)
+        )
+    }
+
+    @ViewBuilder
+    private var deviceCardsSection: some View {
+        VStack(spacing: 10) {
+            if !model.connectedDevicesList.isEmpty {
+                ForEach(model.connectedDevicesList) { device in
+                    VStack(spacing: 16) {
+                        HStack(spacing: 12) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(device.isConnected ? BridgeColors.lime : BridgeColors.line)
+                                    .frame(width: 40, height: 40)
+
+                                Image(systemName: "iphone")
+                                    .font(.system(size: 18, weight: .semibold))
+                                    .foregroundColor(device.isConnected ? BridgeColors.ink : BridgeColors.soft)
+                            }
+
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(formatDisplayDeviceName(device.name))
+                                    .font(.custom("PlusJakartaSans-Medium", size: 14))
+                                    .foregroundColor(BridgeColors.text)
+                                    .kerning(-0.15)
+                                    .lineLimit(1)
+                                    .fixedSize(horizontal: false, vertical: true)
+
+                                if device.isConnected {
+                                    Text("Connected · Same Wi-Fi")
+                                        .font(.custom("PlusJakartaSans-Regular", size: 11.5))
+                                        .foregroundColor(BridgeColors.muted)
+                                        .lineLimit(1)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                } else {
+                                    Text("Disconnected · Tap Connect on phone")
+                                        .font(.custom("PlusJakartaSans-Regular", size: 11.5))
+                                        .foregroundColor(BridgeColors.muted)
+                                        .lineLimit(1)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+
+                            Spacer(minLength: 8)
+
+                            BatteryRingView(
+                                level: device.batteryLevel,
+                                isCharging: device.isCharging,
+                                isStale: model.isBatteryStale(device)
+                            )
+                        }
+
+                        // 4-Tile Quick Panel: Sound (Normal -> Vibrate -> Silent), Do Not Disturb, Calls on Mac, Ring the Phone
+                        HStack(alignment: .top, spacing: 8) {
+                            // 1. Sound (Normal -> Vibrate -> Silent -> Normal)
+                            let soundFill: Color = {
+                                switch device.ringerMode {
+                                case .normal: return BridgeColors.activeTab
+                                case .vibrate: return BridgeColors.amber.opacity(0.16)
+                                case .silent: return BridgeColors.coral.opacity(0.12)
+                                }
+                            }()
+                            let soundBorder: Color = {
+                                switch device.ringerMode {
+                                case .normal: return BridgeColors.lime.opacity(0.35)
+                                case .vibrate: return BridgeColors.amber.opacity(0.45)
+                                case .silent: return BridgeColors.coral.opacity(0.42)
+                                }
+                            }()
+                            let soundIconColor: Color = {
+                                switch device.ringerMode {
+                                case .normal: return BridgeColors.lime
+                                case .vibrate: return BridgeColors.amber
+                                case .silent: return BridgeColors.coral
+                                }
+                            }()
+                            QuickControlTileButton(
+                                iconName: device.ringerMode.symbolName,
+                                label: device.ringerMode.displayName,
+                                fillColor: soundFill,
+                                borderColor: soundBorder,
+                                iconColor: soundIconColor,
+                                labelColor: BridgeColors.soft,
+                                helpText: "Android Sound Mode (Sound → Vibrate → Silent)",
+                                isPending: model.pendingRingerDeviceIds.contains(device.id)
+                            ) {
+                                model.cycleRingerMode(for: device)
+                            }
+
+                            // 2. Do Not Disturb (Android only)
+                            QuickControlTileButton(
+                                iconName: device.isDndEnabled ? "moon.fill" : "minus.circle",
+                                label: "Do Not\nDisturb",
+                                fillColor: device.isDndEnabled ? BridgeColors.activeTab : BridgeColors.bg.opacity(0.75),
+                                borderColor: device.isDndEnabled ? BridgeColors.lime.opacity(0.35) : BridgeColors.line2,
+                                iconColor: device.isDndEnabled ? BridgeColors.lime : BridgeColors.soft,
+                                labelColor: device.isDndEnabled ? BridgeColors.text : BridgeColors.soft,
+                                helpText: device.isDndEnabled ? "Turn off Android Do Not Disturb on \(device.name)" : "Turn on Android Do Not Disturb on \(device.name)",
+                                isPending: model.pendingDndDeviceIds.contains(device.id)
+                            ) {
+                                model.toggleDnd(for: device)
+                            }
+
+                            // 3. Calls on Mac
+                            let callOnMacEnabled = model.isGetCallOnMacEnabled(for: device)
+                            QuickControlTileButton(
+                                iconName: callOnMacEnabled ? "phone.fill" : "phone",
+                                label: "Calls\non Mac",
+                                fillColor: callOnMacEnabled ? BridgeColors.activeTab : BridgeColors.bg.opacity(0.75),
+                                borderColor: callOnMacEnabled ? BridgeColors.lime.opacity(0.35) : BridgeColors.line2,
+                                iconColor: callOnMacEnabled ? BridgeColors.lime : BridgeColors.soft,
+                                labelColor: callOnMacEnabled ? BridgeColors.text : BridgeColors.soft,
+                                helpText: callOnMacEnabled ? "Incoming call mirroring is on for \(device.name)" : "Mirror incoming phone calls to this Mac"
+                            ) {
+                                model.toggleGetCallOnMac(for: device)
+                            }
+
+                            // 4. Ring the Phone (temporary Find My Phone action)
+                            QuickControlTileButton(
+                                iconName: device.isRingingPhone ? "bell.and.waves.left.and.right.fill" : "bell.fill",
+                                label: device.isRingingPhone ? "Stop\nRinging" : "Ring the\nPhone",
+                                fillColor: device.isRingingPhone ? BridgeColors.coral.opacity(0.16) : BridgeColors.bg.opacity(0.75),
+                                borderColor: device.isRingingPhone ? BridgeColors.coral.opacity(0.55) : BridgeColors.line2,
+                                iconColor: device.isRingingPhone ? BridgeColors.coral : BridgeColors.soft,
+                                labelColor: device.isRingingPhone ? BridgeColors.coral : BridgeColors.soft,
+                                helpText: device.isRingingPhone ? "Stop ringing \(device.name)" : "Ring \(device.name) until stopped",
+                                isPending: model.pendingRingDeviceIds.contains(device.id)
+                            ) {
+                                model.toggleRingPhone(for: device)
+                            }
+                        }
+
+                        if let errHint = model.controlErrorHints[device.id] {
+                            HStack(spacing: 6) {
+                                Circle()
+                                    .fill(BridgeColors.coral)
+                                    .frame(width: 6, height: 6)
+                                Text(errHint)
+                                    .font(.custom("PlusJakartaSans-Regular", size: 11))
+                                    .foregroundColor(BridgeColors.coral)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        } else if model.dndHintDeviceIds.contains(device.id) && !device.hasDndPermission {
+                            HStack(spacing: 6) {
+                                Circle()
+                                    .fill(BridgeColors.coral)
+                                    .frame(width: 6, height: 6)
+                                Text("Grant Do Not Disturb access in Bridge on \(device.name).")
+                                    .font(.custom("PlusJakartaSans-Regular", size: 11))
+                                    .foregroundColor(BridgeColors.coral)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+
+                        if let media = device.mediaInfo, media.isActive {
+                            NowPlayingCardView(device: device, media: media, model: model)
+                        }
+
+                        Divider().background(BridgeColors.line.opacity(0.6))
+
+                        HStack(spacing: 8) {
+                            Button(action: {
+                                model.disconnect(deviceId: device.id)
+                            }) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: "power")
+                                        .font(.system(size: 11.5, weight: .semibold))
+                                    Text("Disconnect")
+                                        .font(.custom("PlusJakartaSans-Medium", size: 12.5))
+                                }
+                                .foregroundColor(BridgeColors.soft)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 34)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .fill(BridgeColors.bg.opacity(0.7))
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .stroke(BridgeColors.line2, lineWidth: 1)
+                                )
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .help("Disconnect \(device.name) without unpairing")
+
+                            Button(action: {
+                                model.deviceToUnpair = device
+                                model.showUnpairConfirmation = true
+                            }) {
+                                HStack(spacing: 6) {
+                                    UnlinkIconShape()
+                                        .stroke(
+                                            BridgeColors.coral,
+                                            style: StrokeStyle(lineWidth: 1.7, lineCap: .round, lineJoin: .round)
+                                        )
+                                        .frame(width: 12.5, height: 12.5)
+                                    Text("Unpair")
+                                        .font(.custom("PlusJakartaSans-Medium", size: 12.5))
+                                }
+                                .foregroundColor(BridgeColors.coral)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 34)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .fill(BridgeColors.coral.opacity(0.08))
+                                )
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .stroke(BridgeColors.coral.opacity(0.38), lineWidth: 1)
+                                )
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .help("Unpair \(device.name)")
+                        }
+                    }
+                    .padding(.horizontal, 15)
+                    .padding(.vertical, 16)
+                    .frame(maxWidth: .infinity)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .background(
+                        RoundedRectangle(cornerRadius: 18)
+                            .fill(BridgeColors.panel)
+                    )
+                }
+            } else {
+                HStack(spacing: 12) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(model.isConnected ? BridgeColors.lime : BridgeColors.line)
+                            .frame(width: 40, height: 40)
+
+                        Image(systemName: "iphone")
+                            .font(.system(size: 18, weight: .semibold))
+                            .foregroundColor(model.isConnected ? BridgeColors.ink : BridgeColors.soft)
+                    }
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(formatDisplayDeviceName(model.connectedDevice ?? model.pairedDevice ?? "Phone"))
+                            .font(.custom("PlusJakartaSans-Medium", size: 14))
+                            .foregroundColor(BridgeColors.text)
+                            .kerning(-0.15)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: false, vertical: true)
+
+                        Text(model.isConnected ? "Connected · Same Wi-Fi" : "Disconnected · Tap Connect in Bridge on your phone")
+                            .font(.custom("PlusJakartaSans-Regular", size: 11.5))
+                            .foregroundColor(BridgeColors.muted)
+                            .lineLimit(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .layoutPriority(1)
+
+                    Spacer(minLength: 6)
+
+                    Button(action: {
+                        model.deviceToUnpair = nil
+                        model.showUnpairConfirmation = true
+                    }) {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(BridgeColors.coral.opacity(0.08))
+                                .frame(width: 34, height: 34)
+
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(BridgeColors.coral.opacity(0.38), lineWidth: 1)
+                                .frame(width: 34, height: 34)
+
+                            UnlinkIconShape()
+                                .stroke(
+                                    BridgeColors.coral,
+                                    style: StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round)
+                                )
+                                .frame(width: 15, height: 15)
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Unpair this phone")
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 13)
+                .frame(maxWidth: .infinity)
+                .fixedSize(horizontal: false, vertical: true)
+                .background(
+                    RoundedRectangle(cornerRadius: 18)
+                        .fill(BridgeColors.panel)
+                )
+            }
+        }
+    }
+
+    private var addAnotherPhoneButton: some View {
+        Button(action: {
+            model.showPairingSection.toggle()
+        }) {
+            HStack(spacing: 6) {
+                Image(systemName: model.showPairingSection ? "chevron.up" : "plus.circle.fill")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(BridgeColors.lime)
+
+                Text(model.showPairingSection ? "Hide pairing code" : "Add another phone")
+                    .font(.custom("PlusJakartaSans-Medium", size: 13))
+                    .foregroundColor(BridgeColors.soft)
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 36)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(BridgeColors.panel)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(BridgeColors.line, lineWidth: 1)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    @ViewBuilder
     private var settingsSectionsView: some View {
         VStack(alignment: .leading, spacing: 14) {
             // Section 1: Synced Settings
@@ -1987,322 +2401,28 @@ struct BridgeMenuView: View {
                             RoundedRectangle(cornerRadius: 14)
                                 .stroke(BridgeColors.coral.opacity(0.4), lineWidth: 1)
                         )
-                    } else {
+                    } else if model.showPairingSection {
                         VStack(spacing: 10) {
-                            if !model.connectedDevicesList.isEmpty {
-                                ForEach(model.connectedDevicesList) { device in
-                                    VStack(spacing: 16) {
-                                        HStack(spacing: 12) {
-                                            ZStack {
-                                                RoundedRectangle(cornerRadius: 12)
-                                                    .fill(device.isConnected ? BridgeColors.lime : BridgeColors.line)
-                                                    .frame(width: 40, height: 40)
+                            addAnotherPhoneButton
+                            pairingCardView(isAddingAnotherPhone: true)
+                        }
+                    } else {
+                        let hasManyDevices = model.connectedDevicesList.count > 1
+                        let screenHeight = NSScreen.main?.visibleFrame.height ?? 860
+                        let deviceScrollHeight = max(280, min(460, floor(screenHeight - 280)))
 
-                                                Image(systemName: "iphone")
-                                                    .font(.system(size: 18, weight: .semibold))
-                                                    .foregroundColor(device.isConnected ? BridgeColors.ink : BridgeColors.soft)
-                                            }
-
-                                            VStack(alignment: .leading, spacing: 2) {
-                                                Text(device.name)
-                                                    .font(.custom("PlusJakartaSans-Medium", size: 14))
-                                                    .foregroundColor(BridgeColors.text)
-                                                    .kerning(-0.15)
-                                                    .lineLimit(1)
-                                                    .fixedSize(horizontal: false, vertical: true)
-
-                                                if device.isConnected {
-                                                    Text("Connected · Same Wi-Fi")
-                                                        .font(.custom("PlusJakartaSans-Regular", size: 11.5))
-                                                        .foregroundColor(BridgeColors.muted)
-                                                        .lineLimit(1)
-                                                        .fixedSize(horizontal: false, vertical: true)
-                                                } else {
-                                                    Text("Disconnected · Tap Connect on phone")
-                                                        .font(.custom("PlusJakartaSans-Regular", size: 11.5))
-                                                        .foregroundColor(BridgeColors.muted)
-                                                        .lineLimit(1)
-                                                        .fixedSize(horizontal: false, vertical: true)
-                                                }
-                                            }
-
-                                            Spacer(minLength: 8)
-
-                                            BatteryRingView(
-                                                level: device.batteryLevel,
-                                                isCharging: device.isCharging,
-                                                isStale: model.isBatteryStale(device)
-                                            )
-                                        }
-
-                                        // 4-Tile Quick Panel: Sound (Normal -> Vibrate -> Silent), Do Not Disturb, Calls on Mac, Ring the Phone
-                                        HStack(alignment: .top, spacing: 8) {
-                                            // 1. Sound (Normal -> Vibrate -> Silent -> Normal)
-                                            let soundFill: Color = {
-                                                switch device.ringerMode {
-                                                case .normal: return BridgeColors.activeTab
-                                                case .vibrate: return BridgeColors.amber.opacity(0.16)
-                                                case .silent: return BridgeColors.coral.opacity(0.12)
-                                                }
-                                            }()
-                                            let soundBorder: Color = {
-                                                switch device.ringerMode {
-                                                case .normal: return BridgeColors.lime.opacity(0.35)
-                                                case .vibrate: return BridgeColors.amber.opacity(0.45)
-                                                case .silent: return BridgeColors.coral.opacity(0.42)
-                                                }
-                                            }()
-                                            let soundIconColor: Color = {
-                                                switch device.ringerMode {
-                                                case .normal: return BridgeColors.lime
-                                                case .vibrate: return BridgeColors.amber
-                                                case .silent: return BridgeColors.coral
-                                                }
-                                            }()
-                                            QuickControlTileButton(
-                                                iconName: device.ringerMode.symbolName,
-                                                label: device.ringerMode.displayName,
-                                                fillColor: soundFill,
-                                                borderColor: soundBorder,
-                                                iconColor: soundIconColor,
-                                                labelColor: BridgeColors.soft,
-                                                helpText: "Android Sound Mode (Sound → Vibrate → Silent)",
-                                                isPending: model.pendingRingerDeviceIds.contains(device.id)
-                                            ) {
-                                                model.cycleRingerMode(for: device)
-                                            }
-
-                                            // 2. Do Not Disturb (Android only)
-                                            QuickControlTileButton(
-                                                iconName: device.isDndEnabled ? "moon.fill" : "minus.circle",
-                                                label: "Do Not\nDisturb",
-                                                fillColor: device.isDndEnabled ? BridgeColors.activeTab : BridgeColors.bg.opacity(0.75),
-                                                borderColor: device.isDndEnabled ? BridgeColors.lime.opacity(0.35) : BridgeColors.line2,
-                                                iconColor: device.isDndEnabled ? BridgeColors.lime : BridgeColors.soft,
-                                                labelColor: device.isDndEnabled ? BridgeColors.text : BridgeColors.soft,
-                                                helpText: device.isDndEnabled ? "Turn off Android Do Not Disturb on \(device.name)" : "Turn on Android Do Not Disturb on \(device.name)",
-                                                isPending: model.pendingDndDeviceIds.contains(device.id)
-                                            ) {
-                                                model.toggleDnd(for: device)
-                                            }
-
-                                            // 3. Calls on Mac
-                                            let callOnMacEnabled = model.isGetCallOnMacEnabled(for: device)
-                                            QuickControlTileButton(
-                                                iconName: callOnMacEnabled ? "phone.fill" : "phone",
-                                                label: "Calls\non Mac",
-                                                fillColor: callOnMacEnabled ? BridgeColors.activeTab : BridgeColors.bg.opacity(0.75),
-                                                borderColor: callOnMacEnabled ? BridgeColors.lime.opacity(0.35) : BridgeColors.line2,
-                                                iconColor: callOnMacEnabled ? BridgeColors.lime : BridgeColors.soft,
-                                                labelColor: callOnMacEnabled ? BridgeColors.text : BridgeColors.soft,
-                                                helpText: callOnMacEnabled ? "Incoming call mirroring is on for \(device.name)" : "Mirror incoming phone calls to this Mac"
-                                            ) {
-                                                model.toggleGetCallOnMac(for: device)
-                                            }
-
-                                            // 4. Ring the Phone (temporary Find My Phone action)
-                                            QuickControlTileButton(
-                                                iconName: device.isRingingPhone ? "bell.and.waves.left.and.right.fill" : "bell.fill",
-                                                label: device.isRingingPhone ? "Stop\nRinging" : "Ring the\nPhone",
-                                                fillColor: device.isRingingPhone ? BridgeColors.coral.opacity(0.16) : BridgeColors.bg.opacity(0.75),
-                                                borderColor: device.isRingingPhone ? BridgeColors.coral.opacity(0.55) : BridgeColors.line2,
-                                                iconColor: device.isRingingPhone ? BridgeColors.coral : BridgeColors.soft,
-                                                labelColor: device.isRingingPhone ? BridgeColors.coral : BridgeColors.soft,
-                                                helpText: device.isRingingPhone ? "Stop ringing \(device.name)" : "Ring \(device.name) until stopped",
-                                                isPending: model.pendingRingDeviceIds.contains(device.id)
-                                            ) {
-                                                model.toggleRingPhone(for: device)
-                                            }
-                                        }
-
-                                        if let errHint = model.controlErrorHints[device.id] {
-                                            HStack(spacing: 6) {
-                                                Circle()
-                                                    .fill(BridgeColors.coral)
-                                                    .frame(width: 6, height: 6)
-                                                Text(errHint)
-                                                    .font(.custom("PlusJakartaSans-Regular", size: 11))
-                                                    .foregroundColor(BridgeColors.coral)
-                                                    .fixedSize(horizontal: false, vertical: true)
-                                            }
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                        } else if model.dndHintDeviceIds.contains(device.id) && !device.hasDndPermission {
-                                            HStack(spacing: 6) {
-                                                Circle()
-                                                    .fill(BridgeColors.coral)
-                                                    .frame(width: 6, height: 6)
-                                                Text("Grant Do Not Disturb access in Bridge on \(device.name).")
-                                                    .font(.custom("PlusJakartaSans-Regular", size: 11))
-                                                    .foregroundColor(BridgeColors.coral)
-                                                    .fixedSize(horizontal: false, vertical: true)
-                                            }
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                        }
-
-                                        if let media = device.mediaInfo, media.isActive {
-                                            NowPlayingCardView(device: device, media: media, model: model)
-                                        }
-
-                                        Divider().background(BridgeColors.line.opacity(0.6))
-
-                                        HStack(spacing: 8) {
-                                            Button(action: {
-                                                model.disconnect(deviceId: device.id)
-                                            }) {
-                                                HStack(spacing: 6) {
-                                                    Image(systemName: "power")
-                                                        .font(.system(size: 11.5, weight: .semibold))
-                                                    Text("Disconnect")
-                                                        .font(.custom("PlusJakartaSans-Medium", size: 12.5))
-                                                }
-                                                .foregroundColor(BridgeColors.soft)
-                                                .frame(maxWidth: .infinity)
-                                                .frame(height: 34)
-                                                .background(
-                                                    RoundedRectangle(cornerRadius: 10)
-                                                        .fill(BridgeColors.bg.opacity(0.7))
-                                                )
-                                                .overlay(
-                                                    RoundedRectangle(cornerRadius: 10)
-                                                        .stroke(BridgeColors.line2, lineWidth: 1)
-                                                )
-                                                .contentShape(Rectangle())
-                                            }
-                                            .buttonStyle(.plain)
-                                            .help("Disconnect \(device.name) without unpairing")
-
-                                            Button(action: {
-                                                model.deviceToUnpair = device
-                                                model.showUnpairConfirmation = true
-                                            }) {
-                                                HStack(spacing: 6) {
-                                                    UnlinkIconShape()
-                                                        .stroke(
-                                                            BridgeColors.coral,
-                                                            style: StrokeStyle(lineWidth: 1.7, lineCap: .round, lineJoin: .round)
-                                                        )
-                                                        .frame(width: 12.5, height: 12.5)
-                                                    Text("Unpair")
-                                                        .font(.custom("PlusJakartaSans-Medium", size: 12.5))
-                                                }
-                                                .foregroundColor(BridgeColors.coral)
-                                                .frame(maxWidth: .infinity)
-                                                .frame(height: 34)
-                                                .background(
-                                                    RoundedRectangle(cornerRadius: 10)
-                                                        .fill(BridgeColors.coral.opacity(0.08))
-                                                )
-                                                .overlay(
-                                                    RoundedRectangle(cornerRadius: 10)
-                                                        .stroke(BridgeColors.coral.opacity(0.38), lineWidth: 1)
-                                                )
-                                                .contentShape(Rectangle())
-                                            }
-                                            .buttonStyle(.plain)
-                                            .help("Unpair \(device.name)")
-                                        }
-                                    }
-                                    .padding(.horizontal, 15)
-                                    .padding(.vertical, 16)
-                                    .frame(maxWidth: .infinity)
-                                    .fixedSize(horizontal: false, vertical: true)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 18)
-                                            .fill(BridgeColors.panel)
-                                    )
+                        VStack(spacing: 10) {
+                            if hasManyDevices {
+                                ScrollView(.vertical, showsIndicators: true) {
+                                    deviceCardsSection
+                                        .padding(.trailing, 2)
                                 }
+                                .frame(height: deviceScrollHeight)
                             } else {
-                                HStack(spacing: 12) {
-                                    ZStack {
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .fill(model.isConnected ? BridgeColors.lime : BridgeColors.line)
-                                            .frame(width: 40, height: 40)
-
-                                        Image(systemName: "iphone")
-                                            .font(.system(size: 18, weight: .semibold))
-                                            .foregroundColor(model.isConnected ? BridgeColors.ink : BridgeColors.soft)
-                                    }
-
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(formatDisplayDeviceName(model.connectedDevice ?? model.pairedDevice ?? "Phone"))
-                                            .font(.custom("PlusJakartaSans-Medium", size: 14))
-                                            .foregroundColor(BridgeColors.text)
-                                            .kerning(-0.15)
-                                            .lineLimit(1)
-                                            .fixedSize(horizontal: false, vertical: true)
-
-                                        Text(model.isConnected ? "Connected · Same Wi-Fi" : "Disconnected · Tap Connect in Bridge on your phone")
-                                            .font(.custom("PlusJakartaSans-Regular", size: 11.5))
-                                            .foregroundColor(BridgeColors.muted)
-                                            .lineLimit(2)
-                                            .fixedSize(horizontal: false, vertical: true)
-                                    }
-                                    .layoutPriority(1)
-
-                                    Spacer(minLength: 6)
-
-                                    Button(action: {
-                                        model.deviceToUnpair = nil
-                                        model.showUnpairConfirmation = true
-                                    }) {
-                                        ZStack {
-                                            RoundedRectangle(cornerRadius: 10)
-                                                .fill(BridgeColors.coral.opacity(0.08))
-                                                .frame(width: 34, height: 34)
-
-                                            RoundedRectangle(cornerRadius: 10)
-                                                .stroke(BridgeColors.coral.opacity(0.38), lineWidth: 1)
-                                                .frame(width: 34, height: 34)
-
-                                            UnlinkIconShape()
-                                                .stroke(
-                                                    BridgeColors.coral,
-                                                    style: StrokeStyle(lineWidth: 1.8, lineCap: .round, lineJoin: .round)
-                                                )
-                                                .frame(width: 15, height: 15)
-                                        }
-                                        .contentShape(Rectangle())
-                                    }
-                                    .buttonStyle(.plain)
-                                    .help("Unpair this phone")
-                                }
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 13)
-                                .frame(maxWidth: .infinity)
-                                .fixedSize(horizontal: false, vertical: true)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 18)
-                                        .fill(BridgeColors.panel)
-                                )
+                                deviceCardsSection
                             }
 
-                            // Toggle Button to add another phone
-                            Button(action: {
-                                model.showPairingSection.toggle()
-                            }) {
-                                HStack(spacing: 6) {
-                                    Image(systemName: model.showPairingSection ? "chevron.up" : "plus.circle.fill")
-                                        .font(.system(size: 13, weight: .medium))
-                                        .foregroundColor(BridgeColors.lime)
-
-                                    Text(model.showPairingSection ? "Hide pairing code" : "Add another phone")
-                                        .font(.custom("PlusJakartaSans-Medium", size: 13))
-                                        .foregroundColor(BridgeColors.soft)
-                                }
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 36)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .fill(BridgeColors.panel)
-                                )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .stroke(BridgeColors.line, lineWidth: 1)
-                                )
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .fixedSize(horizontal: false, vertical: true)
+                            addAnotherPhoneButton
                         }
                     }
                 }
@@ -2636,96 +2756,9 @@ struct BridgeMenuView: View {
                 }
             }
 
-            // Pairing Card (Visible when NOT paired/connected, OR when user clicks "Add another phone" on Devices tab)
-            if !isPairedOrConnected || (!model.showUnpairConfirmation && model.selectedTab == .devices && model.showPairingSection) {
-                let qrSize: CGFloat = isPairedOrConnected ? 152 : 176
-                VStack(spacing: isPairedOrConnected ? 10 : 12) {
-                    Text(isPairedOrConnected ? "ADD ANOTHER PHONE" : "PAIR YOUR PHONE")
-                        .font(.custom("DMMono-Regular", size: 11))
-                        .foregroundColor(BridgeColors.muted)
-                        .kerning(1.54)
-                        .padding(.top, 2)
-
-                    // Off-white QR tile
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 18)
-                            .fill(BridgeColors.text)
-                            .frame(width: qrSize, height: qrSize)
-
-                        if let qrImg = model.qrCodeImage {
-                            Image(nsImage: qrImg)
-                                .interpolation(.none)
-                                .resizable()
-                                .scaledToFit()
-                                .padding(isPairedOrConnected ? 10 : 12)
-                                .frame(width: qrSize, height: qrSize)
-                        }
-                    }
-
-                    VStack(spacing: 3) {
-                        Text("Open Bridge on your Android phone and scan this QR code to connect.")
-                            .font(.custom("PlusJakartaSans-Regular", size: 12.5))
-                            .foregroundColor(BridgeColors.soft)
-                            .multilineTextAlignment(.center)
-                            .padding(.horizontal, 8)
-
-                        if isPairedOrConnected {
-                            Text("Your existing phone will remain connected while pairing another phone.")
-                                .font(.custom("PlusJakartaSans-Regular", size: 11.5))
-                                .foregroundColor(BridgeColors.muted)
-                                .multilineTextAlignment(.center)
-                                .padding(.horizontal, 10)
-                                .padding(.top, 1)
-                        }
-                    }
-
-                    // Rule
-                    Rectangle()
-                        .fill(BridgeColors.line)
-                        .frame(height: 1)
-                        .padding(.horizontal, 4)
-
-                    // 6-digit code area with PAIRING CODE label
-                    VStack(spacing: 4) {
-                        Text("PAIRING CODE")
-                            .font(.custom("DMMono-Regular", size: 10))
-                            .foregroundColor(BridgeColors.muted)
-                            .kerning(1.2)
-
-                        HStack(spacing: 12) {
-                            Text(model.formattedCode)
-                                .font(.custom("DMMono-Medium", size: isPairedOrConnected ? 27 : 30))
-                                .foregroundColor(BridgeColors.lime)
-                                .kerning(1.8)
-
-                            Button(action: {
-                                model.copyPairingCode()
-                            }) {
-                                Text(model.copiedNotice ? "Copied" : "Copy")
-                                    .font(.custom("PlusJakartaSans-Medium", size: 13.5))
-                                    .foregroundColor(model.copiedNotice ? BridgeColors.ink : BridgeColors.text)
-                                    .frame(minWidth: 80, minHeight: isPairedOrConnected ? 38 : 44)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .fill(model.copiedNotice ? BridgeColors.lime : Color.clear)
-                                    )
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 12)
-                                            .stroke(model.copiedNotice ? BridgeColors.lime : BridgeColors.line2, lineWidth: 1)
-                                    )
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(.bottom, 2)
-                }
-                .padding(isPairedOrConnected ? 15 : 18)
-                .frame(maxWidth: .infinity)
-                .background(
-                    RoundedRectangle(cornerRadius: 22)
-                        .fill(BridgeColors.panel)
-                )
+            // Pairing Card when NOT paired/connected (Adding another phone renders inside the scrollable Devices tab)
+            if !isPairedOrConnected {
+                pairingCardView(isAddingAnotherPhone: false)
             }
 
             // Footer Bar

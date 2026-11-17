@@ -548,30 +548,12 @@
                                 android:textSize="12sp" />
                         </LinearLayout>
 
-                        <LinearLayout
-                            android:id="@+id/layoutMacBatteryColumn"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
+                        <com.link.clipboardsync.MacBatteryRingView
+                            android:id="@+id/macBatteryRing"
+                            android:layout_width="44dp"
+                            android:layout_height="48dp"
                             android:layout_marginStart="12dp"
-                            android:gravity="center_horizontal"
-                            android:orientation="vertical"
-                            android:visibility="gone">
-
-                            <com.link.clipboardsync.MacBatteryRingView
-                                android:id="@+id/macBatteryRing"
-                                android:layout_width="42dp"
-                                android:layout_height="42dp" />
-
-                            <TextView
-                                android:id="@+id/tvMacBatteryStatus"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:layout_marginTop="5dp"
-                                android:gravity="center"
-                                android:textColor="@color/bridge_muted"
-                                android:fontFamily="@font/plus_jakarta_sans_regular"
-                                android:textSize="11sp" />
-                        </LinearLayout>
+                            android:visibility="gone" />
                     </LinearLayout>
 
                     <!-- Quick Controls inside the SAME Your Mac section -->
