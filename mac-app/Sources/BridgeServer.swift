@@ -1090,6 +1090,12 @@ class BridgeServer {
         BridgeFileTransferManager.shared.sendControlMessage = { [weak self] jsonString, targetDeviceId in
             self?.sendRawJson(jsonString, toDeviceId: targetDeviceId)
         }
+        PhoneMirrorManager.shared.sendMirrorControl = { [weak self] payload, targetDeviceId in
+            self?.sendMirrorControl(payload, toDeviceId: targetDeviceId)
+        }
+        PhoneMirrorManager.shared.sendMirrorInput = { [weak self] payload, targetDeviceId in
+            self?.sendMirrorInput(payload, toDeviceId: targetDeviceId)
+        }
     }
     
     private func loadOrGeneratePairingCode() {
@@ -1344,6 +1350,7 @@ class BridgeServer {
         connectionCreatedAt.removeValue(forKey: id)
         connectionRemoteIp.removeValue(forKey: id)
         if wasAuthenticated {
+            PhoneMirrorManager.shared.handleDeviceDisconnected(deviceId: id)
             notifyUiStatus()
             DispatchQueue.main.async { [weak self] in
                 self?.onDeviceDisconnected?(id)
@@ -1617,6 +1624,12 @@ class BridgeServer {
             return
         }
 
+        if type == "mirror_control" {
+            let devName = self.clientDeviceNames[id] ?? "Android Device"
+            PhoneMirrorManager.shared.handleControlMessage(jsonObject, fromDeviceId: id, deviceName: formatDisplayDeviceName(devName))
+            return
+        }
+
         if type == "ping" {
             self.refreshBatteryKeepalive(for: id)
             let pong = ClipboardPayload(type: "pong")
@@ -1743,6 +1756,26 @@ class BridgeServer {
     func sendDeviceControl(_ payload: [String: Any], toDeviceId id: UUID) {
         var enriched = payload
         enriched["type"] = "device_control"
+        guard let data = try? JSONSerialization.data(withJSONObject: enriched),
+              let jsonString = String(data: data, encoding: .utf8) else {
+            return
+        }
+        sendRawJson(jsonString, toDeviceId: id)
+    }
+
+    func sendMirrorControl(_ payload: [String: Any], toDeviceId id: UUID) {
+        var enriched = payload
+        enriched["type"] = "mirror_control"
+        guard let data = try? JSONSerialization.data(withJSONObject: enriched),
+              let jsonString = String(data: data, encoding: .utf8) else {
+            return
+        }
+        sendRawJson(jsonString, toDeviceId: id)
+    }
+
+    func sendMirrorInput(_ payload: [String: Any], toDeviceId id: UUID) {
+        var enriched = payload
+        enriched["type"] = "mirror_input"
         guard let data = try? JSONSerialization.data(withJSONObject: enriched),
               let jsonString = String(data: data, encoding: .utf8) else {
             return
@@ -2058,6 +2091,9 @@ class BridgeServer {
     }
     
     private func closeAllConnections() {
+        for id in Array(authenticatedConnections) {
+            PhoneMirrorManager.shared.handleDeviceDisconnected(deviceId: id)
+        }
         for (_, conn) in connections { conn.cancel() }
         connections.removeAll()
         authenticatedConnections.removeAll()

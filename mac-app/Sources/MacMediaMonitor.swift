@@ -532,7 +532,6 @@ final class MacMediaMonitor {
     private var lastActiveBundleId: String?
     private var lastBrowserVideoId: String?
     private var lastBrowserMediaSnapshot: MacMediaSnapshot?
-    private var lastGenericAudioActiveAt: Date?
 
     private var isUniversalStreamActive = false
     private var hasReceivedUniversalEvent = false
@@ -579,7 +578,6 @@ final class MacMediaMonitor {
             self.lastSentArtworkHash = nil
             self.lastBrowserVideoId = nil
             self.lastBrowserMediaSnapshot = nil
-            self.lastGenericAudioActiveAt = nil
             self.cachedUniversalArtwork = nil
         }
     }
@@ -677,16 +675,16 @@ final class MacMediaMonitor {
                     )
                 }
 
-                if !handled {
+                if !handled && self.lastSnapshot.isActive {
                     switch action {
                     case "play_pause":
                         self.backend.sendMediaKey(keyType: Int32(NX_KEYTYPE_PLAY))
                     case "play":
-                        if !self.lastSnapshot.isActive || !self.lastSnapshot.isPlaying {
+                        if !self.lastSnapshot.isPlaying {
                             self.backend.sendMediaKey(keyType: Int32(NX_KEYTYPE_PLAY))
                         }
                     case "pause":
-                        if self.lastSnapshot.isActive && self.lastSnapshot.isPlaying {
+                        if self.lastSnapshot.isPlaying {
                             self.backend.sendMediaKey(keyType: Int32(NX_KEYTYPE_PLAY))
                         }
                     case "next":
@@ -832,11 +830,13 @@ final class MacMediaMonitor {
 
     private func captureCurrentSnapshot() -> MacMediaSnapshot {
         if hasReceivedUniversalEvent, let payload = latestUniversalPayload {
-            lastActiveBundleId = payload.bundleIdentifier
-            lastBrowserVideoId = nil
-            lastBrowserMediaSnapshot = nil
-            lastGenericAudioActiveAt = nil
-            return snapshot(from: payload)
+            let universalSnap = snapshot(from: payload)
+            if universalSnap.isActive {
+                lastActiveBundleId = payload.bundleIdentifier
+                lastBrowserVideoId = nil
+                lastBrowserMediaSnapshot = nil
+                return universalSnap
+            }
         }
 
         let running = backend.runningPlayerBundleIds()
@@ -860,7 +860,6 @@ final class MacMediaMonitor {
                     lastActiveBundleId = bundleId
                     lastBrowserVideoId = nil
                     lastBrowserMediaSnapshot = nil
-                    lastGenericAudioActiveAt = nil
                     return snap
                 } else if pausedCandidate == nil {
                     pausedCandidate = snap
@@ -870,30 +869,7 @@ final class MacMediaMonitor {
 
         // Check running web browsers for YouTube / YouTube Music playback & video thumbnails.
         if let browserMedia = captureBrowserYouTubeSnapshot(running: running, audioActive: audioActive) {
-            lastGenericAudioActiveAt = nil
             return browserMedia
-        }
-
-        // If another Mac app (without scriptable metadata) is playing audio (or was playing and just paused),
-        // keep a controllable Mac audio session visible in both playing & paused states.
-        if audioActive {
-            lastActiveBundleId = ""
-            lastGenericAudioActiveAt = Date()
-            return MacMediaSnapshot(
-                isActive: true,
-                isPlaying: true,
-                title: "Audio playing on Mac",
-                artist: "",
-                album: "",
-                appName: "Mac Audio",
-                bundleId: "",
-                durationMs: 0,
-                positionMs: 0,
-                playbackSpeed: 1.0,
-                canSeek: false,
-                canSkipNext: true,
-                canSkipPrevious: true
-            )
         }
 
         if let pausedCandidate {
@@ -901,30 +877,15 @@ final class MacMediaMonitor {
             return pausedCandidate
         }
 
-        if let lastGeneric = lastGenericAudioActiveAt, Date().timeIntervalSince(lastGeneric) < 300 {
-            lastActiveBundleId = ""
-            return MacMediaSnapshot(
-                isActive: true,
-                isPlaying: false,
-                title: "Audio paused on Mac",
-                artist: "",
-                album: "",
-                appName: "Mac Audio",
-                bundleId: "",
-                durationMs: 0,
-                positionMs: 0,
-                playbackSpeed: 0.0,
-                canSeek: false,
-                canSkipNext: true,
-                canSkipPrevious: true
-            )
-        }
-
         lastActiveBundleId = nil
         return MacMediaSnapshot(isActive: false, isPlaying: false)
     }
 
     private func snapshot(from payload: MediaControlPayload) -> MacMediaSnapshot {
+        let trimmedTitle = payload.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedTitle.isEmpty else {
+            return MacMediaSnapshot(isActive: false, isPlaying: false)
+        }
         let durationMs = max(0, Int64((payload.durationSeconds * 1000.0).rounded()))
         let positionMs = payload.estimatedPositionMs()
         let appName = resolveAppName(for: payload.bundleIdentifier)
@@ -1044,10 +1005,9 @@ final class MacMediaMonitor {
             ?? ytTabs.first(where: { $0.isYtMusic })
             ?? ytTabs.first!
 
-        // Show browser YouTube whenever audio is actively playing, the previously-playing video is now paused,
-        // OR the frontmost active browser tab itself is a YouTube video (even if paused).
+        // Show browser YouTube only when audio is playing or the previously-playing video is paused.
         let matchesPaused = (chosen.videoId == lastBrowserVideoId)
-        guard audioActive || matchesPaused || chosen.tab.isActiveTab else {
+        guard audioActive || matchesPaused else {
             lastBrowserVideoId = nil
             lastBrowserMediaSnapshot = nil
             return nil

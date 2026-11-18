@@ -19,7 +19,7 @@ MACOS_MIN ?= 13.0
 ARCH ?= $(shell uname -m)
 SWIFT_TARGET = -target $(ARCH)-apple-macosx$(MACOS_MIN)
 
-SWIFT_SOURCES = Sources/main.swift Sources/BridgeNotificationModels.swift Sources/BridgeFileTransferModels.swift Sources/LaunchAtLoginManager.swift Sources/MacMediaPauser.swift Sources/CallBannerPanelController.swift Sources/MacSystemControlManager.swift Sources/MacMediaControlCLI.swift Sources/MacMediaMonitor.swift Sources/AXNotificationObserver.swift Sources/BridgeNotificationManager.swift Sources/BridgeFileTransferManager.swift Sources/BridgeServer.swift Sources/BridgeModel.swift Sources/BridgeMenuView.swift
+SWIFT_SOURCES = Sources/main.swift Sources/BridgeNotificationModels.swift Sources/BridgeFileTransferModels.swift Sources/LaunchAtLoginManager.swift Sources/MacMediaPauser.swift Sources/CallBannerPanelController.swift Sources/MacSystemControlManager.swift Sources/MacMediaControlCLI.swift Sources/MacMediaMonitor.swift Sources/AXNotificationObserver.swift Sources/BridgeNotificationManager.swift Sources/BridgeFileTransferManager.swift Sources/PhoneVideoDecoder.swift Sources/PhoneMirrorManager.swift Sources/PhoneMirrorWindowController.swift Sources/BridgeServer.swift Sources/BridgeModel.swift Sources/BridgeMenuView.swift
 
 all: $(APP_NAME)
 
@@ -45,7 +45,7 @@ $(APP_NAME): $(SWIFT_SOURCES) $(MRA_SOURCES) $(MRA_DIR)/bin/mediaremote-adapter.
 		"$$ACTOOL" Resources/Bridge.icon --compile .build-icon --platform macosx --minimum-deployment-target $(MACOS_MIN) --app-icon Bridge --output-partial-info-plist .build-icon/partial.plist >/dev/null 2>&1 && cp .build-icon/Assets.car $(RESOURCES)/Assets.car || true; \
 		rm -rf .build-icon; \
 	fi
-	swiftc $(SWIFT_SOURCES) -o $(MACOS)/Bridge -framework AppKit -framework SwiftUI -framework Network -framework CryptoKit -framework CoreImage -framework CoreText -framework UserNotifications -framework ApplicationServices -framework UniformTypeIdentifiers -framework ServiceManagement -framework CoreAudio -framework AudioToolbox -framework IOKit $(SWIFT_TARGET) -O
+	swiftc $(SWIFT_SOURCES) -o $(MACOS)/Bridge -framework AppKit -framework SwiftUI -framework Network -framework CryptoKit -framework CoreImage -framework CoreText -framework UserNotifications -framework ApplicationServices -framework UniformTypeIdentifiers -framework ServiceManagement -framework CoreAudio -framework AudioToolbox -framework IOKit -framework VideoToolbox -framework CoreMedia $(SWIFT_TARGET) -O
 	@cp ShareExtension/Info.plist $(SHARE_APPEX)/Contents/Info.plist
 	@cp Resources/Bridge.icns $(SHARE_APPEX)/Contents/Resources/Bridge.icns 2>/dev/null || true
 	swiftc ShareExtension/ShareController.swift -module-name BridgeShare -o $(SHARE_APPEX)/Contents/MacOS/BridgeShare -framework AppKit -framework Foundation -framework UniformTypeIdentifiers -Xlinker -e -Xlinker _NSExtensionMain $(SWIFT_TARGET) -O
@@ -104,6 +104,6 @@ clean:
 .PHONY: test
 test:
 	@mkdir -p .build-tests
-	swiftc Tests/BridgeTests.swift Sources/BridgeNotificationModels.swift Sources/BridgeFileTransferModels.swift Sources/LaunchAtLoginManager.swift Sources/MacMediaPauser.swift Sources/CallBannerPanelController.swift Sources/MacSystemControlManager.swift Sources/MacMediaControlCLI.swift Sources/MacMediaMonitor.swift Sources/AXNotificationObserver.swift Sources/BridgeNotificationManager.swift Sources/BridgeFileTransferManager.swift Sources/BridgeServer.swift Sources/BridgeModel.swift Sources/BridgeMenuView.swift -o .build-tests/BridgeTests -framework AppKit -framework SwiftUI -framework Network -framework CryptoKit -framework CoreImage -framework CoreText -framework UserNotifications -framework ApplicationServices -framework UniformTypeIdentifiers -framework ServiceManagement -framework CoreAudio -framework AudioToolbox -framework IOKit $(SWIFT_TARGET)
+	swiftc Tests/BridgeTests.swift Sources/BridgeNotificationModels.swift Sources/BridgeFileTransferModels.swift Sources/LaunchAtLoginManager.swift Sources/MacMediaPauser.swift Sources/CallBannerPanelController.swift Sources/MacSystemControlManager.swift Sources/MacMediaControlCLI.swift Sources/MacMediaMonitor.swift Sources/AXNotificationObserver.swift Sources/BridgeNotificationManager.swift Sources/BridgeFileTransferManager.swift Sources/PhoneVideoDecoder.swift Sources/PhoneMirrorManager.swift Sources/PhoneMirrorWindowController.swift Sources/BridgeServer.swift Sources/BridgeModel.swift Sources/BridgeMenuView.swift -o .build-tests/BridgeTests -framework AppKit -framework SwiftUI -framework Network -framework CryptoKit -framework CoreImage -framework CoreText -framework UserNotifications -framework ApplicationServices -framework UniformTypeIdentifiers -framework ServiceManagement -framework CoreAudio -framework AudioToolbox -framework IOKit -framework VideoToolbox -framework CoreMedia $(SWIFT_TARGET)
 	@.build-tests/BridgeTests
 	@rm -rf .build-tests

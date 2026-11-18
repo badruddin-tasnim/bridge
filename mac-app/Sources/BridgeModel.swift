@@ -172,6 +172,14 @@ class BridgeModel: ObservableObject {
             }
             .store(in: &cancellables)
 
+        PhoneMirrorManager.shared.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+                self?.onSizeChangeRequested?()
+            }
+            .store(in: &cancellables)
+
         if startServer {
             startUpdateChecking()
         }
@@ -342,6 +350,17 @@ class BridgeModel: ObservableObject {
             dismissCallBanner()
         }
         onSizeChangeRequested?()
+    }
+
+    // MARK: - Phone Mirroring Quick Control
+
+    func phoneMirrorState(for device: ConnectedDeviceInfo) -> PhoneMirrorSessionState {
+        return PhoneMirrorManager.shared.currentState(for: device.id)
+    }
+
+    func togglePhoneMirroring(for device: ConnectedDeviceInfo) {
+        controlErrorHints.removeValue(forKey: device.id)
+        PhoneMirrorManager.shared.toggleMirroring(for: device)
     }
 
     // MARK: - Incoming Call Banner & Auto-Pause Mac Media

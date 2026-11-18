@@ -1265,7 +1265,7 @@ private func runMacSystemControlAndMediaMonitorTests() {
         expect(false, "Spotify poll should produce valid JSON")
     }
 
-    // When Spotify pauses and another Mac app plays audio, fallback to "Audio playing on Mac"
+    // When Spotify is paused and non-media system sound plays, keep paused Spotify card instead of a phantom generic card
     mockMedia.results["com.spotify.client"] = .active(
         MacMediaSnapshot(
             isActive: true,
@@ -1285,26 +1285,45 @@ private func runMacSystemControlAndMediaMonitorTests() {
         artworkUrl: nil
     )
     mockMedia.audioPlaying = true
-    if let fallbackJson = mediaMon.pollAndBroadcastForTesting(force: true),
-       let data = fallbackJson.data(using: .utf8),
+    if let pausedSpotifyJson = mediaMon.pollAndBroadcastForTesting(force: true),
+       let data = pausedSpotifyJson.data(using: .utf8),
        let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-        expect(obj["title"] as? String == "Audio playing on Mac", "Expected browser audio fallback title")
-        expect(obj["canSeek"] as? Bool == false, "Generic Mac audio must disable seek")
-        expect(obj["isPlaying"] as? Bool == true, "Active audio fallback should be playing")
+        expect(obj["title"] as? String == "Nightcall", "Paused real player should remain over generic system sound")
+        expect(obj["isActive"] as? Bool == true && obj["isPlaying"] as? Bool == false, "Paused Spotify state expected")
     } else {
-        expect(false, "Generic audio fallback should produce JSON")
+        expect(false, "Paused real player poll should produce JSON")
     }
 
-    // When generic Mac audio pauses, card remains active in paused state (isActive=true, isPlaying=false)
+    // When no media player is active, Now Playing must be inactive (never show "Audio paused on Mac")
     mockMedia.results.removeAll()
     mockMedia.audioPlaying = false
-    if let pausedFallbackJson = mediaMon.pollAndBroadcastForTesting(force: true),
-       let data = pausedFallbackJson.data(using: .utf8),
+    if let inactiveJson = mediaMon.pollAndBroadcastForTesting(force: true),
+       let data = inactiveJson.data(using: .utf8),
        let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-        expect(obj["isActive"] as? Bool == true, "Paused Mac audio should keep Now Playing active")
-        expect(obj["isPlaying"] as? Bool == false, "Paused Mac audio should set isPlaying=false for Play icon")
+        expect(obj["isActive"] as? Bool == false, "When nothing is playing, Now Playing must report isActive=false")
     } else {
-        expect(false, "Paused generic audio fallback should produce JSON")
+        expect(false, "Inactive media poll should produce JSON with isActive=false")
+    }
+
+    // Universal payload with empty title must report inactive
+    let emptyUniversal = MediaControlPayload(
+        title: "   ",
+        artist: "",
+        album: "",
+        bundleIdentifier: "com.apple.Music",
+        durationSeconds: 0,
+        elapsedSeconds: 0,
+        isPlaying: false,
+        playbackRate: 0,
+        timestamp: Date(),
+        artworkData: nil
+    )
+    if let emptyJson = mediaMon.applyUniversalPayloadForTesting(emptyUniversal),
+       let data = emptyJson.data(using: .utf8),
+       let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+        expect(obj["isActive"] as? Bool == false, "Empty-title universal payload must report isActive=false")
+    } else {
+        expect(false, "Empty-title universal payload check should emit JSON")
     }
 
     // Thumbnail JPEG encoder
@@ -1335,6 +1354,81 @@ private func runMacSystemControlAndMediaMonitorTests() {
     )
 }
 
+private func runPhoneMirroringTests() {
+    // 1. Handshake parsing (64-byte ASCII token + width BE + height BE + rotation)
+    let token = String(repeating: "ab", count: 32)
+    var handshakeData = Data(token.utf8)
+    handshakeData.append(contentsOf: [0x02, 0xD0, 0x05, 0x00, 0x01]) // 720 x 1280, rot 1
+    let parsedHandshake = PhoneMirrorHandshake.parse(from: handshakeData)
+    expect(parsedHandshake?.token == token, "Handshake token should parse")
+    expect(parsedHandshake?.width == 720 && parsedHandshake?.height == 1280, "Handshake dimensions should parse big-endian")
+    expect(parsedHandshake?.rotation == 1, "Handshake rotation should parse")
+    expect(PhoneMirrorHandshake.parse(from: Data(repeating: 0x30, count: 40)) == nil, "Short handshake must be rejected")
+
+    // 2. Packet header & geometry parsing
+    let hdrBytes: [UInt8] = [
+        0x02, // frame
+        0x01, // keyframe
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x0F, 0x42, 0x40, // 1_000_000 ptsUs
+        0x00, 0x00, 0x10, 0x00  // length 4096
+    ]
+    let header = PhoneMirrorPacketHeader.parse(from: Data(hdrBytes))
+    expect(header?.type == .frame, "Packet header type should parse as frame")
+    expect(header?.isKeyframe == true, "Keyframe bit should set isKeyframe")
+    expect(header?.ptsUs == 1_000_000, "ptsUs should decode big-endian 64-bit")
+    expect(header?.length == 4096, "Payload length should decode big-endian 32-bit")
+
+    let oversizedHdr: [UInt8] = [0x02, 0x00, 0, 0, 0, 0, 0, 0, 0, 1, 0x0F, 0xFF, 0xFF, 0xFF]
+    expect(PhoneMirrorPacketHeader.parse(from: Data(oversizedHdr)) == nil, "Oversized packet header (>8MB) must be rejected")
+
+    let geom = PhoneMirrorGeometry.parse(from: Data([0x05, 0x00, 0x02, 0xD0, 0x03]))
+    expect(geom?.width == 1280 && geom?.height == 720 && geom?.rotation == 3, "Landscape geometry should parse")
+
+    // 3. Annex-B NALU extraction & AVCC conversion
+    let sps: [UInt8] = [0x67, 0x42, 0xC0, 0x1E]
+    let pps: [UInt8] = [0x68, 0xCE, 0x3C, 0x80]
+    let idr: [UInt8] = [0x65, 0x88, 0x84, 0x21, 0xFF]
+    var annexB = Data([0x00, 0x00, 0x00, 0x01])
+    annexB.append(contentsOf: sps)
+    annexB.append(contentsOf: [0x00, 0x00, 0x01]) // 3-byte start code mixed in
+    annexB.append(contentsOf: pps)
+    annexB.append(contentsOf: [0x00, 0x00, 0x00, 0x01])
+    annexB.append(contentsOf: idr)
+
+    let nalus = PhoneVideoDecoder.extractAnnexBNalus(annexB)
+    expect(nalus.count == 3, "Should extract SPS, PPS, and IDR NALUs")
+    let converted = PhoneVideoDecoder.convertAnnexBToAvcc(annexB)
+    expect(converted.sps == Data(sps), "Should extract SPS parameter set")
+    expect(converted.pps == Data(pps), "Should extract PPS parameter set")
+    expect(converted.isIdr == true, "Should detect IDR slice")
+    var expectedAvcc = Data([0x00, 0x00, 0x00, UInt8(idr.count)])
+    expectedAvcc.append(contentsOf: idr)
+    expect(converted.avccData == expectedAvcc, "AVCC payload should contain 4-byte length-prefixed VCL NALU")
+
+    // 4. Video rect aspect-fit & AppKit bottom-left -> Android top-left normalized point mapping
+    let bounds = CGRect(x: 0, y: 0, width: 400, height: 600)
+    let videoSize = CGSize(width: 1000, height: 2000) // 1:2 portrait -> fits to height 600, width 300 centered at x=50..350
+    let contentRect = PhoneMirrorCoordinates.videoContentRect(in: bounds, videoSize: videoSize)
+    expect(abs(contentRect.origin.x - 50.0) < 0.01 && abs(contentRect.width - 300.0) < 0.01, "Portrait video should pillarbox cleanly")
+
+    // In non-flipped AppKit coordinates, y = 600 is TOP of video (yNorm = 0.0), y = 0 is BOTTOM (yNorm = 1.0)
+    let topLeft = PhoneMirrorCoordinates.normalizedPoint(
+        viewPoint: CGPoint(x: 50, y: 600),
+        viewBounds: bounds,
+        videoSize: videoSize,
+        isFlipped: false
+    )
+    expect(topLeft != nil && abs(topLeft!.x - 0.0) < 0.001 && abs(topLeft!.y - 0.0) < 0.001, "AppKit top edge should map to yNorm=0")
+
+    let centerRight = PhoneMirrorCoordinates.normalizedPoint(
+        viewPoint: CGPoint(x: 350, y: 300),
+        viewBounds: bounds,
+        videoSize: videoSize,
+        isFlipped: false
+    )
+    expect(centerRight != nil && abs(centerRight!.x - 1.0) < 0.001 && abs(centerRight!.y - 0.5) < 0.001, "Right middle edge should map to (1.0, 0.5)")
+}
+
 @main
 struct BridgeTestRunner {
     static func main() {
@@ -1350,6 +1444,7 @@ struct BridgeTestRunner {
         runIncomingCallAndAutoPauseTests()
         runMacSystemControlAndMediaMonitorTests()
         runUniversalMediaControlTests()
+        runPhoneMirroringTests()
         do {
             try runPayloadAndVersionTests()
             try runFileTransferSecurityTests()

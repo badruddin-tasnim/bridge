@@ -1469,7 +1469,7 @@ struct BridgeMenuView: View {
                             )
                         }
 
-                        // 4-Tile Quick Panel: Sound (Normal -> Vibrate -> Silent), Do Not Disturb, Calls on Mac, Ring the Phone
+                        // 4-Tile Quick Panel: Sound (Normal -> Vibrate -> Silent), Do Not Disturb, Mirror Phone, Ring the Phone
                         HStack(alignment: .top, spacing: 8) {
                             // 1. Sound (Normal -> Vibrate -> Silent -> Normal)
                             let soundFill: Color = {
@@ -1520,18 +1520,22 @@ struct BridgeMenuView: View {
                                 model.toggleDnd(for: device)
                             }
 
-                            // 3. Calls on Mac
-                            let callOnMacEnabled = model.isGetCallOnMacEnabled(for: device)
+                            // 3. Mirror Phone
+                            let mirrorState = model.phoneMirrorState(for: device)
+                            let isMirrorActive = (mirrorState == .streaming)
+                            let isMirrorPending = (mirrorState == .waitingForPhone)
+                            let isMirrorHighlighted = isMirrorActive || isMirrorPending
                             QuickControlTileButton(
-                                iconName: callOnMacEnabled ? "phone.fill" : "phone",
-                                label: "Calls\non Mac",
-                                fillColor: callOnMacEnabled ? BridgeColors.activeTab : BridgeColors.bg.opacity(0.75),
-                                borderColor: callOnMacEnabled ? BridgeColors.lime.opacity(0.35) : BridgeColors.line2,
-                                iconColor: callOnMacEnabled ? BridgeColors.lime : BridgeColors.soft,
-                                labelColor: callOnMacEnabled ? BridgeColors.text : BridgeColors.soft,
-                                helpText: callOnMacEnabled ? "Incoming call mirroring is on for \(device.name)" : "Mirror incoming phone calls to this Mac"
+                                iconName: "rectangle.on.rectangle.fill",
+                                label: isMirrorActive ? "Stop\nMirroring" : (isMirrorPending ? "Starting\nMirror…" : "Mirror\nPhone"),
+                                fillColor: isMirrorHighlighted ? BridgeColors.activeTab : BridgeColors.bg.opacity(0.75),
+                                borderColor: isMirrorHighlighted ? BridgeColors.lime.opacity(0.35) : BridgeColors.line2,
+                                iconColor: isMirrorHighlighted ? BridgeColors.lime : BridgeColors.soft,
+                                labelColor: isMirrorHighlighted ? BridgeColors.text : BridgeColors.soft,
+                                helpText: isMirrorActive ? "Stop mirroring \(device.name)" : "Mirror \(device.name) screen on this Mac",
+                                isPending: isMirrorPending
                             ) {
-                                model.toggleGetCallOnMac(for: device)
+                                model.togglePhoneMirroring(for: device)
                             }
 
                             // 4. Ring the Phone (temporary Find My Phone action)
@@ -1555,6 +1559,17 @@ struct BridgeMenuView: View {
                                     .fill(BridgeColors.coral)
                                     .frame(width: 6, height: 6)
                                 Text(errHint)
+                                    .font(.custom("PlusJakartaSans-Regular", size: 11))
+                                    .foregroundColor(BridgeColors.coral)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        } else if case .error(let mirrorErr) = model.phoneMirrorState(for: device) {
+                            HStack(spacing: 6) {
+                                Circle()
+                                    .fill(BridgeColors.coral)
+                                    .frame(width: 6, height: 6)
+                                Text(mirrorErr)
                                     .font(.custom("PlusJakartaSans-Regular", size: 11))
                                     .foregroundColor(BridgeColors.coral)
                                     .fixedSize(horizontal: false, vertical: true)
@@ -1841,6 +1856,23 @@ struct BridgeMenuView: View {
                         }
                         Spacer()
                         Toggle("", isOn: $fileTransferManager.autoAcceptIncomingFiles)
+                            .labelsHidden()
+                            .toggleStyle(BridgeSwitchToggleStyle())
+                    }
+
+                    Divider().background(BridgeColors.line.opacity(0.6))
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Calls on Mac")
+                                .font(.custom("PlusJakartaSans-Medium", size: 13))
+                                .foregroundColor(BridgeColors.text)
+                            Text("Show incoming phone calls on your Mac so you can answer or manage them here.")
+                                .font(.custom("PlusJakartaSans-Regular", size: 11.5))
+                                .foregroundColor(BridgeColors.muted)
+                        }
+                        Spacer()
+                        Toggle("", isOn: $notifManager.isCallsOnMacEnabled)
                             .labelsHidden()
                             .toggleStyle(BridgeSwitchToggleStyle())
                     }

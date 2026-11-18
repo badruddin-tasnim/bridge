@@ -123,10 +123,6 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
     private lateinit var tvDeviceMacName: TextView
     private lateinit var macBatteryRing: MacBatteryRingView
     private lateinit var tvLiveBadge: TextView
-    private lateinit var btnMacSoundToggle: LinearLayout
-    private lateinit var flMacSoundIcon: FrameLayout
-    private lateinit var ivMacSoundIcon: ImageView
-    private lateinit var tvMacSoundTitle: TextView
     private lateinit var layoutMacNowPlayingSection: LinearLayout
     private lateinit var ivMacMediaArtwork: ImageView
     private lateinit var tvMacMediaApp: TextView
@@ -149,9 +145,6 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
     private lateinit var btnHeroConnect: Button
 
     private val macUiHandler by lazy { Handler(Looper.getMainLooper()) }
-    private var isMacMutePending = false
-    private var macMutePendingHint: String? = null
-    private var macMuteTimeoutRunnable: Runnable? = null
     private var macMediaTickRunnable: Runnable? = null
     private var isSeekingMacMedia = false
     private var isDraggingMacVolume = false
@@ -446,10 +439,6 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         tvDeviceMacName = findViewById(R.id.tvDeviceMacName)
         macBatteryRing = findViewById(R.id.macBatteryRing)
         tvLiveBadge = findViewById(R.id.tvLiveBadge)
-        btnMacSoundToggle = findViewById(R.id.btnMacSoundToggle)
-        flMacSoundIcon = findViewById(R.id.flMacSoundIcon)
-        ivMacSoundIcon = findViewById(R.id.ivMacSoundIcon)
-        tvMacSoundTitle = findViewById(R.id.tvMacSoundTitle)
         layoutMacNowPlayingSection = findViewById(R.id.layoutMacNowPlayingSection)
         ivMacMediaArtwork = findViewById(R.id.ivMacMediaArtwork)
         tvMacMediaApp = findViewById(R.id.tvMacMediaApp)
@@ -904,29 +893,6 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
 
         btnHeroConnect.setOnClickListener {
             connectSavedMac()
-        }
-
-        btnMacSoundToggle.setOnClickListener {
-            val client = ClipboardSyncManager.networkClient
-            if (client?.isConnected() != true || isMacMutePending) return@setOnClickListener
-            val status = client.latestMacSystemStatus ?: return@setOnClickListener
-            if (!status.canToggleMute) return@setOnClickListener
-
-            isMacMutePending = true
-            macMutePendingHint = null
-            renderMacTelemetryAndMedia(true)
-            client.sendRawJson(MacSystemStatus.buildMacControlJson(action = "toggle_mute"))
-
-            macMuteTimeoutRunnable?.let { macUiHandler.removeCallbacks(it) }
-            val timeout = Runnable {
-                if (isMacMutePending) {
-                    isMacMutePending = false
-                    macMutePendingHint = "Mac didn't respond"
-                    renderMacTelemetryAndMedia(ClipboardSyncManager.networkClient?.isConnected() == true)
-                }
-            }
-            macMuteTimeoutRunnable = timeout
-            macUiHandler.postDelayed(timeout, 2500L)
         }
 
         btnMacMediaVolMute.setOnClickListener {
@@ -1912,10 +1878,6 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
                 userConnectAttempts = 0
                 wasConnectedBefore = true
                 userManuallyDisconnected = false
-            } else {
-                isMacMutePending = false
-                macMutePendingHint = null
-                macMuteTimeoutRunnable?.let { macUiHandler.removeCallbacks(it) }
             }
             updateUI()
         }
@@ -1923,9 +1885,6 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
 
     override fun onMacStatusReceived(status: MacSystemStatus) {
         runOnUiThread {
-            isMacMutePending = false
-            macMutePendingHint = null
-            macMuteTimeoutRunnable?.let { macUiHandler.removeCallbacks(it) }
             renderMacTelemetryAndMedia(ClipboardSyncManager.networkClient?.isConnected() == true)
         }
     }
@@ -1937,7 +1896,7 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
     }
 
     private fun renderMacTelemetryAndMedia(isConnected: Boolean) {
-        if (!::btnMacSoundToggle.isInitialized) return
+        if (!::macBatteryRing.isInitialized) return
         val client = ClipboardSyncManager.networkClient
         val macStatus = if (isConnected) client?.latestMacSystemStatus else null
         val mediaStatus = if (isConnected) client?.latestMacMediaStatus else null
@@ -1951,48 +1910,8 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
             macBatteryRing.visibility = View.GONE
         }
 
-        // 2. MAC CONTROLS: Quick Panel Tile (Sound <-> Silent only)
-        val colorInk = ContextCompat.getColor(this, R.color.bridge_ink)
-        val colorText = ContextCompat.getColor(this, R.color.bridge_text)
-        val colorMuted = ContextCompat.getColor(this, R.color.bridge_muted)
-
-        if (!isConnected || macStatus == null) {
-            btnMacSoundToggle.isEnabled = false
-            btnMacSoundToggle.alpha = 0.45f
-            flMacSoundIcon.setBackgroundResource(R.drawable.bg_quick_tile_off)
-            ivMacSoundIcon.setImageResource(R.drawable.ic_mac_sound)
-            ivMacSoundIcon.imageTintList = ColorStateList.valueOf(colorMuted)
-            tvMacSoundTitle.text = "Sound"
-            tvMacSoundTitle.setTextColor(colorMuted)
-        } else {
-            val isMuted = macStatus.isMuted
-            btnMacSoundToggle.isEnabled = macStatus.canToggleMute && !isMacMutePending
-            btnMacSoundToggle.alpha = if (isMacMutePending) 0.65f else 1.0f
-            if (isMuted) {
-                flMacSoundIcon.setBackgroundResource(R.drawable.bg_quick_tile_off)
-                ivMacSoundIcon.setImageResource(R.drawable.ic_mac_silent)
-                ivMacSoundIcon.imageTintList = ColorStateList.valueOf(colorText)
-                tvMacSoundTitle.text = when {
-                    isMacMutePending -> "Updating…"
-                    macMutePendingHint != null -> "No reply"
-                    else -> "Silent"
-                }
-                tvMacSoundTitle.setTextColor(colorText)
-            } else {
-                flMacSoundIcon.setBackgroundResource(R.drawable.bg_quick_tile_lime)
-                ivMacSoundIcon.setImageResource(R.drawable.ic_mac_sound)
-                ivMacSoundIcon.imageTintList = ColorStateList.valueOf(colorInk)
-                tvMacSoundTitle.text = when {
-                    isMacMutePending -> "Updating…"
-                    macMutePendingHint != null -> "No reply"
-                    else -> "Sound"
-                }
-                tvMacSoundTitle.setTextColor(colorText)
-            }
-        }
-
-        // 3. NOW PLAYING · YOUR MAC
-        if (!isConnected || mediaStatus == null || !mediaStatus.isActive) {
+        // 2. NOW PLAYING · YOUR MAC
+        if (!isConnected || mediaStatus == null || !mediaStatus.isActive || mediaStatus.title.isBlank()) {
             layoutMacNowPlayingSection.visibility = View.GONE
             stopMacMediaTick()
             lastRenderedMacArtworkHash = null

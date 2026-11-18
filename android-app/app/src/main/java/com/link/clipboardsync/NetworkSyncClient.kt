@@ -692,6 +692,10 @@ class NetworkSyncClient(private val context: Context) {
                                     PhoneMediaManager.handleMediaAction(context, innerObj)
                                 } else if (innerType == "call_action" && innerObj != null) {
                                     PhoneCallMonitor.handleCallAction(context, innerObj)
+                                } else if (innerType == "mirror_control" && innerObj != null) {
+                                    PhoneMirrorController.handleControlMessage(context, innerObj, host)
+                                } else if (innerType == "mirror_input" && innerObj != null) {
+                                    PhoneMirrorInputController.handleInputMessage(context, innerObj)
                                 } else if (innerType == "mac_status" && innerObj != null) {
                                     val status = MacSystemStatus.fromJson(innerObj)
                                     latestMacSystemStatus = status
@@ -710,6 +714,7 @@ class NetworkSyncClient(private val context: Context) {
                                         "disconnect" -> {
                                             log("Mac disconnected session (pairing kept).")
                                             PhoneControlManager.stopRinging(context)
+                                            PhoneMirrorController.stopMirroring(context, reason = "mac_disconnected", notifyMac = false)
                                             isRunning.set(false)
                                             stopDiscovery()
                                             notifyRemoteDisconnect()
@@ -718,6 +723,7 @@ class NetworkSyncClient(private val context: Context) {
                                         "unpair" -> {
                                             log("Mac initiated unpair.")
                                             PhoneControlManager.stopRinging(context)
+                                            PhoneMirrorController.stopMirroring(context, reason = "mac_unpaired", notifyMac = false)
                                             pairCode = null
                                             BridgePrefs.clearPairing(context)
                                             BridgeNotificationManager.cancelAllMacAlerts(context)
@@ -758,6 +764,7 @@ class NetworkSyncClient(private val context: Context) {
                         notifyConnectionFailed(failedAttempts)
                     }
                 } finally {
+                    PhoneMirrorController.stopMirroring(context, reason = "connection_dropped", notifyMac = false)
                     stopHeartbeat()
                     disconnectSocket()
                     notifyConnectionStatusChanged(false, if (BridgePrefs.isPaired(context)) host else null)

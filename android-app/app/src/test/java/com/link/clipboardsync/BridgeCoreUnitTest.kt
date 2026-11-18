@@ -509,4 +509,93 @@ class BridgeCoreUnitTest {
         assertEquals("seek", seekCmd.getString("action"))
         assertEquals(90000L, seekCmd.getLong("positionMs"))
     }
+
+    @Test
+    fun phoneMirrorProtocol_handshakeHeadersGeometryAndCoordinates() {
+        val token = "ab".repeat(32)
+        val hs = PhoneMirrorProtocol.buildHandshake(token, width = 720, height = 1280, rotation = 2)
+        assertEquals(PhoneMirrorProtocol.HANDSHAKE_BYTES, hs.size)
+        assertEquals(token, String(hs.copyOfRange(0, 64), Charsets.US_ASCII))
+        assertEquals(0x02, hs[64].toInt() and 0xFF)
+        assertEquals(0xD0, hs[65].toInt() and 0xFF)
+        assertEquals(0x05, hs[66].toInt() and 0xFF)
+        assertEquals(0x00, hs[67].toInt() and 0xFF)
+        assertEquals(0x02, hs[68].toInt() and 0xFF)
+
+        val hdr = PhoneMirrorProtocol.buildPacketHeader(
+            type = PhoneMirrorProtocol.PACKET_TYPE_FRAME,
+            flags = PhoneMirrorProtocol.FLAG_KEYFRAME,
+            ptsUs = 1_000_000L,
+            payloadLength = 4096
+        )
+        assertEquals(PhoneMirrorProtocol.HEADER_BYTES, hdr.size)
+        assertEquals(0x02, hdr[0].toInt() and 0xFF)
+        assertEquals(0x01, hdr[1].toInt() and 0xFF)
+        assertEquals(0x10, hdr[12].toInt() and 0xFF)
+        assertEquals(0x00, hdr[13].toInt() and 0xFF)
+
+        val (sw, sh) = PhoneMirrorProtocol.computeStreamDimensions(1080, 2400, maxDimension = 1280)
+        assertTrue(sw % 16 == 0 && sh % 16 == 0)
+        assertEquals(1280, sh)
+        assertEquals(576, sw)
+
+        val (px, py) = PhoneMirrorProtocol.denormalizePoint(1.5f, -0.2f, 1080, 2400)
+        assertEquals(1079f, px, 0.01f)
+        assertEquals(0f, py, 0.01f)
+    }
+
+    @Test
+    fun phoneMirrorCommands_parseControlAndInputJson() {
+        val validToken = "cd".repeat(32)
+        val reqStart = PhoneMirrorProtocol.parseControlCommand(
+            JSONObject()
+                .put("type", "mirror_control")
+                .put("action", "request_start")
+                .put("port", 51234)
+                .put("token", validToken)
+                .put("maxDimension", 1280)
+                .put("bitRate", 5_000_000)
+                .put("fps", 60)
+        )
+        assertTrue(reqStart is MirrorControlCommand.RequestStart)
+        assertEquals(51234, (reqStart as MirrorControlCommand.RequestStart).offer.port)
+
+        // Reject malformed token or invalid port
+        assertNull(
+            PhoneMirrorProtocol.parseControlCommand(
+                JSONObject().put("action", "request_start").put("port", 80).put("token", validToken)
+            )
+        )
+        assertNull(
+            PhoneMirrorProtocol.parseControlCommand(
+                JSONObject().put("action", "request_start").put("port", 51234).put("token", "short")
+            )
+        )
+
+        val swipe = PhoneMirrorProtocol.parseInputCommand(
+            JSONObject()
+                .put("action", "swipe")
+                .put("startXNorm", 0.5)
+                .put("startYNorm", 0.8)
+                .put("endXNorm", 0.5)
+                .put("endYNorm", 0.2)
+                .put("durationMs", 250)
+        )
+        assertTrue(swipe is MirrorInputCommand.Swipe)
+        assertEquals(250L, (swipe as MirrorInputCommand.Swipe).durationMs)
+
+        val global = PhoneMirrorProtocol.parseInputCommand(
+            JSONObject().put("action", "global").put("globalAction", "home")
+        )
+        assertEquals(MirrorInputCommand.GlobalAction("home"), global)
+
+        val setDimTrue = PhoneMirrorProtocol.parseControlCommand(
+            JSONObject().put("action", "set_dim").put("dimmed", true)
+        )
+        assertEquals(MirrorControlCommand.SetDim(true), setDimTrue)
+        val setDimFalse = PhoneMirrorProtocol.parseControlCommand(
+            JSONObject().put("action", "set_dim").put("dimmed", false)
+        )
+        assertEquals(MirrorControlCommand.SetDim(false), setDimFalse)
+    }
 }

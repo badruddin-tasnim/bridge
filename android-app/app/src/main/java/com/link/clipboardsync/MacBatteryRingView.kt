@@ -38,8 +38,8 @@ class MacBatteryRingView @JvmOverloads constructor(
     private val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         textAlign = Paint.Align.CENTER
         color = 0xFFF4F5F2.toInt()
-        typeface = ResourcesCompat.getFont(context, R.font.plus_jakarta_sans_semibold)
-            ?: Typeface.create("sans-serif-medium", Typeface.BOLD)
+        typeface = ResourcesCompat.getFont(context, R.font.plus_jakarta_sans_bold)
+            ?: Typeface.DEFAULT_BOLD
     }
 
     private val badgeBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
