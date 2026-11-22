@@ -175,21 +175,49 @@ struct IncomingCallInfo: Equatable {
     let canAnswer: Bool
     let canDecline: Bool
     let appIconImage: NSImage?
+    var isMuted: Bool = false
+    var connectedAt: Date? = nil
+
+    func formattedDuration(at now: Date = Date()) -> String? {
+        guard state == "active" else { return nil }
+        let totalSeconds = max(0, Int(now.timeIntervalSince(connectedAt ?? now)))
+        let hours = totalSeconds / 3600
+        let mins = (totalSeconds % 3600) / 60
+        let secs = totalSeconds % 60
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, mins, secs)
+        }
+        return String(format: "%02d:%02d", mins, secs)
+    }
 
     static func from(
         jsonObject: [String: Any],
         deviceId: UUID,
-        deviceName: String
+        deviceName: String,
+        now: Date = Date()
     ) -> IncomingCallInfo? {
         guard let callId = jsonObject["callId"] as? String, !callId.isEmpty,
               let state = jsonObject["state"] as? String, !state.isEmpty else {
             return nil
         }
         let callerName = (jsonObject["callerName"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let resolvedCaller = (callerName?.isEmpty == false) ? callerName! : "Unknown Caller"
+        let lowerCaller = callerName?.lowercased() ?? ""
+        let resolvedCaller: String
+        if let name = callerName, !name.isEmpty, lowerCaller != "call", lowerCaller != "phone" {
+            resolvedCaller = name
+        } else {
+            resolvedCaller = "Unknown Caller"
+        }
         let appName = (jsonObject["appName"] as? String) ?? ""
-        let canAnswer = (jsonObject["canAnswer"] as? Bool) ?? false
-        let canDecline = (jsonObject["canDecline"] as? Bool) ?? false
+        let canAnswer = (jsonObject["canAnswer"] as? Bool) ?? (state == "ringing")
+        let canDecline = (jsonObject["canDecline"] as? Bool) ?? (state != "ended")
+        let isMuted = (jsonObject["isMuted"] as? Bool) ?? false
+
+        var connectedAt: Date? = nil
+        if state == "active" {
+            let elapsed = (jsonObject["elapsedSeconds"] as? Int) ?? (jsonObject["elapsedSeconds"] as? NSNumber)?.intValue ?? 0
+            connectedAt = now.addingTimeInterval(-TimeInterval(max(0, elapsed)))
+        }
 
         var appIcon: NSImage? = nil
         if let iconB64 = jsonObject["icon"] as? String,
@@ -207,7 +235,9 @@ struct IncomingCallInfo: Equatable {
             appName: appName,
             canAnswer: canAnswer,
             canDecline: canDecline,
-            appIconImage: appIcon
+            appIconImage: appIcon,
+            isMuted: isMuted,
+            connectedAt: connectedAt
         )
     }
 }

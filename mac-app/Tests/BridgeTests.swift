@@ -982,6 +982,41 @@ private func runIncomingCallAndAutoPauseTests() {
         deviceName: "GalaxyCallTest"
     )
     expect(unknownCaller?.callerName == "Unknown Caller", "Blank caller name should fall back to Unknown Caller")
+
+    let genericCallTitle = IncomingCallInfo.from(
+        jsonObject: ["type": "call_event", "callId": "c_104", "state": "active", "callerName": "Call", "isMuted": true, "elapsedSeconds": 45],
+        deviceId: devId,
+        deviceName: "GalaxyCallTest",
+        now: Date(timeIntervalSince1970: 1000)
+    )
+    expect(genericCallTitle?.callerName == "Unknown Caller", "Generic 'Call' title should sanitize to Unknown Caller")
+    expect(genericCallTitle?.isMuted == true, "isMuted should parse from call_event")
+    expect(genericCallTitle?.canDecline == true, "Active call should default canDecline to true")
+    expect(genericCallTitle?.formattedDuration(at: Date(timeIntervalSince1970: 1000)) == "00:45", "Elapsed 45s should format as 00:45")
+    expect(genericCallTitle?.formattedDuration(at: Date(timeIntervalSince1970: 4620)) == "1:01:05", "Elapsed 3665s should format as 1:01:05")
+
+    // Re-enable Get Call on Mac and test answer transition + mute toggling
+    model.toggleGetCallOnMac(for: device)
+    model.handleIncomingCallEvent(call, presentPanel: false)
+    model.answerCall(call, sendToServer: false, presentPanel: false)
+    let activeCall = IncomingCallInfo(
+        deviceId: devId,
+        deviceName: "GalaxyCallTest",
+        callId: "c_101",
+        state: "active",
+        callerName: "Alex",
+        appName: "Phone",
+        canAnswer: false,
+        canDecline: true,
+        appIconImage: nil,
+        isMuted: false
+    )
+    model.handleIncomingCallEvent(activeCall, presentPanel: false)
+    expect(model.activeIncomingCall?.state == "active" && model.activeIncomingCall?.callerName == "Alex", "Answered call transitioning to active should display active call banner")
+    model.muteCall(activeCall, sendToServer: false, presentPanel: false)
+    expect(model.activeIncomingCall?.isMuted == true, "muteCall should toggle isMuted on active call")
+    model.muteCall(activeCall, sendToServer: false, presentPanel: false)
+    expect(model.activeIncomingCall?.isMuted == false, "Second muteCall should unmute active call")
 }
 
 private final class MockMacControlProvider: MacSystemControlProviding {

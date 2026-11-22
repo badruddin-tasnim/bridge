@@ -355,6 +355,15 @@ final class PhoneMirrorCanvasView: NSView {
 
         if flags.contains(.command), let key = event.charactersIgnoringModifiers?.lowercased() {
             switch key {
+            case "c":
+                PhoneMirrorManager.shared.sendKeyAction("copy")
+                return true
+            case "x":
+                PhoneMirrorManager.shared.sendKeyAction("cut")
+                return true
+            case "a":
+                PhoneMirrorManager.shared.sendKeyAction("select_all")
+                return true
             case "v":
                 if let text = NSPasteboard.general.string(forType: .string), !text.isEmpty {
                     PhoneMirrorManager.shared.sendText(text)

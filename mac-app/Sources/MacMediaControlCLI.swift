@@ -239,6 +239,10 @@ final class MacMediaControlCLI: MacMediaControlClientProviding {
         self.customBinaryPath = customBinaryPath
     }
 
+    deinit {
+        terminateStreamProcessLocked()
+    }
+
     var isAvailable: Bool {
         resolveLaunchBackend() != nil
     }
@@ -361,6 +365,16 @@ final class MacMediaControlCLI: MacMediaControlClientProviding {
         }
     }
 
+    func stopStreamingSync() {
+        stateQueue.sync {
+            self.isStreamingActive = false
+            self.retryCount = 0
+            self.onUpdateHandler = nil
+            self.onFailureHandler = nil
+            self.terminateStreamProcessLocked()
+        }
+    }
+
     func fetchCurrent() -> MediaControlPayload? {
         guard let backend = resolveLaunchBackend() else { return nil }
         let proc = Process()
@@ -447,6 +461,16 @@ final class MacMediaControlCLI: MacMediaControlClientProviding {
         lineBuffer.removeAll()
     }
 
+    private func killOrphanedAdapterStreams() {
+        let pkill = Process()
+        pkill.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+        pkill.arguments = ["-f", "mediaremote-adapter.pl.*stream"]
+        pkill.standardOutput = FileHandle.nullDevice
+        pkill.standardError = FileHandle.nullDevice
+        try? pkill.run()
+        pkill.waitUntilExit()
+    }
+
     private func launchStreamProcessLocked() {
         guard isStreamingActive else { return }
         guard let backend = resolveLaunchBackendLocked() else {
@@ -456,6 +480,7 @@ final class MacMediaControlCLI: MacMediaControlClientProviding {
             return
         }
         terminateStreamProcessLocked()
+        killOrphanedAdapterStreams()
 
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: backend.executablePath)

@@ -91,6 +91,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         setupStatusItem()
         setupPopover()
     }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        MacMediaMonitor.shared.stop()
+        MacMediaControlCLI.shared.stopStreamingSync()
+        PhoneMirrorManager.shared.stopMirroring(notifyDevice: false)
+    }
     
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)

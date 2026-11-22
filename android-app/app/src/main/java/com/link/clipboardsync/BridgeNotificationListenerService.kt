@@ -518,13 +518,20 @@ class BridgeNotificationListenerService : NotificationListenerService() {
                     bundle.putCharSequence(input.resultKey, replyText)
                 }
                 RemoteInput.addResultsToIntent(holder.remoteInputs, intent, bundle)
-                holder.action.actionIntent.send(this, 0, intent)
+                val sent = PhoneCallMonitor.sendPendingIntentWithBal(this, holder.action.actionIntent, "notif_reply", intent)
+                if (!sent) {
+                    holder.action.actionIntent.send(this, 0, intent)
+                }
                 Log.d(TAG, "Sent reply text for notification: $baseKey (action $actionId)")
+                true
             } else {
-                holder.action.actionIntent.send()
+                val sent = PhoneCallMonitor.sendPendingIntentWithBal(this, holder.action.actionIntent, "notif_action")
+                if (!sent) {
+                    holder.action.actionIntent.send()
+                }
                 Log.d(TAG, "Triggered action click for notification: $baseKey (action $actionId)")
+                true
             }
-            true
         } catch (e: Exception) {
             Log.e(TAG, "Failed to execute action on $baseKey: ${e.message}", e)
             false

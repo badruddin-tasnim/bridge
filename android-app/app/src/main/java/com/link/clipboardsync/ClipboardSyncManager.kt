@@ -37,6 +37,9 @@ object ClipboardSyncManager {
     @Volatile
     var isInternalMutation: Boolean = false
 
+    @Volatile
+    var lastInternalMutationAtMs: Long = 0L
+
     private val imageExecutor = Executors.newSingleThreadExecutor()
 
     val history = CopyOnWriteArrayList<HistoryItem>()
@@ -114,7 +117,7 @@ object ClipboardSyncManager {
             // Ignore images placed onto the Android clipboard by Bridge itself
             if (uri.authority == ClipboardImageProvider.AUTHORITY) {
                 Log.d(TAG, "[$source] Ignoring Bridge's own ClipboardImageProvider URI")
-                return true
+                return false
             }
 
             val resolver = context.contentResolver

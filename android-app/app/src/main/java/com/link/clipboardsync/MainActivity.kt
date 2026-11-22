@@ -4,6 +4,7 @@ import android.Manifest
 import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
 import android.app.AlertDialog
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -370,6 +371,19 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
 
         if (!BridgePrefs.isPaired(this)) {
             ClipboardSyncManager.networkClient?.startDiscovery()
+        }
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus && BridgePrefs.isPaired(this)) {
+            try {
+                val cm = getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                val clip = cm?.primaryClip
+                if (clip != null && clip.itemCount > 0) {
+                    ClipboardSyncManager.extractAndDispatchClipboard(this, clip, "MainActivityFocus")
+                }
+            } catch (_: Exception) {}
         }
     }
 
@@ -801,7 +815,9 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         switchCallsOnMac.setOnCheckedChangeListener { _, isChecked ->
             if (isUpdatingSettingsUi) return@setOnCheckedChangeListener
             BridgePrefs.setCallsOnMacEnabled(this, isChecked, updateTimestamp = true)
-            if (!isChecked) {
+            if (isChecked) {
+                requestCallPermissionsIfNeeded()
+            } else {
                 PhoneCallMonitor.clearAll()
             }
             BridgeNotificationManager.sendSettingsToMac(this)
@@ -2135,11 +2151,40 @@ class MainActivity : AppCompatActivity(), NetworkSyncClient.SyncListener, Clipbo
         }
     }
 
+    private fun requestCallPermissionsIfNeeded() {
+        val missing = ArrayList<String>()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.ANSWER_PHONE_CALLS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            missing.add(Manifest.permission.ANSWER_PHONE_CALLS)
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED) {
+            missing.add(Manifest.permission.READ_PHONE_STATE)
+        }
+        if (missing.isNotEmpty()) {
+            ActivityCompat.requestPermissions(this, missing.toTypedArray(), 102)
+        }
+    }
+
     private fun checkPermissions() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
-                ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 101)
+        val missing = ArrayList<String>()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            missing.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+        if (BridgePrefs.isCallsOnMacEnabled(this)) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                ContextCompat.checkSelfPermission(this, Manifest.permission.ANSWER_PHONE_CALLS) != PackageManager.PERMISSION_GRANTED
+            ) {
+                missing.add(Manifest.permission.ANSWER_PHONE_CALLS)
             }
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED) {
+                missing.add(Manifest.permission.READ_PHONE_STATE)
+            }
+        }
+        if (missing.isNotEmpty()) {
+            ActivityCompat.requestPermissions(this, missing.toTypedArray(), 101)
         }
 
         try {

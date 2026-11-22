@@ -101,6 +101,7 @@ class BridgeModel: ObservableObject {
     private let mediaPauser: MacMediaPauser
     private var lowBatteryAlertedDevices = Set<String>()
     private var dismissedCallIds = Set<String>()
+    private var answeredCallIds = Set<String>()
     private var updateTimer: Timer?
     private var cancellables = Set<AnyCancellable>()
 
@@ -370,6 +371,7 @@ class BridgeModel: ObservableObject {
 
         if call.state == "ended" {
             dismissedCallIds.remove(call.callId)
+            answeredCallIds.remove(call.callId)
             mediaPauser.clearCall(callId: call.callId)
             if activeIncomingCall?.callId == call.callId {
                 activeIncomingCall = nil
@@ -388,13 +390,33 @@ class BridgeModel: ObservableObject {
             mediaPauser.pauseIfPlaying(callId: call.callId)
         }
 
-        guard !dismissedCallIds.contains(call.callId) else {
-            return
+        if dismissedCallIds.contains(call.callId) {
+            if call.state == "active" && answeredCallIds.contains(call.callId) {
+                dismissedCallIds.remove(call.callId)
+                answeredCallIds.remove(call.callId)
+            } else {
+                return
+            }
         }
 
-        activeIncomingCall = call
+        var resolvedCall = call
+        if resolvedCall.state == "active",
+           let existing = activeIncomingCall,
+           existing.callId == resolvedCall.callId,
+           existing.state == "active",
+           let prevConnected = existing.connectedAt {
+            if let newConnected = resolvedCall.connectedAt {
+                if abs(newConnected.timeIntervalSince(prevConnected)) <= 2.0 {
+                    resolvedCall.connectedAt = prevConnected
+                }
+            } else {
+                resolvedCall.connectedAt = prevConnected
+            }
+        }
+
+        activeIncomingCall = resolvedCall
         if presentPanel {
-            CallBannerPanelController.shared.show(call: call, model: self)
+            CallBannerPanelController.shared.show(call: resolvedCall, model: self)
         }
     }
 
@@ -402,6 +424,7 @@ class BridgeModel: ObservableObject {
         if let active = activeIncomingCall, active.deviceId == deviceId {
             mediaPauser.clearCall(callId: active.callId)
             dismissedCallIds.remove(active.callId)
+            answeredCallIds.remove(active.callId)
             activeIncomingCall = nil
             if presentPanel {
                 CallBannerPanelController.shared.hide(callId: active.callId)
@@ -413,6 +436,7 @@ class BridgeModel: ObservableObject {
         if sendToServer {
             server.sendCallAction(["action": "answer", "callId": call.callId], toDeviceId: call.deviceId)
         }
+        answeredCallIds.insert(call.callId)
         dismissedCallIds.insert(call.callId)
         activeIncomingCall = nil
         if presentPanel {
@@ -424,6 +448,7 @@ class BridgeModel: ObservableObject {
         if sendToServer {
             server.sendCallAction(["action": "decline", "callId": call.callId], toDeviceId: call.deviceId)
         }
+        answeredCallIds.remove(call.callId)
         dismissedCallIds.insert(call.callId)
         mediaPauser.clearCall(callId: call.callId)
         activeIncomingCall = nil
@@ -443,8 +468,25 @@ class BridgeModel: ObservableObject {
         }
     }
 
+    func muteCall(_ call: IncomingCallInfo, sendToServer: Bool = true, presentPanel: Bool = true) {
+        if call.state == "ringing" {
+            silenceCall(call, sendToServer: sendToServer, presentPanel: presentPanel)
+            return
+        }
+        if sendToServer {
+            server.sendCallAction(["action": "mute", "callId": call.callId], toDeviceId: call.deviceId)
+        }
+        var updated = (activeIncomingCall?.callId == call.callId ? activeIncomingCall : nil) ?? call
+        updated.isMuted.toggle()
+        activeIncomingCall = updated
+        if presentPanel {
+            CallBannerPanelController.shared.show(call: updated, model: self)
+        }
+    }
+
     func dismissCallBanner(presentPanel: Bool = true) {
         if let active = activeIncomingCall {
+            answeredCallIds.remove(active.callId)
             dismissedCallIds.insert(active.callId)
         }
         activeIncomingCall = nil

@@ -394,6 +394,7 @@ class BridgeCoreUnitTest {
                 appName = "Phone",
                 canAnswer = true,
                 canDecline = true,
+                isMuted = false,
                 iconBase64 = "aWNvbg=="
             )
         )
@@ -404,21 +405,55 @@ class BridgeCoreUnitTest {
         assertEquals("Phone", ringingJson.getString("appName"))
         assertTrue(ringingJson.getBoolean("canAnswer"))
         assertTrue(ringingJson.getBoolean("canDecline"))
+        assertFalse(ringingJson.getBoolean("isMuted"))
         assertEquals("aWNvbg==", ringingJson.getString("icon"))
 
-        val endedJson = JSONObject(
+        val activeMutedJson = JSONObject(
             PhoneCallMonitor.buildCallEventJson(
                 callId = "call_key_1",
-                state = "ended",
+                state = "active",
                 callerName = "Alex",
                 appName = "Phone",
                 canAnswer = false,
-                canDecline = false,
+                canDecline = true,
+                isMuted = true,
+                elapsedSeconds = 45,
                 iconBase64 = null
             )
         )
-        assertEquals("ended", endedJson.getString("state"))
-        assertFalse(endedJson.has("icon"))
+        assertEquals("active", activeMutedJson.getString("state"))
+        assertTrue(activeMutedJson.getBoolean("isMuted"))
+        assertEquals(45, activeMutedJson.getInt("elapsedSeconds"))
+        assertFalse(activeMutedJson.has("icon"))
+    }
+
+    @Test
+    fun phoneCallMonitor_filtersGenericLabelsAndResolvesCallerAndAppName() {
+        assertEquals("Phone", PhoneCallMonitor.normalizeCallAppName("com.samsung.android.incallui", "Call"))
+        assertEquals("WhatsApp", PhoneCallMonitor.normalizeCallAppName("com.whatsapp", "WhatsApp"))
+
+        assertTrue(PhoneCallMonitor.isGenericCallLabel("Call", "Phone"))
+        assertTrue(PhoneCallMonitor.isGenericCallLabel("Incoming voice call...", "Phone"))
+        assertTrue(PhoneCallMonitor.isGenericCallLabel("01:24", "Phone"))
+        assertTrue(PhoneCallMonitor.isGenericCallLabel("Answer", "Phone"))
+        assertFalse(PhoneCallMonitor.isGenericCallLabel("Sarah Connor", "Phone"))
+        assertFalse(PhoneCallMonitor.isGenericCallLabel("+880 1712-345678", "Phone"))
+
+        val resolved = PhoneCallMonitor.selectBestCallerName(
+            candidates = listOf("Call", "Incoming call", "00:05", "Incoming call from Sarah Connor", "Answer"),
+            appName = "Phone",
+            previousCallerName = null,
+            fallback = "Incoming Call"
+        )
+        assertEquals("Sarah Connor", resolved)
+
+        val fallbackPrev = PhoneCallMonitor.selectBestCallerName(
+            candidates = listOf("Call", "Ongoing call"),
+            appName = "Phone",
+            previousCallerName = "Alex",
+            fallback = "Active Call"
+        )
+        assertEquals("Alex", fallbackPrev)
     }
 
     @Test
@@ -597,5 +632,54 @@ class BridgeCoreUnitTest {
             JSONObject().put("action", "set_dim").put("dimmed", false)
         )
         assertEquals(MirrorControlCommand.SetDim(false), setDimFalse)
+
+        val copyKey = PhoneMirrorProtocol.parseInputCommand(
+            JSONObject().put("action", "key").put("keyAction", "copy")
+        )
+        assertEquals(MirrorInputCommand.KeyAction("copy"), copyKey)
+    }
+
+    @Test
+    fun clipboardSyncDetection_matchesCopyKeywordsViewIdsAndSystemClipboardOverlay() {
+        assertTrue(ClipboardSyncAccessibilityService.isCopyOrCutKeyword("Copy"))
+        assertTrue(ClipboardSyncAccessibilityService.isCopyOrCutKeyword("Copy link"))
+        assertTrue(ClipboardSyncAccessibilityService.isCopyOrCutKeyword("Cut"))
+        assertTrue(ClipboardSyncAccessibilityService.isCopyOrCutKeyword("Copied to clipboard"))
+        assertTrue(ClipboardSyncAccessibilityService.isCopyOrCutKeyword("কপি"))
+        assertFalse(ClipboardSyncAccessibilityService.isCopyOrCutKeyword("Copyright 2026"))
+        assertFalse(ClipboardSyncAccessibilityService.isCopyOrCutKeyword("Select all"))
+
+        assertTrue(ClipboardSyncAccessibilityService.isCopyRelatedViewId("com.samsung.android.honeyboard:id/clipboard_btn"))
+        assertTrue(ClipboardSyncAccessibilityService.isCopyRelatedViewId("android:id/floating_toolbar_menu_item_text"))
+        assertTrue(ClipboardSyncAccessibilityService.isCopyRelatedViewId("com.android.chrome:id/copy_button"))
+        assertFalse(ClipboardSyncAccessibilityService.isCopyRelatedViewId("com.whatsapp:id/send"))
+
+        assertTrue(
+            ClipboardSyncAccessibilityService.isSystemClipboardOverlayEvent(
+                pkg = "com.android.systemui",
+                className = "com.android.systemui.clipboardoverlay.ClipboardOverlayView",
+                text = "",
+                contentDesc = "",
+                viewId = "com.android.systemui:id/clipboard_preview"
+            )
+        )
+        assertTrue(
+            ClipboardSyncAccessibilityService.isSystemClipboardOverlayEvent(
+                pkg = "com.whatsapp",
+                className = "android.widget.TextView",
+                text = "Message copied",
+                contentDesc = "",
+                viewId = ""
+            )
+        )
+        assertFalse(
+            ClipboardSyncAccessibilityService.isSystemClipboardOverlayEvent(
+                pkg = "com.whatsapp",
+                className = "android.widget.TextView",
+                text = "Hey, check out this long message about nothing related",
+                contentDesc = "",
+                viewId = ""
+            )
+        )
     }
 }
