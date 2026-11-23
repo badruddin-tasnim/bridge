@@ -13,9 +13,9 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.3.5</string>
+    <string>1.4.0</string>
     <key>CFBundleVersion</key>
-    <string>8</string>
+    <string>9</string>
     <key>CFBundleIconFile</key>
     <string>Bridge.icns</string>
     <key>CFBundleIconName</key>
@@ -24,6 +24,8 @@
     <string>13.0</string>
     <key>LSUIElement</key>
     <true/>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>Bridge reads playback info, thumbnails, and sends media controls to your web browsers, Apple Music, Spotify, and VLC when controlling your Mac from your phone.</string>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
     <key>NSDesktopFolderUsageDescription</key>

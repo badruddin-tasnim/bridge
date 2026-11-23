@@ -66,12 +66,15 @@ class BridgeNotificationListenerService : NotificationListenerService() {
         super.onListenerConnected()
         instance = this
         Log.i(TAG, "Bridge Notification Listener connected.")
+        PhoneMediaManager.startObserving(this)
         syncActiveNotifications()
     }
 
     override fun onListenerDisconnected() {
         super.onListenerDisconnected()
         instance = null
+        PhoneMediaManager.stopObserving(this)
+        PhoneCallMonitor.clearAll()
         actionCache.clear()
         rawKeyMap.clear()
         lastSeenTextByNormKey.clear()
@@ -80,11 +83,16 @@ class BridgeNotificationListenerService : NotificationListenerService() {
         Log.i(TAG, "Bridge Notification Listener disconnected.")
     }
 
+    override fun onInterruptionFilterChanged(interruptionFilter: Int) {
+        super.onInterruptionFilterChanged(interruptionFilter)
+        DeviceStatusMonitor.sendCurrentStatus(this, force = false)
+    }
+
     private fun shouldDeduplicatePost(dedupeKey: String): Boolean {
         val now = System.currentTimeMillis()
         val last = recentPosted[dedupeKey] ?: 0L
         if (now - last < 2500) {
-            Log.d(TAG, "Deduplicating duplicate notification event: $dedupeKey")
+            Log.d(TAG, "Deduplicating duplicate notification event (${ClipboardPayload.computeSHA256(dedupeKey).take(8)})")
             return true
         }
         recentPosted[dedupeKey] = now
@@ -101,7 +109,6 @@ class BridgeNotificationListenerService : NotificationListenerService() {
 
     private fun processNotificationPosted(sbn: StatusBarNotification?, isFullSync: Boolean) {
         if (sbn == null) return
-        if (!BridgePrefs.isNotificationSyncEnabled(this)) return
 
         val pkg = sbn.packageName ?: return
         if (pkg == packageName) return // Don't mirror Bridge's own notifications
@@ -112,6 +119,15 @@ class BridgeNotificationListenerService : NotificationListenerService() {
         }
 
         val notif = sbn.notification ?: return
+        // Route live incoming/active calls to PhoneCallMonitor (independent of general notification sync)
+        if ((notif.flags and Notification.FLAG_GROUP_SUMMARY) == 0 &&
+            PhoneCallMonitor.handleCallNotificationPosted(this, sbn)
+        ) {
+            return
+        }
+
+        if (!BridgePrefs.isNotificationSyncEnabled(this)) return
+
         val rawKey = sbn.key ?: return
         val normKey = normalizeKey(rawKey)
         rawKeyMap[normKey] = rawKey
@@ -411,6 +427,7 @@ class BridgeNotificationListenerService : NotificationListenerService() {
 
     private fun handleNotificationRemoved(sbn: StatusBarNotification?) {
         if (sbn == null) return
+        PhoneCallMonitor.handleCallNotificationRemoved(sbn)
         val rawKey = sbn.key ?: return
         val normKey = normalizeKey(rawKey)
         val now = System.currentTimeMillis()
@@ -501,13 +518,20 @@ class BridgeNotificationListenerService : NotificationListenerService() {
                     bundle.putCharSequence(input.resultKey, replyText)
                 }
                 RemoteInput.addResultsToIntent(holder.remoteInputs, intent, bundle)
-                holder.action.actionIntent.send(this, 0, intent)
+                val sent = PhoneCallMonitor.sendPendingIntentWithBal(this, holder.action.actionIntent, "notif_reply", intent)
+                if (!sent) {
+                    holder.action.actionIntent.send(this, 0, intent)
+                }
                 Log.d(TAG, "Sent reply text for notification: $baseKey (action $actionId)")
+                true
             } else {
-                holder.action.actionIntent.send()
+                val sent = PhoneCallMonitor.sendPendingIntentWithBal(this, holder.action.actionIntent, "notif_action")
+                if (!sent) {
+                    holder.action.actionIntent.send()
+                }
                 Log.d(TAG, "Triggered action click for notification: $baseKey (action $actionId)")
+                true
             }
-            true
         } catch (e: Exception) {
             Log.e(TAG, "Failed to execute action on $baseKey: ${e.message}", e)
             false

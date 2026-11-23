@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.os.Build
+import android.os.SystemClock
 import android.util.Log
 import org.json.JSONObject
 import java.io.BufferedReader
@@ -292,8 +293,11 @@ class NetworkSyncClient(private val context: Context) {
         fun onNotificationPayloadReceived(jsonString: String) {}
         fun onLog(message: String) {}
         fun onPairingResult(accepted: Boolean, macName: String?) {}
+        fun onRemoteDisconnect() {}
         fun onRemoteUnpair() {}
         fun onConnectionFailed(consecutiveFailures: Int) {}
+        fun onMacStatusReceived(status: MacSystemStatus) {}
+        fun onMacMediaStatusReceived(status: MacMediaStatus) {}
     }
 
     private val listeners = CopyOnWriteArrayList<SyncListener>()
@@ -311,6 +315,10 @@ class NetworkSyncClient(private val context: Context) {
     @Volatile private var currentPort: Int = DEFAULT_PORT
     @Volatile private var pairCode: String? = null
     @Volatile var macName: String? = null
+        private set
+    @Volatile var latestMacSystemStatus: MacSystemStatus? = null
+        private set
+    @Volatile var latestMacMediaStatus: MacMediaStatus? = null
         private set
     private var failedAttempts: Int = 0
 
@@ -396,10 +404,12 @@ class NetworkSyncClient(private val context: Context) {
     }
 
     fun sendDisconnectAndStop() {
+        PhoneControlManager.stopRinging(context)
         stopWithSignal(signalType = "disconnect", clearPairingCode = false, hostOnNotify = currentHost)
     }
 
     fun sendUnpairAndStop() {
+        PhoneControlManager.stopRinging(context)
         stopWithSignal(signalType = "unpair", clearPairingCode = true, hostOnNotify = null)
     }
 
@@ -483,6 +493,9 @@ class NetworkSyncClient(private val context: Context) {
                     heartbeatTick++
                     if (heartbeatTick % 3 == 0) {
                         BridgeNotificationListenerService.instance?.syncActiveIdsOnly()
+                    }
+                    if (heartbeatTick % 20 == 0) {
+                        DeviceStatusMonitor.sendCurrentStatus(context, force = true)
                     }
                 } catch (e: Exception) {
                     Log.w(TAG, "Heartbeat ping failed: ${e.message}")
@@ -644,6 +657,8 @@ class NetworkSyncClient(private val context: Context) {
                                         notifyPairingResult(true, macName)
                                         notifyConnectionStatusChanged(true, host)
                                         startHeartbeat()
+                                        DeviceStatusMonitor.sendCurrentStatus(context, force = true)
+                                        PhoneMediaManager.sendCurrentStatus(context, forceArtwork = true)
                                         BridgeNotificationListenerService.instance?.syncActiveNotifications()
                                     }
                                     "denied" -> {
@@ -671,11 +686,44 @@ class NetworkSyncClient(private val context: Context) {
                                     notifyNotificationPayloadReceived(decryptedJsonString)
                                 } else if (innerType != null && innerType.startsWith("file_") && innerObj != null) {
                                     BridgeFileTransferManager.handleControlMessage(context, innerObj, host)
+                                } else if (innerType == "device_control" && innerObj != null) {
+                                    PhoneControlManager.handleControlCommand(context, innerObj)
+                                } else if (innerType == "media_action" && innerObj != null) {
+                                    PhoneMediaManager.handleMediaAction(context, innerObj)
+                                } else if (innerType == "call_action" && innerObj != null) {
+                                    PhoneCallMonitor.handleCallAction(context, innerObj)
+                                } else if (innerType == "mirror_control" && innerObj != null) {
+                                    PhoneMirrorController.handleControlMessage(context, innerObj, host)
+                                } else if (innerType == "mirror_input" && innerObj != null) {
+                                    PhoneMirrorInputController.handleInputMessage(context, innerObj)
+                                } else if (innerType == "mac_status" && innerObj != null) {
+                                    val status = MacSystemStatus.fromJson(innerObj)
+                                    latestMacSystemStatus = status
+                                    notifyMacStatusReceived(status)
+                                } else if (innerType == "mac_media_status" && innerObj != null) {
+                                    val status = MacMediaStatus.fromJson(
+                                        json = innerObj,
+                                        previous = latestMacMediaStatus,
+                                        receivedAtElapsedMs = SystemClock.elapsedRealtime()
+                                    )
+                                    latestMacMediaStatus = status
+                                    notifyMacMediaStatusReceived(status)
                                 } else {
                                     val payload = ClipboardPayload.fromJsonString(decryptedJsonString)
                                     when (payload?.type) {
+                                        "disconnect" -> {
+                                            log("Mac disconnected session (pairing kept).")
+                                            PhoneControlManager.stopRinging(context)
+                                            PhoneMirrorController.stopMirroring(context, reason = "mac_disconnected", notifyMac = false)
+                                            isRunning.set(false)
+                                            stopDiscovery()
+                                            notifyRemoteDisconnect()
+                                            break
+                                        }
                                         "unpair" -> {
                                             log("Mac initiated unpair.")
+                                            PhoneControlManager.stopRinging(context)
+                                            PhoneMirrorController.stopMirroring(context, reason = "mac_unpaired", notifyMac = false)
                                             pairCode = null
                                             BridgePrefs.clearPairing(context)
                                             BridgeNotificationManager.cancelAllMacAlerts(context)
@@ -716,6 +764,7 @@ class NetworkSyncClient(private val context: Context) {
                         notifyConnectionFailed(failedAttempts)
                     }
                 } finally {
+                    PhoneMirrorController.stopMirroring(context, reason = "connection_dropped", notifyMac = false)
                     stopHeartbeat()
                     disconnectSocket()
                     notifyConnectionStatusChanged(false, if (BridgePrefs.isPaired(context)) host else null)
@@ -741,6 +790,8 @@ class NetworkSyncClient(private val context: Context) {
         synchronized(this) {
             authenticated = false
             sessionCipher = null
+            latestMacSystemStatus = null
+            latestMacMediaStatus = null
             try {
                 writer?.close()
                 socket?.close()
@@ -774,6 +825,12 @@ class NetworkSyncClient(private val context: Context) {
         }
     }
 
+    private fun notifyRemoteDisconnect() {
+        for (l in listeners) {
+            try { l.onRemoteDisconnect() } catch (ignored: Exception) {}
+        }
+    }
+
     private fun notifyRemoteUnpair() {
         for (l in listeners) {
             try { l.onRemoteUnpair() } catch (ignored: Exception) {}
@@ -783,6 +840,18 @@ class NetworkSyncClient(private val context: Context) {
     private fun notifyConnectionFailed(failures: Int) {
         for (l in listeners) {
             try { l.onConnectionFailed(failures) } catch (ignored: Exception) {}
+        }
+    }
+
+    private fun notifyMacStatusReceived(status: MacSystemStatus) {
+        for (l in listeners) {
+            try { l.onMacStatusReceived(status) } catch (ignored: Exception) {}
+        }
+    }
+
+    private fun notifyMacMediaStatusReceived(status: MacMediaStatus) {
+        for (l in listeners) {
+            try { l.onMacMediaStatusReceived(status) } catch (ignored: Exception) {}
         }
     }
 

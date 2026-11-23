@@ -536,17 +536,278 @@
                                 android:fontFamily="@font/plus_jakarta_sans_medium"
                                 android:textSize="17sp"
                                 android:letterSpacing="-0.01" />
+
+                            <TextView
+                                android:id="@+id/tvLiveBadge"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="4dp"
+                                android:text="Connected"
+                                android:textColor="@color/bridge_lime"
+                                android:fontFamily="@font/dm_mono"
+                                android:textSize="12sp" />
                         </LinearLayout>
 
-                        <TextView
-                            android:id="@+id/tvLiveBadge"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="Connected"
-                            android:textColor="@color/bridge_lime"
-                            android:fontFamily="@font/dm_mono"
-                            android:textSize="12sp" />
+                        <com.link.clipboardsync.MacBatteryRingView
+                            android:id="@+id/macBatteryRing"
+                            android:layout_width="44dp"
+                            android:layout_height="48dp"
+                            android:layout_marginStart="12dp"
+                            android:visibility="gone" />
                     </LinearLayout>
+                </LinearLayout>
+
+                <!-- NOW PLAYING · YOUR MAC -->
+                <LinearLayout
+                    android:id="@+id/layoutMacNowPlayingSection"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="20dp"
+                    android:orientation="vertical"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="NOW PLAYING · YOUR MAC"
+                        android:textColor="@color/bridge_muted"
+                        android:fontFamily="@font/dm_mono"
+                        android:textSize="11sp"
+                        android:letterSpacing="0.14" />
+
+                    <com.google.android.material.card.MaterialCardView
+                        android:id="@+id/cardMacNowPlaying"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        app:cardBackgroundColor="@color/bridge_panel"
+                        app:cardCornerRadius="20dp"
+                        app:cardElevation="0dp"
+                        app:strokeColor="@color/bridge_line"
+                        app:strokeWidth="1dp">
+
+                        <RelativeLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content">
+
+                            <ImageView
+                                android:id="@+id/ivMacMediaArtwork"
+                                android:layout_width="match_parent"
+                                android:layout_height="0dp"
+                                android:layout_alignTop="@id/layoutMacMediaContent"
+                                android:layout_alignBottom="@id/layoutMacMediaContent"
+                                android:scaleType="centerCrop"
+                                android:visibility="gone"
+                                android:contentDescription="Mac album artwork" />
+
+                            <View
+                                android:layout_width="match_parent"
+                                android:layout_height="0dp"
+                                android:layout_alignTop="@id/layoutMacMediaContent"
+                                android:layout_alignBottom="@id/layoutMacMediaContent"
+                                android:background="@drawable/bg_media_scrim" />
+
+                            <LinearLayout
+                                android:id="@+id/layoutMacMediaContent"
+                                android:layout_width="match_parent"
+                                android:layout_height="wrap_content"
+                                android:orientation="vertical"
+                                android:paddingStart="16dp"
+                                android:paddingTop="14dp"
+                                android:paddingEnd="16dp"
+                                android:paddingBottom="14dp">
+
+                                <TextView
+                                    android:id="@+id/tvMacMediaApp"
+                                    android:layout_width="wrap_content"
+                                    android:layout_height="wrap_content"
+                                    android:text="Spotify"
+                                    android:textColor="@color/bridge_lime"
+                                    android:fontFamily="@font/dm_mono"
+                                    android:textSize="11sp" />
+
+                                <TextView
+                                    android:id="@+id/tvMacMediaTitle"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="4dp"
+                                    android:ellipsize="end"
+                                    android:maxLines="2"
+                                    android:text="Track Title"
+                                    android:textColor="@color/bridge_text"
+                                    android:fontFamily="@font/plus_jakarta_sans_semibold"
+                                    android:textSize="16sp" />
+
+                                <TextView
+                                    android:id="@+id/tvMacMediaArtist"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="2dp"
+                                    android:ellipsize="end"
+                                    android:maxLines="1"
+                                    android:text="Artist"
+                                    android:textColor="@color/bridge_soft"
+                                    android:fontFamily="@font/plus_jakarta_sans_regular"
+                                    android:textSize="13sp" />
+
+                                <!-- Transport controls (center aligned) -->
+                                <LinearLayout
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="14dp"
+                                    android:gravity="center"
+                                    android:orientation="horizontal">
+
+                                    <ImageButton
+                                        android:id="@+id/btnMacMediaPrev"
+                                        android:layout_width="40dp"
+                                        android:layout_height="40dp"
+                                        android:layout_marginEnd="6dp"
+                                        android:background="?attr/selectableItemBackgroundBorderless"
+                                        android:src="@drawable/ic_media_prev"
+                                        app:tint="@color/bridge_soft"
+                                        android:contentDescription="Previous track" />
+
+                                    <ImageButton
+                                        android:id="@+id/btnMacMediaRew10"
+                                        android:layout_width="40dp"
+                                        android:layout_height="40dp"
+                                        android:layout_marginEnd="10dp"
+                                        android:background="?attr/selectableItemBackgroundBorderless"
+                                        android:src="@drawable/ic_media_rew10"
+                                        app:tint="@color/bridge_soft"
+                                        android:contentDescription="Rewind 10 seconds" />
+
+                                    <FrameLayout
+                                        android:id="@+id/btnMacMediaPlayPause"
+                                        android:layout_width="46dp"
+                                        android:layout_height="46dp"
+                                        android:background="@drawable/bg_button_lime"
+                                        android:clickable="true"
+                                        android:focusable="true">
+
+                                        <ImageView
+                                            android:id="@+id/ivMacMediaPlayPause"
+                                            android:layout_width="24dp"
+                                            android:layout_height="24dp"
+                                            android:layout_gravity="center"
+                                            android:src="@drawable/ic_media_play"
+                                            app:tint="@color/bridge_ink"
+                                            android:contentDescription="Play or Pause Mac media" />
+                                    </FrameLayout>
+
+                                    <ImageButton
+                                        android:id="@+id/btnMacMediaFwd10"
+                                        android:layout_width="40dp"
+                                        android:layout_height="40dp"
+                                        android:layout_marginStart="10dp"
+                                        android:background="?attr/selectableItemBackgroundBorderless"
+                                        android:src="@drawable/ic_media_fwd10"
+                                        app:tint="@color/bridge_soft"
+                                        android:contentDescription="Forward 10 seconds" />
+
+                                    <ImageButton
+                                        android:id="@+id/btnMacMediaNext"
+                                        android:layout_width="40dp"
+                                        android:layout_height="40dp"
+                                        android:layout_marginStart="6dp"
+                                        android:background="?attr/selectableItemBackgroundBorderless"
+                                        android:src="@drawable/ic_media_next"
+                                        app:tint="@color/bridge_soft"
+                                        android:contentDescription="Next track" />
+                                </LinearLayout>
+
+                                <!-- Seek bar & timestamps (hidden when unsupported) -->
+                                <LinearLayout
+                                    android:id="@+id/layoutMacMediaSeekRow"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="12dp"
+                                    android:orientation="vertical">
+
+                                    <SeekBar
+                                        android:id="@+id/seekBarMacMedia"
+                                        android:layout_width="match_parent"
+                                        android:layout_height="wrap_content"
+                                        android:max="1000"
+                                        android:paddingStart="0dp"
+                                        android:paddingEnd="0dp"
+                                        android:progressBackgroundTint="#40FFFFFF"
+                                        android:progressTint="@color/bridge_lime"
+                                        android:thumbTint="#FFFFFFFF" />
+
+                                    <LinearLayout
+                                        android:layout_width="match_parent"
+                                        android:layout_height="wrap_content"
+                                        android:layout_marginTop="2dp"
+                                        android:orientation="horizontal">
+
+                                        <TextView
+                                            android:id="@+id/tvMacMediaElapsed"
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:text="0:00"
+                                            android:textColor="@color/bridge_soft"
+                                            android:fontFamily="@font/dm_mono"
+                                            android:textSize="11sp" />
+
+                                        <View
+                                            android:layout_width="0dp"
+                                            android:layout_height="1dp"
+                                            android:layout_weight="1" />
+
+                                        <TextView
+                                            android:id="@+id/tvMacMediaRemaining"
+                                            android:layout_width="wrap_content"
+                                            android:layout_height="wrap_content"
+                                            android:text="-0:00"
+                                            android:textColor="@color/bridge_soft"
+                                            android:fontFamily="@font/dm_mono"
+                                            android:textSize="11sp" />
+                                    </LinearLayout>
+                                </LinearLayout>
+
+                                <!-- Mac Volume Row -->
+                                <LinearLayout
+                                    android:id="@+id/layoutMacMediaVolumeRow"
+                                    android:layout_width="match_parent"
+                                    android:layout_height="wrap_content"
+                                    android:layout_marginTop="10dp"
+                                    android:gravity="center_vertical"
+                                    android:orientation="horizontal">
+
+                                    <ImageButton
+                                        android:id="@+id/btnMacMediaVolMute"
+                                        android:layout_width="32dp"
+                                        android:layout_height="32dp"
+                                        android:background="?attr/selectableItemBackgroundBorderless"
+                                        android:src="@drawable/ic_mac_sound"
+                                        app:tint="@color/bridge_soft"
+                                        android:contentDescription="Toggle Mac mute" />
+
+                                    <SeekBar
+                                        android:id="@+id/seekBarMacVolume"
+                                        android:layout_width="0dp"
+                                        android:layout_height="wrap_content"
+                                        android:layout_weight="1"
+                                        android:max="100"
+                                        android:progressBackgroundTint="#40FFFFFF"
+                                        android:progressTint="@color/bridge_lime"
+                                        android:thumbTint="#FFFFFFFF" />
+
+                                    <TextView
+                                        android:id="@+id/tvMacMediaVolumePct"
+                                        android:layout_width="40dp"
+                                        android:layout_height="wrap_content"
+                                        android:gravity="end"
+                                        android:text="50%"
+                                        android:textColor="@color/bridge_soft"
+                                        android:fontFamily="@font/dm_mono"
+                                        android:textSize="11sp" />
+                                </LinearLayout>
+                            </LinearLayout>
+                        </RelativeLayout>
+                    </com.google.android.material.card.MaterialCardView>
                 </LinearLayout>
 
                 <View
@@ -1037,6 +1298,66 @@
                         android:layout_height="wrap_content"
                         android:checked="true" />
                 </LinearLayout>
+
+                <!-- Divider -->
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginTop="8dp"
+                    android:background="@color/bridge_line" />
+
+                <!-- Get Call on Mac (Synced) -->
+                <LinearLayout
+                    android:id="@+id/rowCallsOnMac"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingTop="12dp"
+                    android:paddingBottom="4dp">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginEnd="12dp"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Get Call on Mac"
+                            android:textColor="@color/bridge_text"
+                            android:fontFamily="@font/plus_jakarta_sans_medium"
+                            android:textSize="15sp" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:text="Show incoming phone calls on your Mac so you can answer or manage them there."
+                            android:textColor="@color/bridge_muted"
+                            android:fontFamily="@font/plus_jakarta_sans_regular"
+                            android:textSize="12.5sp" />
+
+                        <TextView
+                            android:id="@+id/tvCallsOnMacPermHint"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="4dp"
+                            android:text="Notification Access required — tap to enable"
+                            android:textColor="@color/bridge_coral"
+                            android:fontFamily="@font/plus_jakarta_sans_medium"
+                            android:textSize="12sp"
+                            android:visibility="gone" />
+                    </LinearLayout>
+
+                    <androidx.appcompat.widget.SwitchCompat
+                        android:id="@+id/switchCallsOnMac"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:checked="true" />
+                </LinearLayout>
             </LinearLayout>
 
             <!-- PHONE ONLY SETTINGS Section Header -->
@@ -1288,6 +1609,59 @@
                         android:fontFamily="@font/dm_mono"
                         android:text="Active"
                         android:textColor="@color/bridge_lime"
+                        android:textSize="12sp" />
+                </LinearLayout>
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:background="@color/bridge_line" />
+
+                <!-- Do Not Disturb Policy Access Row -->
+                <LinearLayout
+                    android:id="@+id/rowSettingDndAccess"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:background="?attr/selectableItemBackground"
+                    android:clickable="true"
+                    android:focusable="true"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:paddingTop="12dp"
+                    android:paddingBottom="12dp">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginEnd="12dp"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="Do Not Disturb Access"
+                            android:textColor="@color/bridge_text"
+                            android:fontFamily="@font/plus_jakarta_sans_medium"
+                            android:textSize="15sp" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:text="Lets Mac toggle Silent ringer and Do Not Disturb mode"
+                            android:textColor="@color/bridge_muted"
+                            android:fontFamily="@font/plus_jakarta_sans_regular"
+                            android:textSize="12.5sp" />
+                    </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/tvSettingDndAccessStatus"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:fontFamily="@font/dm_mono"
+                        android:text="Setup"
+                        android:textColor="@color/bridge_coral"
                         android:textSize="12sp" />
                 </LinearLayout>
             </LinearLayout>

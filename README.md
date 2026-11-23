@@ -9,7 +9,7 @@
 A lightweight, native open-source bridge linking your **Android phone** and your **Mac** over your local Wi-Fi network—with zero cloud accounts, zero telemetry, and zero latency.
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Version-v1.3.5-C8F135?style=for-the-badge&labelColor=0E0F12" alt="Version 1.3.5" />
+  <img src="https://img.shields.io/badge/Version-v1.4.0-C8F135?style=for-the-badge&labelColor=0E0F12" alt="Version 1.4.0" />
   <img src="https://img.shields.io/badge/Android-Kotlin-C8F135?style=for-the-badge&logo=android&logoColor=C8F135&labelColor=0E0F12" alt="Android Kotlin" />
   <img src="https://img.shields.io/badge/macOS-Swift_%26_SwiftUI-C8F135?style=for-the-badge&logo=apple&logoColor=C8F135&labelColor=0E0F12" alt="macOS Swift" />
   <img src="https://img.shields.io/badge/Network-100%25_Local_LAN-181B20?style=for-the-badge&labelColor=0E0F12&color=C8F135" alt="100% Local LAN" />
@@ -17,7 +17,7 @@ A lightweight, native open-source bridge linking your **Android phone** and your
 </p>
 
 <p align="center">
-  <a href="#-whats-new-in-v135">What's New in v1.3.5</a> •
+  <a href="#-whats-new-in-v140">What's New in v1.4.0</a> •
   <a href="#-key-features">Key Features</a> •
   <a href="#-getting-started">Getting Started</a> •
   <a href="#-pairing--multi-device-connection">Pairing & Multi-Device</a> •
@@ -45,13 +45,14 @@ A lightweight, native open-source bridge linking your **Android phone** and your
 
 ---
 
-## ⚡ What's New in v1.3.5
+## ⚡ What's New in v1.4.0
 
-Bridge **v1.3.5** introduces end-to-end encrypted local control transport, 2048-bit SPEKE PAKE authentication, and macOS menu bar UI stability fixes:
+Bridge **v1.4.0** introduces pure in-app Android-to-Mac phone mirroring, native-style macOS call notifications with live call duration, bidirectional media & device controls, and Android 14 clipboard reliability fixes:
 
-- **2048-Bit SPEKE PAKE Handshake** — Replaced the static salted SHA-256 pairing challenge with a 2048-bit **SPEKE (Simple Password Exponential Key Exchange)** over RFC 3526 Group 14 (`hello` $\to$ `challenge` $\to$ `auth` $\to$ `welcome`), preventing offline brute-force recovery of the 6-digit pairing code from captured handshakes and providing Perfect Forward Secrecy (PFS).
-- **End-to-End AES-256-GCM Session Transport (`TCP :8765`)** — All post-handshake control and sync traffic (clipboard text/images, mirrored notifications, inline replies, settings sync, and file-transfer control headers) is now encrypted with directional **AES-256-GCM** session keys, monotonic sequence numbers, and AAD direction binding.
-- **Hardened File Sharing & Menu Bar Popover Scroll Fix** — Expanded executable/script/bundle extension guards (`.command`, `.workflow`, `.scpt`, `.py`, `.jar`, `.webloc`, etc.), symlink rejection during archive extraction, and hashed data-socket auth proofs (`computeDataSocketAuth`), plus fixed the macOS menu bar popover displacing when long multi-message notifications arrive (`ViewThatFits` + screen height clamping).
+- **In-App Phone Mirroring (Zero ADB Required)** — Stream your phone's display via hardware H.264 (`MediaProjection` → Apple `VideoToolbox`) into a borderless iPhone Mirroring-style macOS window with hover-reveal controls, trackpad swipes, Mac keyboard input (`⌘C`, `⌘X`, `⌘V`, `⌘A`, `⌘1`–`⌘4`), auto-hidden phone keyboard, and physical phone screen dimming—secured end-to-end with one-way SHA-256 handshake proofs and per-frame **AES-256-GCM** encryption.
+- **Calls on Mac with Live Duration & Multi-App Controls** — Displays real caller names from cellular calls and VoIP apps (Telegram, Messenger, WhatsApp) in a native macOS Notification Center frosted banner with a live `MM:SS` timer, **Accept**, **Decline**, **Silence**, and active **Mute / End Call** buttons, plus automatic pause for playing Mac media.
+- **Bidirectional Universal Now Playing & Remote Device Controls** — View and control Android media from your Mac, or control universal Mac media playback (bundled `MediaRemoteAdapter`, Spotify, Apple Music, VLC, and browser YouTube tabs), Mac mute/volume, and live Mac battery telemetry directly from Android.
+- **Quick Controls, Low-Battery Alerts, Launch at Login & Clipboard Sync Fixes** — Added remote **Sound / Vibrate / Silent**, **DND**, and **Ring Phone** beacon controls, optional ≤ 15% phone low-battery alerts, macOS Launch at Login, and reliable Android 13/14 / One UI 6 background copy sync.
 
 ---
 
@@ -64,10 +65,27 @@ Bridge **v1.3.5** introduces end-to-end encrypted local control transport, 2048-
 * **Native OS Shortcuts:** Drag and drop onto the macOS menu bar icon, right-click in Finder to "Share with Bridge", or share from Android's system share sheet (`ACTION_SEND`).
 * **Custom Save Locations:** Choose your custom downloads folder on both Mac (via persistent Security-Scoped Bookmarks) and Android (via Storage Access Framework).
 
+<br/>
+<table align="center">
+  <tr>
+    <td align="center"><b>macOS Menu Bar Transfer</b></td>
+    <td align="center"><b>Android Transfer Tab</b></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="https://raw.githubusercontent.com/badruddin-tasnim/bridge/assets/mac/04-mac-connected-transfer.png" width="340" alt="macOS Menu Bar Encrypted File and Folder Transfer" /></td>
+    <td align="center"><img src="https://raw.githubusercontent.com/badruddin-tasnim/bridge/assets/android/03-android-transfer-active.png" width="225" alt="Android Transfer Tab with Active Encrypted Progress" /></td>
+  </tr>
+</table>
+
 ### 📋 Two-Way Clipboard Synchronization (Text & Photos)
 * **Instant Text Copy:** Copy any text, code snippet, or link on your phone or Mac; immediately paste it on the other device with zero extra taps.
 * **Screenshot & Image Sync:** Copy an image in Preview, capture a macOS screenshot (`Cmd+Shift+4`), or copy a photo on Android—it syncs directly into the other device's pasteboard.
 * **Echo Suppression:** Robust SHA-256 digest hashing prevents infinite clipboard feedback loops.
+
+<br/>
+<div align="center">
+  <img src="https://raw.githubusercontent.com/badruddin-tasnim/bridge/assets/features/02-clipboard-sync.png" width="640" alt="Two-Way Encrypted Clipboard Sync for Text and Images" />
+</div>
 
 ### 🔔 Interactive Notification Mirroring
 * **Instant Forwarding:** Phone notifications appear instantly in the macOS menu bar popover and as native macOS notification banners with app icons.
@@ -76,15 +94,66 @@ Bridge **v1.3.5** introduces end-to-end encrypted local control transport, 2048-
 * **Bidirectional Settings Sync:** Toggle notification sync on either phone or Mac with changes synchronized across both devices in real time.
 * **Mac Alert Mirroring:** Optionally forward Mac system notifications to your Android device with smart duplicate detection (drops alerts for apps already installed on your phone).
 
+<br/>
+<div align="center">
+  <img src="https://raw.githubusercontent.com/badruddin-tasnim/bridge/assets/mac/05-mac-notifications-reply.png" width="360" alt="Interactive Notification Mirroring with Inline Quick Reply" />
+</div>
+
 ### ⚡ Seamless Local Connectivity
 * **Zero-Config Bonjour Discovery:** Discovers your Mac automatically on Wi-Fi via mDNS (`_clipboardsync._tcp`), adapting seamlessly to DHCP router changes.
 * **Sleep & Wake Resilience:** Automatically pauses when your MacBook lid closes and re-establishes the connection within 1.5 seconds upon waking.
 * **100% Local Wi-Fi:** All communication travels strictly over your local router on `TCP :8765`. Zero cloud servers, zero third-party accounts, zero tracking.
 
+<br/>
+<div align="center">
+  <img src="https://raw.githubusercontent.com/badruddin-tasnim/bridge/assets/features/04-local-connectivity.png" width="640" alt="Zero-Config Local Wi-Fi Architecture with SPEKE PAKE and AES-256-GCM" />
+</div>
+
 ### 📱 Multiple Device Connectivity
 * **One Mac, Multiple Phones:** Keep your personal and work phones linked to your MacBook at the same time.
 * **Unified Feed:** Notifications from both devices are displayed with individual device tags.
 * **Selective Unpairing:** Unpair or disconnect one phone without affecting other active devices.
+
+<br/>
+<div align="center">
+  <img src="https://raw.githubusercontent.com/badruddin-tasnim/bridge/assets/mac/06-mac-multi-device.png" width="360" alt="Multiple Android Devices Connected Simultaneously on Mac" />
+</div>
+
+### 🖥️ In-App Phone Mirroring
+* **Native Hardware Streaming:** Mirrors your Android display in real time over local Wi-Fi using `MediaProjection` + H.264 `MediaCodec` on Android and hardware `VideoToolbox` decoding on Mac—without needing USB cables or ADB setup.
+* **iPhone Mirroring-Style Window:** Borderless resizable bezel window with a hover-reveal top pill (`Screen Dim`, `Pin on Top`, `Back`, `Home`, `Recents`) and automatic rotation handling.
+* **Mac Trackpad & Keyboard Control:** Click, drag, long-press, scroll with two-finger trackpad swipes, and type directly from your Mac keyboard (`⌘V`, `⌘C`, `⌘X`, `⌘A`, plus `⌘1` Home, `⌘2` Recents, `⌘3` Back, `⌘4` Notifications) while keeping the phone screen dimmed and awake.
+
+<br/>
+<div align="center">
+  <img src="https://raw.githubusercontent.com/badruddin-tasnim/bridge/assets/features/06-phone-mirroring.png" width="290" alt="In-App Android Phone Mirroring Window with Hover Controls" />
+</div>
+
+### 📞 Calls on Mac & Auto-Pause Media
+* **Native macOS Call Banner:** Incoming cellular calls and messaging calls (Telegram, Messenger, WhatsApp) surface in a frosted-glass macOS Notification Center banner showing the resolved caller name, app icon, and a live `MM:SS` duration counter once answered.
+* **Full Call Controls:** **Accept**, **Decline**, or **Silence** ringing calls, and **Mute / Unmute** or **End Call** while active.
+* **Auto-Pause Mac Media:** Optionally pauses active audio/video on your Mac when a call arrives on your phone.
+
+<br/>
+<div align="center">
+  <img src="https://raw.githubusercontent.com/badruddin-tasnim/bridge/assets/features/07-calls-on-mac.png" width="480" alt="Native macOS Incoming and Active Call Banners with Live Duration" />
+</div>
+
+### 🎵 Bidirectional Media & Device Controls
+* **Universal Now Playing Sync:** Control active Android media from Mac, or view album art, seek timelines, skip tracks (`±10s`, previous/next), and control Mac audio across Spotify, Apple Music, VLC, browsers, and any Now Playing app from your phone.
+* **Live Telemetry & Quick Toggles:** View live battery percentages & charging status on both devices, receive optional ≤ 15% low-battery alerts on Mac, toggle phone ringer mode (`Sound` / `Vibrate` / `Mute`), Do Not Disturb, Mac mute/volume, or trigger a high-audibility **Ring Phone** beacon.
+
+<br/>
+<table align="center">
+  <tr>
+    <td align="center"><b>Android Controls & Now Playing on Mac</b></td>
+    <td align="center"><b>Mac Controls & Now Playing on Android</b></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="https://raw.githubusercontent.com/badruddin-tasnim/bridge/assets/mac/07-mac-devices-media-controls.png" width="340" alt="macOS Popover with Phone Quick Controls, Battery Ring, and Android Now Playing" /></td>
+    <td align="center"><img src="https://raw.githubusercontent.com/badruddin-tasnim/bridge/assets/android/01-android-home-connected.png" width="225" alt="Android Home Screen with Mac Battery Ring and Mac Now Playing" /></td>
+  </tr>
+</table>
 
 ---
 
@@ -224,9 +293,10 @@ Pairing your devices is fast, private, and requires zero account creation:
    - *Alternatively:* Enter the 6-digit pairing code shown on your Mac.
    - *Manual IP:* If on an enterprise network blocking multicast (mDNS), tap **Enter IP address instead** and click the eye icon in the bottom bar of the Mac popover to view your `IP:port`.
 4. **Grant Permissions on Android:**
-   - **Notification Access:** Allows Bridge to mirror your incoming notifications and route quick replies.
-   - **Accessibility Service:** Android 10+ restricts background apps from reading the clipboard. Bridge uses an accessibility event listener to capture copy actions without screen reading or keylogging.
+   - **Notification Access:** Allows Bridge to mirror your incoming notifications, live calls, and route quick replies or call actions.
+   - **Accessibility Service:** Android 10+ restricts background apps from reading the clipboard. Bridge uses accessibility events to capture copy actions and dispatch gestures/text when Phone Mirroring is active.
    - **Battery Optimization Exemption:** Prevents OEM task killers from freezing background sync when your phone is locked.
+   - **Phone & Screen Capture *(Optional, for Calls & Mirroring)*:** Prompted when enabling **Calls on Mac** (`ANSWER_PHONE_CALLS` / `READ_PHONE_STATE`) or starting a **Mirror Phone** session (`MediaProjection`).
 5. **Adding Another Phone:**
    - Click **Add another phone** in the Mac popover anytime.
    - The QR drawer expands smoothly without disconnecting your existing device.
@@ -245,7 +315,7 @@ Bridge is built to be **100% local, zero-cloud, and auditable** (see [SECURITY.m
 
 ### 1. 2048-Bit SPEKE PAKE Authentication & End-to-End AES-256-GCM Transport
 * **Zero-knowledge PAKE handshake (`BridgeSpeke`):** Devices authenticate using a 2048-bit **SPEKE (Simple Password Exponential Key Exchange)** over RFC 3526 Group 14 ($p = 2q + 1$). Neither the 6-digit pairing code nor any static hash of it is sent before Diffie-Hellman key agreement, preventing offline brute-force attacks against recorded handshakes and providing **Perfect Forward Secrecy (PFS)**.
-* **Encrypted control & data channels (`BridgeSessionCipher`):** All post-handshake traffic on `TCP :8765` (clipboard text/images, notifications, inline replies, settings sync, and file-transfer control messages) is encrypted with directional **AES-256-GCM** keys, monotonic 64-bit sequence numbers, and AAD direction binding. File-transfer data streams are likewise encrypted with **AES-256-GCM** and authenticated via one-way SHA-256 data-socket proofs (`computeDataSocketAuth`).
+* **Encrypted control, file & mirroring channels (`BridgeSessionCipher`, `PhoneMirrorStreamCipher`):** All post-handshake traffic on `TCP :8765` (clipboard text/images, notifications, call events/actions, media/device controls, mirror control/input, and file-transfer headers) is encrypted with directional **AES-256-GCM** keys, monotonic 64-bit sequence numbers, and AAD direction binding. Dedicated file-transfer streams and Phone Mirroring H.264 video sockets are likewise encrypted per-packet with **AES-256-GCM**, authenticated via one-way SHA-256 session proofs (`computeDataSocketAuth` / `computeStreamAuthProof`), and strictly isolated to local LAN interfaces.
 
 ### 2. Brute-Force & Denial-of-Service Defense
 * **Per-IP Exponential Lockout:** 5 failed handshake attempts from an IP within 60 seconds trigger an immediate 60-second lockout, doubling exponentially on consecutive violations up to 960 seconds.
@@ -268,11 +338,14 @@ Bridge is built to be **100% local, zero-cloud, and auditable** (see [SECURITY.m
 
 | Permission | Exact Purpose in Bridge | Source Reference |
 | :--- | :--- | :--- |
-| `BIND_NOTIFICATION_LISTENER_SERVICE` | Reads incoming Android status bar notifications to mirror them to your Mac and delivers replies/dismissals back to apps. | [`BridgeNotificationListenerService.kt`](android-app/app/src/main/java/com/link/clipboardsync/BridgeNotificationListenerService.kt) |
-| `BIND_ACCESSIBILITY_SERVICE` | Detects copy events on Android 10+ so clipboard text can be synced without background polling. Does not read screen text or log keystrokes. | [`ClipboardSyncAccessibilityService.kt`](android-app/app/src/main/java/com/link/clipboardsync/ClipboardSyncAccessibilityService.kt) |
-| `INTERNET` | Establishes the local LAN TCP socket (`:8765`) between phone and Mac. Checks GitHub API for new releases. | [`NetworkSyncClient.kt`](android-app/app/src/main/java/com/link/clipboardsync/NetworkSyncClient.kt) |
+| `BIND_NOTIFICATION_LISTENER_SERVICE` | Reads incoming Android status bar notifications & live calls to mirror to your Mac and delivers replies, dismissals, or call actions back to apps. | [`BridgeNotificationListenerService.kt`](android-app/app/src/main/java/com/link/clipboardsync/BridgeNotificationListenerService.kt) |
+| `BIND_ACCESSIBILITY_SERVICE` | Detects copy events on Android 10+ and executes gestures/text input during active Phone Mirroring sessions. Does not read private content or log keystrokes outside active mirroring/copy events. | [`ClipboardSyncAccessibilityService.kt`](android-app/app/src/main/java/com/link/clipboardsync/ClipboardSyncAccessibilityService.kt) |
+| `FOREGROUND_SERVICE_MEDIA_PROJECTION` | Captures your display strictly while a user-approved **Mirror Phone** session is running and streams encrypted frames to your Mac. | [`ScreenMirrorForegroundService.kt`](android-app/app/src/main/java/com/link/clipboardsync/ScreenMirrorForegroundService.kt) |
+| `ANSWER_PHONE_CALLS` & `READ_PHONE_STATE` | Enables cellular **Accept** / **End Call** actions and ringing state detection when **Calls on Mac** is enabled. | [`PhoneCallMonitor.kt`](android-app/app/src/main/java/com/link/clipboardsync/PhoneCallMonitor.kt) |
+| `ACCESS_NOTIFICATION_POLICY` & `MODIFY_AUDIO_SETTINGS` | Powers remote **Ringer Mode**, **Do Not Disturb**, active call **Mute**, media volume, and **Ring Phone** finder controls from your Mac. | [`PhoneControlManager.kt`](android-app/app/src/main/java/com/link/clipboardsync/PhoneControlManager.kt) |
+| `INTERNET` | Establishes local LAN sockets (`:8765`, transfer & mirror streams) between phone and Mac. Queries GitHub Releases for app updates. | [`NetworkSyncClient.kt`](android-app/app/src/main/java/com/link/clipboardsync/NetworkSyncClient.kt) |
 | `CAMERA` | Active only when scanning the pairing QR code. Video frames are decoded in memory and discarded immediately. | [`MainActivity.kt`](android-app/app/src/main/java/com/link/clipboardsync/MainActivity.kt) |
-| `POST_NOTIFICATIONS` | Displays the persistent foreground notification required by Android to keep the background sync engine alive. | [`ClipboardSyncForegroundService.kt`](android-app/app/src/main/java/com/link/clipboardsync/ClipboardSyncForegroundService.kt) |
+| `POST_NOTIFICATIONS` | Displays the persistent foreground notification, file transfer progress alerts, and active mirroring controls. | [`ClipboardSyncForegroundService.kt`](android-app/app/src/main/java/com/link/clipboardsync/ClipboardSyncForegroundService.kt) |
 | `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` | Prevents Android Doze mode from killing the socket connection when the device is locked. | [`MainActivity.kt`](android-app/app/src/main/java/com/link/clipboardsync/MainActivity.kt) |
 
 ---

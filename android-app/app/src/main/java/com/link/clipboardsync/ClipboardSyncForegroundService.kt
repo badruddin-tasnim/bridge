@@ -76,6 +76,7 @@ class ClipboardSyncForegroundService : Service(), NetworkSyncClient.SyncListener
 
         ClipboardSyncManager.init(this)
         ClipboardSyncManager.networkClient?.addListener(this)
+        DeviceStatusMonitor.register(this)
         BridgeNotificationManager.init(this)
         UpdateChecker.startPeriodicChecks(this)
     }
@@ -191,7 +192,8 @@ class ClipboardSyncForegroundService : Service(), NetworkSyncClient.SyncListener
                 mainHandler.post {
                     try {
                         ClipboardSyncManager.lastReceivedHash = hash
-                        ClipboardSyncManager.isInternalMutation = true
+                        ClipboardSyncManager.lastInternalMutationAtMs = System.currentTimeMillis()
+                        ClipboardSyncManager.isInternalMutation = false
                         clipboardManager.setPrimaryClip(ClipData.newPlainText("Bridge", text))
                         ClipboardSyncManager.recordHistory(text, outgoing = false)
                         Log.d(TAG, "Injected remote clipboard into Android (${text.length} chars, hash: ${hash.take(8)})")
@@ -221,7 +223,8 @@ class ClipboardSyncForegroundService : Service(), NetworkSyncClient.SyncListener
                         try {
                             ClipboardSyncManager.lastReceivedHash = hash
                             ClipboardSyncManager.lastRawImageHash = hash
-                            ClipboardSyncManager.isInternalMutation = true
+                            ClipboardSyncManager.lastInternalMutationAtMs = System.currentTimeMillis()
+                            ClipboardSyncManager.isInternalMutation = false
                             val clipData = ClipData.newUri(contentResolver, "Bridge Image", imageUri)
                             clipboardManager.setPrimaryClip(clipData)
                             ClipboardSyncManager.recordHistory("[Image]", outgoing = false)
@@ -246,6 +249,8 @@ class ClipboardSyncForegroundService : Service(), NetworkSyncClient.SyncListener
         super.onDestroy()
         isRunning = false
         try { wifiLock?.release() } catch (ignored: Exception) {}
+        PhoneControlManager.stopRinging(this)
+        DeviceStatusMonitor.unregister(this)
         ClipboardSyncManager.networkClient?.removeListener(this)
     }
 }

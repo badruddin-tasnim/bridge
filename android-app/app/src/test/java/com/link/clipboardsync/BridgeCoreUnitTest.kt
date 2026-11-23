@@ -288,4 +288,424 @@ class BridgeCoreUnitTest {
         assertNull(NotificationActionRequest.fromJson(JSONObject("""{"id":"","actionId":0}""")))
         assertNull(NotificationDismissRequest.fromJson(JSONObject("""{"id":""}""")))
     }
+
+    @Test
+    fun deviceStatusMonitor_buildsBatteryStatusJson() {
+        val json = JSONObject(
+            DeviceStatusMonitor.buildDeviceStatusJson(
+                DeviceStatusMonitor.BatterySnapshot(level = 45, isCharging = false)
+            )
+        )
+        assertEquals("device_status", json.getString("type"))
+        assertEquals(45, json.getInt("batteryLevel"))
+        assertFalse(json.getBoolean("isCharging"))
+
+        val chargingJson = JSONObject(
+            DeviceStatusMonitor.buildDeviceStatusJson(
+                DeviceStatusMonitor.BatterySnapshot(level = 20, isCharging = true)
+            )
+        )
+        assertEquals(20, chargingJson.getInt("batteryLevel"))
+        assertTrue(chargingJson.getBoolean("isCharging"))
+
+        val fullJson = JSONObject(
+            DeviceStatusMonitor.buildDeviceStatusJson(
+                DeviceStatusMonitor.DeviceSnapshot(
+                    batteryLevel = 72,
+                    isCharging = false,
+                    ringerMode = "vibrate",
+                    isDndEnabled = true,
+                    hasDndPermission = true,
+                    isRingingPhone = true
+                )
+            )
+        )
+        assertEquals("device_status", fullJson.getString("type"))
+        assertEquals(72, fullJson.getInt("batteryLevel"))
+        assertFalse(fullJson.getBoolean("isCharging"))
+        assertEquals("vibrate", fullJson.getString("ringerMode"))
+        assertTrue(fullJson.getBoolean("isDndEnabled"))
+        assertTrue(fullJson.getBoolean("hasDndPermission"))
+        assertTrue(fullJson.getBoolean("isRingingPhone"))
+    }
+
+    @Test
+    fun phoneMediaManager_buildsMediaStatusJson() {
+        val activeJson = JSONObject(
+            PhoneMediaManager.buildMediaStatusJson(
+                PhoneMediaManager.MediaSnapshot(
+                    isActive = true,
+                    isPlaying = true,
+                    title = "Surrender",
+                    artist = "KIDPUNK",
+                    album = "Surrender",
+                    appName = "Spotify",
+                    durationMs = 176000L,
+                    positionMs = 28000L,
+                    playbackSpeed = 1.0f,
+                    volumeIndex = 10,
+                    maxVolume = 15,
+                    canSeek = true,
+                    canSkipNext = true,
+                    canSkipPrevious = false,
+                    canControlVolume = true,
+                    artworkHash = "abc123",
+                    artworkBase64 = "ZmFrZQ=="
+                )
+            )
+        )
+        assertEquals("media_status", activeJson.getString("type"))
+        assertTrue(activeJson.getBoolean("isActive"))
+        assertTrue(activeJson.getBoolean("isPlaying"))
+        assertEquals("Surrender", activeJson.getString("title"))
+        assertEquals("KIDPUNK", activeJson.getString("artist"))
+        assertEquals("Spotify", activeJson.getString("appName"))
+        assertEquals(176000L, activeJson.getLong("durationMs"))
+        assertEquals(28000L, activeJson.getLong("positionMs"))
+        assertEquals(10, activeJson.getInt("volumeIndex"))
+        assertEquals(15, activeJson.getInt("maxVolume"))
+        assertTrue(activeJson.getBoolean("canSeek"))
+        assertTrue(activeJson.getBoolean("canSkipNext"))
+        assertFalse(activeJson.getBoolean("canSkipPrevious"))
+        assertTrue(activeJson.getBoolean("canControlVolume"))
+        assertEquals("ZmFrZQ==", activeJson.getString("artworkBase64"))
+
+        val inactiveJson = JSONObject(
+            PhoneMediaManager.buildMediaStatusJson(
+                PhoneMediaManager.MediaSnapshot(
+                    isActive = false,
+                    volumeIndex = 4,
+                    maxVolume = 15
+                )
+            )
+        )
+        assertFalse(inactiveJson.getBoolean("isActive"))
+        assertFalse(inactiveJson.has("artworkBase64"))
+        assertEquals(4, inactiveJson.getInt("volumeIndex"))
+    }
+
+    @Test
+    fun phoneCallMonitor_buildsCallEventJson() {
+        val ringingJson = JSONObject(
+            PhoneCallMonitor.buildCallEventJson(
+                callId = "call_key_1",
+                state = "ringing",
+                callerName = "Alex",
+                appName = "Phone",
+                canAnswer = true,
+                canDecline = true,
+                isMuted = false,
+                iconBase64 = "aWNvbg=="
+            )
+        )
+        assertEquals("call_event", ringingJson.getString("type"))
+        assertEquals("call_key_1", ringingJson.getString("callId"))
+        assertEquals("ringing", ringingJson.getString("state"))
+        assertEquals("Alex", ringingJson.getString("callerName"))
+        assertEquals("Phone", ringingJson.getString("appName"))
+        assertTrue(ringingJson.getBoolean("canAnswer"))
+        assertTrue(ringingJson.getBoolean("canDecline"))
+        assertFalse(ringingJson.getBoolean("isMuted"))
+        assertEquals("aWNvbg==", ringingJson.getString("icon"))
+
+        val activeMutedJson = JSONObject(
+            PhoneCallMonitor.buildCallEventJson(
+                callId = "call_key_1",
+                state = "active",
+                callerName = "Alex",
+                appName = "Phone",
+                canAnswer = false,
+                canDecline = true,
+                isMuted = true,
+                elapsedSeconds = 45,
+                iconBase64 = null
+            )
+        )
+        assertEquals("active", activeMutedJson.getString("state"))
+        assertTrue(activeMutedJson.getBoolean("isMuted"))
+        assertEquals(45, activeMutedJson.getInt("elapsedSeconds"))
+        assertFalse(activeMutedJson.has("icon"))
+    }
+
+    @Test
+    fun phoneCallMonitor_filtersGenericLabelsAndResolvesCallerAndAppName() {
+        assertEquals("Phone", PhoneCallMonitor.normalizeCallAppName("com.samsung.android.incallui", "Call"))
+        assertEquals("WhatsApp", PhoneCallMonitor.normalizeCallAppName("com.whatsapp", "WhatsApp"))
+
+        assertTrue(PhoneCallMonitor.isGenericCallLabel("Call", "Phone"))
+        assertTrue(PhoneCallMonitor.isGenericCallLabel("Incoming voice call...", "Phone"))
+        assertTrue(PhoneCallMonitor.isGenericCallLabel("01:24", "Phone"))
+        assertTrue(PhoneCallMonitor.isGenericCallLabel("Answer", "Phone"))
+        assertFalse(PhoneCallMonitor.isGenericCallLabel("Sarah Connor", "Phone"))
+        assertFalse(PhoneCallMonitor.isGenericCallLabel("+880 1712-345678", "Phone"))
+
+        val resolved = PhoneCallMonitor.selectBestCallerName(
+            candidates = listOf("Call", "Incoming call", "00:05", "Incoming call from Sarah Connor", "Answer"),
+            appName = "Phone",
+            previousCallerName = null,
+            fallback = "Incoming Call"
+        )
+        assertEquals("Sarah Connor", resolved)
+
+        val fallbackPrev = PhoneCallMonitor.selectBestCallerName(
+            candidates = listOf("Call", "Ongoing call"),
+            appName = "Phone",
+            previousCallerName = "Alex",
+            fallback = "Active Call"
+        )
+        assertEquals("Alex", fallbackPrev)
+    }
+
+    @Test
+    fun phoneControlManager_generatesFindPhoneBeaconPcm() {
+        val pcm = PhoneControlManager.generateFindPhoneBeaconPcm(sampleRate = 24000)
+        assertEquals(30000, pcm.size)
+        assertTrue(pcm.any { it.toInt() != 0 })
+        assertEquals(0, pcm.last().toInt())
+    }
+
+    @Test
+    fun macSystemStatus_parsesMacBookAndDesktopBatteriesAndBuildsControlJson() {
+        val macBook = MacSystemStatus.fromJson(
+            JSONObject()
+                .put("type", "mac_status")
+                .put("batteryPercent", 84)
+                .put("isCharging", true)
+                .put("isMuted", false)
+                .put("volumePercent", 65)
+                .put("canToggleMute", true)
+                .put("canControlVolume", true)
+        )
+        assertEquals(84, macBook.batteryPercent)
+        assertTrue(macBook.isCharging)
+        assertFalse(macBook.isMuted)
+        assertEquals(65, macBook.volumePercent)
+
+        val desktopMac = MacSystemStatus.fromJson(
+            JSONObject()
+                .put("type", "mac_status")
+                .put("isCharging", false)
+                .put("isMuted", true)
+                .put("volumePercent", 0)
+        )
+        assertNull(desktopMac.batteryPercent)
+        assertTrue(desktopMac.isMuted)
+
+        val toggleCmd = JSONObject(MacSystemStatus.buildMacControlJson(action = "toggle_mute"))
+        assertEquals("mac_control", toggleCmd.getString("type"))
+        assertEquals("toggle_mute", toggleCmd.getString("action"))
+    }
+
+    @Test
+    fun macMediaStatus_parsesReusesArtworkInterpolatesAndBuildsActionJson() {
+        val first = MacMediaStatus.fromJson(
+            JSONObject()
+                .put("type", "mac_media_status")
+                .put("isActive", true)
+                .put("isPlaying", true)
+                .put("title", "Midnight City")
+                .put("artist", "M83")
+                .put("appName", "Spotify")
+                .put("durationMs", 243000L)
+                .put("positionMs", 40000L)
+                .put("playbackSpeed", 1.0)
+                .put("canSeek", true)
+                .put("canSkipNext", true)
+                .put("canSkipPrevious", true)
+                .put("artworkHash", "hash_m83")
+                .put("artworkBase64", "AQID"),
+            previous = null,
+            receivedAtElapsedMs = 1000L
+        )
+        assertTrue(first.isActive)
+        assertEquals("AQID", first.artworkBase64)
+        assertEquals(45000L, first.estimatedPositionMs(6000L))
+        assertEquals("1:05", MacMediaStatus.formatTimeMs(65000L))
+
+        val followUp = MacMediaStatus.fromJson(
+            JSONObject()
+                .put("type", "mac_media_status")
+                .put("isActive", true)
+                .put("isPlaying", false)
+                .put("title", "Midnight City")
+                .put("appName", "Spotify")
+                .put("durationMs", 243000L)
+                .put("positionMs", 50000L)
+                .put("canSeek", true)
+                .put("artworkHash", "hash_m83"),
+            previous = first,
+            receivedAtElapsedMs = 8000L
+        )
+        assertEquals("AQID", followUp.artworkBase64)
+        assertEquals(50000L, followUp.estimatedPositionMs(20000L))
+
+        val seekCmd = JSONObject(MacMediaStatus.buildMediaActionJson(action = "seek", positionMs = 90000L))
+        assertEquals("mac_media_action", seekCmd.getString("type"))
+        assertEquals("seek", seekCmd.getString("action"))
+        assertEquals(90000L, seekCmd.getLong("positionMs"))
+    }
+
+    @Test
+    fun phoneMirrorProtocol_handshakeHeadersGeometryAndCoordinates() {
+        val token = "ab".repeat(32)
+        val expectedProof = PhoneMirrorProtocol.computeStreamAuthProof(token, width = 720, height = 1280, rotation = 2)
+        assertEquals(64, expectedProof.length)
+        assertNotEquals(token, expectedProof)
+
+        val hs = PhoneMirrorProtocol.buildHandshake(token, width = 720, height = 1280, rotation = 2)
+        assertEquals(PhoneMirrorProtocol.HANDSHAKE_BYTES, hs.size)
+        assertEquals(expectedProof, String(hs.copyOfRange(0, 64), Charsets.US_ASCII))
+        assertEquals(0x02, hs[64].toInt() and 0xFF)
+        assertEquals(0xD0, hs[65].toInt() and 0xFF)
+        assertEquals(0x05, hs[66].toInt() and 0xFF)
+        assertEquals(0x00, hs[67].toInt() and 0xFF)
+        assertEquals(0x02, hs[68].toInt() and 0xFF)
+
+        // AES-256-GCM stream encryption round-trip, tamper rejection, wrong key & replay/seq mismatch
+        val sender = PhoneMirrorStreamCipher(token)
+        val receiver = PhoneMirrorStreamCipher(token)
+        val sampleNalu = byteArrayOf(0x00, 0x00, 0x00, 0x01, 0x65, 0x88.toByte(), 0x84.toByte())
+        val enc0 = sender.seal(PhoneMirrorProtocol.PACKET_TYPE_FRAME, PhoneMirrorProtocol.FLAG_KEYFRAME, 123_456L, sampleNalu)
+        assertEquals(sampleNalu.size + 28, enc0.size)
+        assertTrue(sampleNalu.contentEquals(receiver.open(PhoneMirrorProtocol.PACKET_TYPE_FRAME, PhoneMirrorProtocol.FLAG_KEYFRAME, 123_456L, enc0)))
+
+        // Replay of seq 0 must fail at seq 1
+        assertNull(receiver.open(PhoneMirrorProtocol.PACKET_TYPE_FRAME, PhoneMirrorProtocol.FLAG_KEYFRAME, 123_456L, enc0))
+
+        // Tampered ciphertext/tag must fail
+        val enc1 = sender.seal(PhoneMirrorProtocol.PACKET_TYPE_CONFIG, PhoneMirrorProtocol.FLAG_NONE, 0L, byteArrayOf(1, 2, 3, 4))
+        val tampered = enc1.copyOf().also { it[it.size - 1] = (it[it.size - 1].toInt() xor 0xFF).toByte() }
+        assertNull(receiver.open(PhoneMirrorProtocol.PACKET_TYPE_CONFIG, PhoneMirrorProtocol.FLAG_NONE, 0L, tampered))
+
+        // Wrong token must fail even at valid seq 0
+        val wrongReceiver = PhoneMirrorStreamCipher("cd".repeat(32))
+        val freshSender = PhoneMirrorStreamCipher(token)
+        val encFresh = freshSender.seal(PhoneMirrorProtocol.PACKET_TYPE_FRAME, PhoneMirrorProtocol.FLAG_NONE, 55L, sampleNalu)
+        assertNull(wrongReceiver.open(PhoneMirrorProtocol.PACKET_TYPE_FRAME, PhoneMirrorProtocol.FLAG_NONE, 55L, encFresh))
+
+        val hdr = PhoneMirrorProtocol.buildPacketHeader(
+            type = PhoneMirrorProtocol.PACKET_TYPE_FRAME,
+            flags = PhoneMirrorProtocol.FLAG_KEYFRAME,
+            ptsUs = 1_000_000L,
+            payloadLength = 4096
+        )
+        assertEquals(PhoneMirrorProtocol.HEADER_BYTES, hdr.size)
+        assertEquals(0x02, hdr[0].toInt() and 0xFF)
+        assertEquals(0x01, hdr[1].toInt() and 0xFF)
+        assertEquals(0x10, hdr[12].toInt() and 0xFF)
+        assertEquals(0x00, hdr[13].toInt() and 0xFF)
+
+        val (sw, sh) = PhoneMirrorProtocol.computeStreamDimensions(1080, 2400, maxDimension = 1280)
+        assertTrue(sw % 16 == 0 && sh % 16 == 0)
+        assertEquals(1280, sh)
+        assertEquals(576, sw)
+
+        val (px, py) = PhoneMirrorProtocol.denormalizePoint(1.5f, -0.2f, 1080, 2400)
+        assertEquals(1079f, px, 0.01f)
+        assertEquals(0f, py, 0.01f)
+    }
+
+    @Test
+    fun phoneMirrorCommands_parseControlAndInputJson() {
+        val validToken = "cd".repeat(32)
+        val reqStart = PhoneMirrorProtocol.parseControlCommand(
+            JSONObject()
+                .put("type", "mirror_control")
+                .put("action", "request_start")
+                .put("port", 51234)
+                .put("token", validToken)
+                .put("maxDimension", 1280)
+                .put("bitRate", 5_000_000)
+                .put("fps", 60)
+        )
+        assertTrue(reqStart is MirrorControlCommand.RequestStart)
+        assertEquals(51234, (reqStart as MirrorControlCommand.RequestStart).offer.port)
+
+        // Reject malformed token or invalid port
+        assertNull(
+            PhoneMirrorProtocol.parseControlCommand(
+                JSONObject().put("action", "request_start").put("port", 80).put("token", validToken)
+            )
+        )
+        assertNull(
+            PhoneMirrorProtocol.parseControlCommand(
+                JSONObject().put("action", "request_start").put("port", 51234).put("token", "short")
+            )
+        )
+
+        val swipe = PhoneMirrorProtocol.parseInputCommand(
+            JSONObject()
+                .put("action", "swipe")
+                .put("startXNorm", 0.5)
+                .put("startYNorm", 0.8)
+                .put("endXNorm", 0.5)
+                .put("endYNorm", 0.2)
+                .put("durationMs", 250)
+        )
+        assertTrue(swipe is MirrorInputCommand.Swipe)
+        assertEquals(250L, (swipe as MirrorInputCommand.Swipe).durationMs)
+
+        val global = PhoneMirrorProtocol.parseInputCommand(
+            JSONObject().put("action", "global").put("globalAction", "home")
+        )
+        assertEquals(MirrorInputCommand.GlobalAction("home"), global)
+
+        val setDimTrue = PhoneMirrorProtocol.parseControlCommand(
+            JSONObject().put("action", "set_dim").put("dimmed", true)
+        )
+        assertEquals(MirrorControlCommand.SetDim(true), setDimTrue)
+        val setDimFalse = PhoneMirrorProtocol.parseControlCommand(
+            JSONObject().put("action", "set_dim").put("dimmed", false)
+        )
+        assertEquals(MirrorControlCommand.SetDim(false), setDimFalse)
+
+        val copyKey = PhoneMirrorProtocol.parseInputCommand(
+            JSONObject().put("action", "key").put("keyAction", "copy")
+        )
+        assertEquals(MirrorInputCommand.KeyAction("copy"), copyKey)
+    }
+
+    @Test
+    fun clipboardSyncDetection_matchesCopyKeywordsViewIdsAndSystemClipboardOverlay() {
+        assertTrue(ClipboardSyncAccessibilityService.isCopyOrCutKeyword("Copy"))
+        assertTrue(ClipboardSyncAccessibilityService.isCopyOrCutKeyword("Copy link"))
+        assertTrue(ClipboardSyncAccessibilityService.isCopyOrCutKeyword("Cut"))
+        assertTrue(ClipboardSyncAccessibilityService.isCopyOrCutKeyword("Copied to clipboard"))
+        assertTrue(ClipboardSyncAccessibilityService.isCopyOrCutKeyword("কপি"))
+        assertFalse(ClipboardSyncAccessibilityService.isCopyOrCutKeyword("Copyright 2026"))
+        assertFalse(ClipboardSyncAccessibilityService.isCopyOrCutKeyword("Select all"))
+
+        assertTrue(ClipboardSyncAccessibilityService.isCopyRelatedViewId("com.samsung.android.honeyboard:id/clipboard_btn"))
+        assertTrue(ClipboardSyncAccessibilityService.isCopyRelatedViewId("android:id/floating_toolbar_menu_item_text"))
+        assertTrue(ClipboardSyncAccessibilityService.isCopyRelatedViewId("com.android.chrome:id/copy_button"))
+        assertFalse(ClipboardSyncAccessibilityService.isCopyRelatedViewId("com.whatsapp:id/send"))
+
+        assertTrue(
+            ClipboardSyncAccessibilityService.isSystemClipboardOverlayEvent(
+                pkg = "com.android.systemui",
+                className = "com.android.systemui.clipboardoverlay.ClipboardOverlayView",
+                text = "",
+                contentDesc = "",
+                viewId = "com.android.systemui:id/clipboard_preview"
+            )
+        )
+        assertTrue(
+            ClipboardSyncAccessibilityService.isSystemClipboardOverlayEvent(
+                pkg = "com.whatsapp",
+                className = "android.widget.TextView",
+                text = "Message copied",
+                contentDesc = "",
+                viewId = ""
+            )
+        )
+        assertFalse(
+            ClipboardSyncAccessibilityService.isSystemClipboardOverlayEvent(
+                pkg = "com.whatsapp",
+                className = "android.widget.TextView",
+                text = "Hey, check out this long message about nothing related",
+                contentDesc = "",
+                viewId = ""
+            )
+        )
+    }
 }

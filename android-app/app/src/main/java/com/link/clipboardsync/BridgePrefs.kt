@@ -18,6 +18,7 @@ object BridgePrefs {
     private const val KEY_MAC_ALERTS_ENABLED = "mac_alerts_enabled"
     private const val KEY_PHONE_VIBRATE_ENABLED = "phone_vibrate_mac_alerts"
     private const val KEY_AUTO_ACCEPT_FILES = "auto_accept_incoming_files"
+    private const val KEY_CALLS_ON_MAC = "calls_on_mac_enabled"
     private const val KEY_SETTINGS_UPDATED_AT = "settings_updated_at"
     private const val KEY_BLACKLISTED_PACKAGES = "notif_blacklisted_pkgs"
     private const val KEY_CUSTOM_SAVE_TREE_URI = "custom_save_tree_uri"
@@ -98,6 +99,18 @@ object BridgePrefs {
 
     fun setAutoAcceptFilesEnabled(context: Context, enabled: Boolean, updateTimestamp: Boolean = true) {
         val editor = prefs(context).edit().putBoolean(KEY_AUTO_ACCEPT_FILES, enabled)
+        if (updateTimestamp) {
+            editor.putLong(KEY_SETTINGS_UPDATED_AT, System.currentTimeMillis())
+        }
+        editor.apply()
+    }
+
+    // Synced Setting: Get Call on Mac (mirror incoming phone calls to Mac)
+    fun isCallsOnMacEnabled(context: Context): Boolean =
+        prefs(context).getBoolean(KEY_CALLS_ON_MAC, true)
+
+    fun setCallsOnMacEnabled(context: Context, enabled: Boolean, updateTimestamp: Boolean = true) {
+        val editor = prefs(context).edit().putBoolean(KEY_CALLS_ON_MAC, enabled)
         if (updateTimestamp) {
             editor.putLong(KEY_SETTINGS_UPDATED_AT, System.currentTimeMillis())
         }

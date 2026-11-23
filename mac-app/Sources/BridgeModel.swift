@@ -35,9 +35,15 @@ class BridgeModel: ObservableObject {
             if selectedTab != .devices && showPairingSection {
                 showPairingSection = false
             }
+            if selectedTab == .settings {
+                refreshLaunchAtLoginStatus()
+            }
             onSizeChangeRequested?()
         }
     }
+    @Published var isLaunchAtLoginEnabled: Bool = false
+    @Published var launchAtLoginRequiresApproval: Bool = false
+    @Published var launchAtLoginError: String? = nil
     var notificationsManager: BridgeNotificationManager {
         return BridgeNotificationManager.shared
     }
@@ -61,10 +67,41 @@ class BridgeModel: ObservableObject {
         }
     }
     @Published var availableUpdateUrl: String? = nil
+    @Published var dndHintDeviceIds: Set<UUID> = []
+    @Published var pendingRingerDeviceIds: Set<UUID> = []
+    @Published var pendingDndDeviceIds: Set<UUID> = []
+    @Published var pendingRingDeviceIds: Set<UUID> = []
+    @Published var controlErrorHints: [UUID: String] = [:]
+    @Published var isLowBatteryAlertEnabled: Bool = {
+        if UserDefaults.standard.object(forKey: "bridge_low_battery_alert_enabled") == nil {
+            return true
+        }
+        return UserDefaults.standard.bool(forKey: "bridge_low_battery_alert_enabled")
+    }() {
+        didSet {
+            UserDefaults.standard.set(isLowBatteryAlertEnabled, forKey: Self.keyLowBatteryAlertEnabled)
+        }
+    }
+    @Published var isAutoPauseMacMediaEnabled: Bool = {
+        if UserDefaults.standard.object(forKey: "bridge_auto_pause_mac_media_enabled") == nil {
+            return true
+        }
+        return UserDefaults.standard.bool(forKey: "bridge_auto_pause_mac_media_enabled")
+    }() {
+        didSet {
+            UserDefaults.standard.set(isAutoPauseMacMediaEnabled, forKey: Self.keyAutoPauseMacMediaEnabled)
+        }
+    }
+    @Published var activeIncomingCall: IncomingCallInfo? = nil
 
     var onSizeChangeRequested: (() -> Void)?
     
     let server = BridgeServer()
+    private let launchAtLoginController: LaunchAtLoginControlling
+    private let mediaPauser: MacMediaPauser
+    private var lowBatteryAlertedDevices = Set<String>()
+    private var dismissedCallIds = Set<String>()
+    private var answeredCallIds = Set<String>()
     private var updateTimer: Timer?
     private var cancellables = Set<AnyCancellable>()
 
@@ -81,8 +118,16 @@ class BridgeModel: ObservableObject {
     private static let keyLastNotifiedAt = "bridge_update_last_notified_at"
     private static let keyLastCheckAt = "bridge_update_last_check_at"
     private static let keyPairedDevice = "bridge_paired_device_name"
+    private static let keyLowBatteryAlertEnabled = "bridge_low_battery_alert_enabled"
+    private static let keyAutoPauseMacMediaEnabled = "bridge_auto_pause_mac_media_enabled"
     
-    init(startServer: Bool = true) {
+    init(
+        startServer: Bool = true,
+        launchAtLoginController: LaunchAtLoginControlling = SMAppServiceLaunchAtLoginController(),
+        mediaPauser: MacMediaPauser = MacMediaPauser()
+    ) {
+        self.launchAtLoginController = launchAtLoginController
+        self.mediaPauser = mediaPauser
         self.rawCode = server.pairingCode
         if rawCode.count == 6 {
             self.formattedCode = "\(rawCode.prefix(3)) \(rawCode.suffix(3))"
@@ -96,6 +141,7 @@ class BridgeModel: ObservableObject {
         self.pairedDevice = UserDefaults.standard.string(forKey: BridgeModel.keyPairedDevice)
         
         updateQrCode()
+        refreshLaunchAtLoginStatus()
         setupServerCallbacks()
         if startServer {
             server.start()
@@ -108,9 +154,29 @@ class BridgeModel: ObservableObject {
             }
             .store(in: &cancellables)
 
+        BridgeNotificationManager.shared.$isCallsOnMacEnabled
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] enabled in
+                guard let self = self else { return }
+                if !enabled {
+                    self.dismissCallBanner()
+                }
+                self.objectWillChange.send()
+                self.onSizeChangeRequested?()
+            }
+            .store(in: &cancellables)
+
         BridgeFileTransferManager.shared.$transfers
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in
+                self?.onSizeChangeRequested?()
+            }
+            .store(in: &cancellables)
+
+        PhoneMirrorManager.shared.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
                 self?.onSizeChangeRequested?()
             }
             .store(in: &cancellables)
@@ -125,11 +191,12 @@ class BridgeModel: ObservableObject {
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.isConnected = connected
-                self.connectedDevice = device
+                self.connectedDevice = device.map { formatDisplayDeviceName($0) }
                 if connected {
                     if let dev = device, !dev.isEmpty {
-                        self.pairedDevice = dev
-                        UserDefaults.standard.set(dev, forKey: BridgeModel.keyPairedDevice)
+                        let formatted = formatDisplayDeviceName(dev)
+                        self.pairedDevice = formatted
+                        UserDefaults.standard.set(formatted, forKey: BridgeModel.keyPairedDevice)
                     }
                     self.showPairingSection = false
                 }
@@ -141,6 +208,17 @@ class BridgeModel: ObservableObject {
             DispatchQueue.main.async {
                 guard let self = self else { return }
                 self.connectedDevicesList = devices
+                for dev in devices where dev.hasDndPermission {
+                    self.dndHintDeviceIds.remove(dev.id)
+                }
+                let activeIds = Set(devices.map { $0.id })
+                self.dndHintDeviceIds = self.dndHintDeviceIds.intersection(activeIds)
+                self.pendingRingerDeviceIds.removeAll()
+                self.pendingDndDeviceIds.removeAll()
+                self.pendingRingDeviceIds.removeAll()
+                for id in Array(self.controlErrorHints.keys) where !activeIds.contains(id) {
+                    self.controlErrorHints.removeValue(forKey: id)
+                }
                 if let first = devices.first {
                     self.connectedDevice = first.name
                     self.pairedDevice = first.name
@@ -187,6 +265,58 @@ class BridgeModel: ObservableObject {
                 self.onSizeChangeRequested?()
             }
         }
+
+        server.onDeviceBatteryUpdated = { [weak self] _, deviceName, level, isCharging in
+            self?.evaluateBatteryAlert(deviceName: deviceName, level: level, isCharging: isCharging)
+        }
+
+        server.onCallEvent = { [weak self] call in
+            self?.handleIncomingCallEvent(call)
+        }
+
+        server.onDeviceDisconnected = { [weak self] deviceId in
+            self?.handleDeviceCallDisconnect(deviceId: deviceId)
+        }
+    }
+
+    @discardableResult
+    func evaluateBatteryAlert(
+        deviceName: String,
+        level: Int,
+        isCharging: Bool,
+        postNotification: Bool = true
+    ) -> Bool {
+        if isCharging || level >= 20 {
+            lowBatteryAlertedDevices.remove(deviceName)
+            return false
+        }
+        guard isLowBatteryAlertEnabled,
+              level <= 15,
+              !lowBatteryAlertedDevices.contains(deviceName) else {
+            return false
+        }
+        lowBatteryAlertedDevices.insert(deviceName)
+        if postNotification {
+            postLowBatteryNotification(deviceName: deviceName, level: level)
+        }
+        return true
+    }
+
+    private func postLowBatteryNotification(deviceName: String, level: Int) {
+        let center = UNUserNotificationCenter.current()
+        center.requestAuthorization(options: [.alert, .sound]) { granted, _ in
+            guard granted else { return }
+            let content = UNMutableNotificationContent()
+            content.title = "\(deviceName) battery low (\(level)%)"
+            content.body = "Plug your phone into a charger soon."
+            content.sound = .default
+            let req = UNNotificationRequest(
+                identifier: "bridge_low_battery_\(deviceName)",
+                content: content,
+                trigger: nil
+            )
+            center.add(req, withCompletionHandler: nil)
+        }
     }
 
     func toggleDeviceIpVisibility(_ id: UUID) {
@@ -200,6 +330,394 @@ class BridgeModel: ObservableObject {
     func hideAllIpAddresses() {
         isLocalIpRevealed = false
         revealedDeviceIpIds.removeAll()
+    }
+
+    // MARK: - Quick Device Controls (Sound / DND / Get Call on Mac / Ring Phone)
+
+    var isAnyGetCallOnMacEnabled: Bool {
+        return BridgeNotificationManager.shared.isCallsOnMacEnabled
+    }
+
+    func isGetCallOnMacEnabled(for device: ConnectedDeviceInfo) -> Bool {
+        return BridgeNotificationManager.shared.isCallsOnMacEnabled
+    }
+
+    func toggleGetCallOnMac(for device: ConnectedDeviceInfo) {
+        let next = !BridgeNotificationManager.shared.isCallsOnMacEnabled
+        BridgeNotificationManager.shared.isCallsOnMacEnabled = next
+        if next && UserDefaults.standard.object(forKey: Self.keyAutoPauseMacMediaEnabled) == nil {
+            isAutoPauseMacMediaEnabled = true
+        } else if !next {
+            dismissCallBanner()
+        }
+        onSizeChangeRequested?()
+    }
+
+    // MARK: - Phone Mirroring Quick Control
+
+    func phoneMirrorState(for device: ConnectedDeviceInfo) -> PhoneMirrorSessionState {
+        return PhoneMirrorManager.shared.currentState(for: device.id)
+    }
+
+    func togglePhoneMirroring(for device: ConnectedDeviceInfo) {
+        controlErrorHints.removeValue(forKey: device.id)
+        PhoneMirrorManager.shared.toggleMirroring(for: device)
+    }
+
+    // MARK: - Incoming Call Banner & Auto-Pause Mac Media
+
+    func handleIncomingCallEvent(_ call: IncomingCallInfo, presentPanel: Bool = true) {
+        let callAllowed = BridgeNotificationManager.shared.isCallsOnMacEnabled
+
+        if call.state == "ended" {
+            dismissedCallIds.remove(call.callId)
+            answeredCallIds.remove(call.callId)
+            mediaPauser.clearCall(callId: call.callId)
+            if activeIncomingCall?.callId == call.callId {
+                activeIncomingCall = nil
+            }
+            if presentPanel {
+                CallBannerPanelController.shared.hide(callId: call.callId)
+            }
+            return
+        }
+
+        guard callAllowed else {
+            return
+        }
+
+        if isAutoPauseMacMediaEnabled {
+            mediaPauser.pauseIfPlaying(callId: call.callId)
+        }
+
+        if dismissedCallIds.contains(call.callId) {
+            if call.state == "active" && answeredCallIds.contains(call.callId) {
+                dismissedCallIds.remove(call.callId)
+                answeredCallIds.remove(call.callId)
+            } else {
+                return
+            }
+        }
+
+        var resolvedCall = call
+        if resolvedCall.state == "active",
+           let existing = activeIncomingCall,
+           existing.callId == resolvedCall.callId,
+           existing.state == "active",
+           let prevConnected = existing.connectedAt {
+            if let newConnected = resolvedCall.connectedAt {
+                if abs(newConnected.timeIntervalSince(prevConnected)) <= 2.0 {
+                    resolvedCall.connectedAt = prevConnected
+                }
+            } else {
+                resolvedCall.connectedAt = prevConnected
+            }
+        }
+
+        activeIncomingCall = resolvedCall
+        if presentPanel {
+            CallBannerPanelController.shared.show(call: resolvedCall, model: self)
+        }
+    }
+
+    func handleDeviceCallDisconnect(deviceId: UUID, presentPanel: Bool = true) {
+        if let active = activeIncomingCall, active.deviceId == deviceId {
+            mediaPauser.clearCall(callId: active.callId)
+            dismissedCallIds.remove(active.callId)
+            answeredCallIds.remove(active.callId)
+            activeIncomingCall = nil
+            if presentPanel {
+                CallBannerPanelController.shared.hide(callId: active.callId)
+            }
+        }
+    }
+
+    func answerCall(_ call: IncomingCallInfo, sendToServer: Bool = true, presentPanel: Bool = true) {
+        if sendToServer {
+            server.sendCallAction(["action": "answer", "callId": call.callId], toDeviceId: call.deviceId)
+        }
+        answeredCallIds.insert(call.callId)
+        dismissedCallIds.insert(call.callId)
+        activeIncomingCall = nil
+        if presentPanel {
+            CallBannerPanelController.shared.hide(callId: call.callId)
+        }
+    }
+
+    func declineCall(_ call: IncomingCallInfo, sendToServer: Bool = true, presentPanel: Bool = true) {
+        if sendToServer {
+            server.sendCallAction(["action": "decline", "callId": call.callId], toDeviceId: call.deviceId)
+        }
+        answeredCallIds.remove(call.callId)
+        dismissedCallIds.insert(call.callId)
+        mediaPauser.clearCall(callId: call.callId)
+        activeIncomingCall = nil
+        if presentPanel {
+            CallBannerPanelController.shared.hide(callId: call.callId)
+        }
+    }
+
+    func silenceCall(_ call: IncomingCallInfo, sendToServer: Bool = true, presentPanel: Bool = true) {
+        if sendToServer {
+            server.sendCallAction(["action": "silence", "callId": call.callId], toDeviceId: call.deviceId)
+        }
+        dismissedCallIds.insert(call.callId)
+        activeIncomingCall = nil
+        if presentPanel {
+            CallBannerPanelController.shared.hide(callId: call.callId)
+        }
+    }
+
+    func muteCall(_ call: IncomingCallInfo, sendToServer: Bool = true, presentPanel: Bool = true) {
+        if call.state == "ringing" {
+            silenceCall(call, sendToServer: sendToServer, presentPanel: presentPanel)
+            return
+        }
+        if sendToServer {
+            server.sendCallAction(["action": "mute", "callId": call.callId], toDeviceId: call.deviceId)
+        }
+        var updated = (activeIncomingCall?.callId == call.callId ? activeIncomingCall : nil) ?? call
+        updated.isMuted.toggle()
+        activeIncomingCall = updated
+        if presentPanel {
+            CallBannerPanelController.shared.show(call: updated, model: self)
+        }
+    }
+
+    func dismissCallBanner(presentPanel: Bool = true) {
+        if let active = activeIncomingCall {
+            answeredCallIds.remove(active.callId)
+            dismissedCallIds.insert(active.callId)
+        }
+        activeIncomingCall = nil
+        if presentPanel {
+            CallBannerPanelController.shared.hide()
+        }
+    }
+
+    func isBatteryStale(_ device: ConnectedDeviceInfo, now: TimeInterval = Date().timeIntervalSince1970) -> Bool {
+        guard device.batteryLevel != nil else { return true }
+        if let updated = device.lastBatteryUpdatedAt, (now - updated) > 300 {
+            return true
+        }
+        return false
+    }
+
+    func cycleRingerMode(for device: ConnectedDeviceInfo, sendToServer: Bool = true) {
+        let nextMode = device.ringerMode.next
+        controlErrorHints.removeValue(forKey: device.id)
+        if nextMode == .silent && !device.hasDndPermission {
+            dndHintDeviceIds.insert(device.id)
+            onSizeChangeRequested?()
+            if sendToServer {
+                server.sendDeviceControl([
+                    "action": "set_ringer_mode",
+                    "mode": nextMode.rawValue
+                ], toDeviceId: device.id)
+            }
+            return
+        }
+        dndHintDeviceIds.remove(device.id)
+
+        if sendToServer {
+            pendingRingerDeviceIds.insert(device.id)
+            server.sendDeviceControl([
+                "action": "set_ringer_mode",
+                "mode": nextMode.rawValue
+            ], toDeviceId: device.id)
+            scheduleControlTimeout(for: device.id, deviceName: device.name, kind: .ringer)
+        } else if let idx = connectedDevicesList.firstIndex(where: { $0.id == device.id }) {
+            connectedDevicesList[idx].ringerMode = nextMode
+        }
+    }
+
+    func toggleDnd(for device: ConnectedDeviceInfo, sendToServer: Bool = true) {
+        let targetEnabled = !device.isDndEnabled
+        controlErrorHints.removeValue(forKey: device.id)
+        if !device.hasDndPermission {
+            dndHintDeviceIds.insert(device.id)
+            onSizeChangeRequested?()
+            if sendToServer {
+                server.sendDeviceControl([
+                    "action": "set_dnd",
+                    "enabled": targetEnabled
+                ], toDeviceId: device.id)
+            }
+            return
+        }
+        dndHintDeviceIds.remove(device.id)
+
+        if sendToServer {
+            pendingDndDeviceIds.insert(device.id)
+            server.sendDeviceControl([
+                "action": "set_dnd",
+                "enabled": targetEnabled
+            ], toDeviceId: device.id)
+            scheduleControlTimeout(for: device.id, deviceName: device.name, kind: .dnd)
+        } else if let idx = connectedDevicesList.firstIndex(where: { $0.id == device.id }) {
+            connectedDevicesList[idx].isDndEnabled = targetEnabled
+        }
+    }
+
+    func toggleRingPhone(for device: ConnectedDeviceInfo, sendToServer: Bool = true) {
+        let targetRinging = !device.isRingingPhone
+        controlErrorHints.removeValue(forKey: device.id)
+        if sendToServer {
+            pendingRingDeviceIds.insert(device.id)
+            server.sendDeviceControl([
+                "action": "ring_phone",
+                "ringing": targetRinging
+            ], toDeviceId: device.id)
+            scheduleControlTimeout(for: device.id, deviceName: device.name, kind: .ring)
+        } else if let idx = connectedDevicesList.firstIndex(where: { $0.id == device.id }) {
+            connectedDevicesList[idx].isRingingPhone = targetRinging
+        }
+    }
+
+    private enum PendingControlKind {
+        case ringer, dnd, ring
+    }
+
+    private func scheduleControlTimeout(for deviceId: UUID, deviceName: String, kind: PendingControlKind) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+            guard let self = self else { return }
+            let stillPending: Bool
+            switch kind {
+            case .ringer:
+                stillPending = self.pendingRingerDeviceIds.remove(deviceId) != nil
+            case .dnd:
+                stillPending = self.pendingDndDeviceIds.remove(deviceId) != nil
+            case .ring:
+                stillPending = self.pendingRingDeviceIds.remove(deviceId) != nil
+            }
+            if stillPending && self.connectedDevicesList.contains(where: { $0.id == deviceId }) {
+                self.controlErrorHints[deviceId] = "\(deviceName) didn't confirm the change."
+                self.onSizeChangeRequested?()
+            }
+        }
+    }
+
+    // MARK: - Media Remote Control (Now Playing on Phone)
+
+    @Published var mediaSeekDragFraction: [UUID: Double] = [:]
+    @Published var hoveredSeekDeviceId: UUID? = nil
+    private var lastMediaVolumeSentAt = [UUID: TimeInterval]()
+
+    func sendMediaPlayPause(for device: ConnectedDeviceInfo, sendToServer: Bool = true) {
+        if let idx = connectedDevicesList.firstIndex(where: { $0.id == device.id }),
+           var media = connectedDevicesList[idx].mediaInfo {
+            let now = ProcessInfo.processInfo.systemUptime
+            media.positionMs = media.estimatedPositionMs(at: now)
+            media.receivedAtUptime = now
+            media.isPlaying.toggle()
+            connectedDevicesList[idx].mediaInfo = media
+        }
+        if sendToServer {
+            server.sendMediaAction(["action": "play_pause"], toDeviceId: device.id)
+        }
+    }
+
+    func sendMediaNext(for device: ConnectedDeviceInfo, sendToServer: Bool = true) {
+        if sendToServer {
+            server.sendMediaAction(["action": "next"], toDeviceId: device.id)
+        }
+    }
+
+    func sendMediaPrevious(for device: ConnectedDeviceInfo, sendToServer: Bool = true) {
+        if sendToServer {
+            server.sendMediaAction(["action": "previous"], toDeviceId: device.id)
+        }
+    }
+
+    func sendMediaSeek(for device: ConnectedDeviceInfo, positionMs: Int64, sendToServer: Bool = true) {
+        let clamped = max(0, positionMs)
+        if let idx = connectedDevicesList.firstIndex(where: { $0.id == device.id }),
+           var media = connectedDevicesList[idx].mediaInfo {
+            let maxDur = media.durationMs > 0 ? media.durationMs : clamped
+            media.positionMs = min(clamped, maxDur)
+            media.receivedAtUptime = ProcessInfo.processInfo.systemUptime
+            connectedDevicesList[idx].mediaInfo = media
+        }
+        if sendToServer {
+            server.sendMediaAction(["action": "seek", "positionMs": clamped], toDeviceId: device.id)
+        }
+    }
+
+    func sendMediaSkip(for device: ConnectedDeviceInfo, deltaMs: Int64, sendToServer: Bool = true) {
+        let currentMedia = connectedDevicesList.first(where: { $0.id == device.id })?.mediaInfo ?? device.mediaInfo
+        guard let media = currentMedia else { return }
+        let current = media.estimatedPositionMs()
+        let rawTarget = current + deltaMs
+        let target = media.durationMs > 0 ? max(0, min(media.durationMs, rawTarget)) : max(0, rawTarget)
+        sendMediaSeek(for: device, positionMs: target, sendToServer: sendToServer)
+    }
+
+    func setMediaVolume(
+        for device: ConnectedDeviceInfo,
+        volumeIndex: Int,
+        forceSend: Bool = false,
+        sendToServer: Bool = true
+    ) {
+        let maxVol = max(1, device.mediaInfo?.maxVolume ?? 15)
+        let clamped = max(0, min(maxVol, volumeIndex))
+        if let idx = connectedDevicesList.firstIndex(where: { $0.id == device.id }),
+           var media = connectedDevicesList[idx].mediaInfo {
+            media.volumeIndex = clamped
+            connectedDevicesList[idx].mediaInfo = media
+        }
+        guard sendToServer else { return }
+
+        let now = ProcessInfo.processInfo.systemUptime
+        let lastSent = lastMediaVolumeSentAt[device.id] ?? 0
+        if forceSend || (now - lastSent >= 0.05) {
+            lastMediaVolumeSentAt[device.id] = now
+            server.sendMediaAction([
+                "action": "set_volume",
+                "volumeIndex": clamped
+            ], toDeviceId: device.id)
+        }
+    }
+
+    // MARK: - Launch at Login (SMAppService)
+
+    func refreshLaunchAtLoginStatus() {
+        let state = launchAtLoginController.currentState()
+        let newEnabled = state.isEnabled
+        let newRequiresApproval = (state == .requiresApproval)
+        let changed = (isLaunchAtLoginEnabled != newEnabled)
+            || (launchAtLoginRequiresApproval != newRequiresApproval)
+        isLaunchAtLoginEnabled = newEnabled
+        launchAtLoginRequiresApproval = newRequiresApproval
+        if newEnabled {
+            launchAtLoginError = nil
+        }
+        if changed {
+            onSizeChangeRequested?()
+        }
+    }
+
+    func setLaunchAtLogin(enabled: Bool) {
+        launchAtLoginError = nil
+        do {
+            if enabled {
+                try launchAtLoginController.register()
+            } else {
+                try launchAtLoginController.unregister()
+            }
+            refreshLaunchAtLoginStatus()
+        } catch {
+            refreshLaunchAtLoginStatus()
+            if enabled && Bundle.main.bundleURL.pathExtension != "app" {
+                launchAtLoginError = "Run Bridge.app from Applications to enable."
+            } else {
+                launchAtLoginError = "Couldn't update Login Items automatically."
+            }
+        }
+        onSizeChangeRequested?()
+    }
+
+    func openLoginItemsSettings() {
+        launchAtLoginController.openLoginItemsSettings()
     }
     
     func updateQrCode() {
@@ -262,15 +780,42 @@ class BridgeModel: ObservableObject {
         isConnected = false
         connectedDevice = nil
         hideAllIpAddresses()
+        activeIncomingCall = nil
+        dismissedCallIds.removeAll()
+        mediaPauser.reset()
+        CallBannerPanelController.shared.hide()
         UserDefaults.standard.removeObject(forKey: BridgeModel.keyPairedDevice)
         BridgeNotificationManager.shared.clearLocalNotificationsOnly()
         refreshPairingCodeFromServer()
         onSizeChangeRequested?()
     }
 
+    func disconnect(deviceId: UUID) {
+        handleDeviceCallDisconnect(deviceId: deviceId)
+        server.disconnectSession(id: deviceId)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            guard let self = self else { return }
+            self.connectedDevicesList.removeAll { $0.id == deviceId }
+            self.revealedDeviceIpIds.remove(deviceId)
+            self.isConnected = !self.connectedDevicesList.isEmpty
+            if let first = self.connectedDevicesList.first {
+                self.connectedDevice = first.name
+                self.pairedDevice = first.name
+                UserDefaults.standard.set(first.name, forKey: BridgeModel.keyPairedDevice)
+                if self.selectedTargetDeviceId == deviceId || self.selectedTargetDeviceId == nil {
+                    self.selectedTargetDeviceId = first.id
+                }
+            } else {
+                self.connectedDevice = nil
+                self.selectedTargetDeviceId = nil
+            }
+            self.onSizeChangeRequested?()
+        }
+    }
+
     func unpair(deviceId: UUID? = nil) {
         if let id = deviceId {
-            server.disconnectDevice(id: id)
+            server.unpairDevice(id: id)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
                 guard let self = self else { return }
                 self.connectedDevicesList.removeAll { $0.id == id }

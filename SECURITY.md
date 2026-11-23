@@ -4,8 +4,9 @@
 
 | Version | Supported | Security Policy |
 | :--- | :---: | :--- |
-| **1.3.5+** | :white_check_mark: | Current stable series with 2048-bit SPEKE PAKE authentication, end-to-end AES-256-GCM session & file encryption, and local-network safeguards. |
-| **1.3.0 – 1.3.2** | :x: | Superseded by `v1.3.5`. Upgrade to `v1.3.5+` for SPEKE PAKE and encrypted `:8765` control transport. |
+| **1.4.0+** | :white_check_mark: | Current stable series with 2048-bit SPEKE PAKE, end-to-end AES-256-GCM control, file transfer, and Phone Mirroring video stream encryption. |
+| **1.3.5** | :white_check_mark: | Previous stable series with 2048-bit SPEKE PAKE authentication and AES-256-GCM control/file transport. |
+| **1.3.0 – 1.3.2** | :x: | Superseded by `v1.3.5+`. Upgrade to `v1.4.0+` for SPEKE PAKE and encrypted control, file, and mirroring streams. |
 | **< 1.3.0** | :x: | Unsupported. |
 
 ---
@@ -47,10 +48,16 @@
 - **Executable Guard & Save Location:** Auto-accepting incoming non-executable files from an authenticated paired device is enabled by default and can be toggled off at any time in Settings (`autoAcceptIncomingFiles`). Even when auto-accept is enabled, both platforms always require manual confirmation for executable, script, bundle, and shortcut extensions (`.app`, `.command`, `.workflow`, `.scpt`, `.sh`, `.py`, `.jar`, `.webloc`, `.apk`, `.dmg`, `.pkg`, `.exe`, etc.) as well as folder archives.
 - **OS Metadata Filtering:** System metadata files (`.DS_Store`, `__MACOSX`, `Thumbs.db`, `.Trashes`, `.Spotlight-V100`, `._*`) are skipped during folder packaging.
 
-### 6. Private Content Protection & Android Manifest Hardening
-- Clipboard text and notification bodies are not logged in normal sync paths (using truncated SHA-256 hashes for clipboard diagnostics).
+### 6. Encrypted Phone Mirroring Video Stream (`PhoneMirrorStreamCipher`)
+- Ephemeral session offers (`request_start` / `stream_offer`) exchange one-time 256-bit `token` values exclusively inside the AES-256-GCM encrypted `:8765` control channel.
+- Before streaming, the Android sender (`ScreenMirrorForegroundService`) must present a one-way handshake proof `SHA-256("bridge-mirror-auth-v1:<token>:<width>:<height>:<rotation>")` verified in constant time alongside a 10-second handshake timeout and bounded receive buffers.
+- Every video config, H.264 frame, and geometry packet is encrypted with **AES-256-GCM** using `SHA-256("<token>:bridge-mirror-encryption")`, a monotonic 12-byte IV (`4-byte random salt + 8-byte seq`), and header/sequence AAD binding (`bridge-mirror-pkt-v1:<type>:<flags>:<ptsUs>:<seq>`).
+- Both Android (`PhoneMirrorController`, `ScreenMirrorForegroundService`) and macOS (`PhoneMirrorManager`) reject any non-private/public IP address on the mirror socket.
+
+### 7. Private Content Protection & Android Manifest Hardening
+- Clipboard text, notification bodies, inline reply text, and remote mirroring text inputs are not logged in plaintext (using redacted lengths or truncated SHA-256 hashes for diagnostics).
 - `android:allowBackup="false"` prevents cloud backup extraction of local preferences.
-- Internal receivers and helper components (including `FileTransferActionReceiver` and `MacAlertDismissReceiver`) set `android:exported="false"`.
+- Internal receivers and helper components (`FileTransferActionReceiver`, `MacAlertDismissReceiver`, `PhoneFinderActionReceiver`, `ScreenMirrorActionReceiver`, `ScreenCaptureConsentActivity`) set `android:exported="false"`.
 
 ---
 

@@ -91,6 +91,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         setupStatusItem()
         setupPopover()
     }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        MacMediaMonitor.shared.stop()
+        MacMediaControlCLI.shared.stopStreamingSync()
+        PhoneMirrorManager.shared.stopMirroring(notifyDevice: false)
+    }
     
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -203,6 +209,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private func showPopover(forceBringToFront: Bool = false) {
         guard let button = statusItem?.button, let pop = popover else { return }
         BridgeNotificationManager.shared.checkNotificationAuth()
+        model.refreshLaunchAtLoginStatus()
         model.checkForUpdates(forceNetwork: false)
         applyPopoverSize()
 

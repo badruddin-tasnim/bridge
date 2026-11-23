@@ -39,14 +39,240 @@ struct ClipboardPayload: Codable {
     }
 }
 
+enum RingerMode: String, Equatable, CaseIterable {
+    case normal
+    case vibrate
+    case silent
+
+    var next: RingerMode {
+        switch self {
+        case .normal: return .vibrate
+        case .vibrate: return .silent
+        case .silent: return .normal
+        }
+    }
+
+    var displayName: String {
+        switch self {
+        case .normal: return "Sound"
+        case .vibrate: return "Vibrate"
+        case .silent: return "Silent"
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .normal: return "speaker.wave.2.fill"
+        case .vibrate: return "iphone.radiowaves.left.and.right"
+        case .silent: return "speaker.slash.fill"
+        }
+    }
+}
+
+struct MediaPlaybackInfo: Equatable {
+    var isActive: Bool = false
+    var isPlaying: Bool = false
+    var title: String = ""
+    var artist: String = ""
+    var album: String = ""
+    var appName: String = ""
+    var durationMs: Int64 = 0
+    var positionMs: Int64 = 0
+    var playbackSpeed: Double = 1.0
+    var receivedAtUptime: TimeInterval = ProcessInfo.processInfo.systemUptime
+    var volumeIndex: Int = 0
+    var maxVolume: Int = 15
+    var canSeek: Bool = true
+    var canSkipNext: Bool = true
+    var canSkipPrevious: Bool = true
+    var canControlVolume: Bool = true
+    var artworkHash: String = ""
+    var artworkImage: NSImage? = nil
+
+    func estimatedPositionMs(at uptime: TimeInterval = ProcessInfo.processInfo.systemUptime) -> Int64 {
+        let clampedPos = max(0, positionMs)
+        guard isPlaying else {
+            return durationMs > 0 ? min(durationMs, clampedPos) : clampedPos
+        }
+        let elapsedSeconds = max(0, uptime - receivedAtUptime)
+        let elapsedMs = Int64(elapsedSeconds * 1000.0 * max(0.0, playbackSpeed))
+        let total = clampedPos + elapsedMs
+        return durationMs > 0 ? min(durationMs, total) : total
+    }
+
+    static func from(
+        jsonObject: [String: Any],
+        previous: MediaPlaybackInfo?,
+        receivedAtUptime: TimeInterval = ProcessInfo.processInfo.systemUptime
+    ) -> MediaPlaybackInfo {
+        let isActive = (jsonObject["isActive"] as? Bool) ?? false
+        let volumeIndex = max(0, (jsonObject["volumeIndex"] as? Int) ?? previous?.volumeIndex ?? 0)
+        let maxVolume = max(1, (jsonObject["maxVolume"] as? Int) ?? previous?.maxVolume ?? 15)
+
+        guard isActive else {
+            return MediaPlaybackInfo(
+                isActive: false,
+                receivedAtUptime: receivedAtUptime,
+                volumeIndex: volumeIndex,
+                maxVolume: maxVolume
+            )
+        }
+
+        let isPlaying = (jsonObject["isPlaying"] as? Bool) ?? false
+        let title = (jsonObject["title"] as? String) ?? ""
+        let artist = (jsonObject["artist"] as? String) ?? ""
+        let album = (jsonObject["album"] as? String) ?? ""
+        let appName = (jsonObject["appName"] as? String) ?? ""
+        let durationMs = max(0, (jsonObject["durationMs"] as? NSNumber)?.int64Value ?? 0)
+        let positionMs = max(0, (jsonObject["positionMs"] as? NSNumber)?.int64Value ?? 0)
+        let playbackSpeed = (jsonObject["playbackSpeed"] as? NSNumber)?.doubleValue ?? (isPlaying ? 1.0 : 0.0)
+        let canSeek = (jsonObject["canSeek"] as? Bool) ?? (durationMs > 0)
+        let canSkipNext = (jsonObject["canSkipNext"] as? Bool) ?? true
+        let canSkipPrevious = (jsonObject["canSkipPrevious"] as? Bool) ?? true
+        let canControlVolume = (jsonObject["canControlVolume"] as? Bool) ?? true
+        let artworkHash = (jsonObject["artworkHash"] as? String) ?? ""
+
+        var artworkImage: NSImage? = nil
+        if let b64 = jsonObject["artworkBase64"] as? String,
+           !b64.isEmpty,
+           let imgData = Data(base64Encoded: b64, options: .ignoreUnknownCharacters),
+           let decoded = NSImage(data: imgData) {
+            artworkImage = decoded
+        } else if !artworkHash.isEmpty, let prev = previous, prev.artworkHash == artworkHash {
+            artworkImage = prev.artworkImage
+        }
+
+        return MediaPlaybackInfo(
+            isActive: true,
+            isPlaying: isPlaying,
+            title: title,
+            artist: artist,
+            album: album,
+            appName: appName,
+            durationMs: durationMs,
+            positionMs: positionMs,
+            playbackSpeed: playbackSpeed,
+            receivedAtUptime: receivedAtUptime,
+            volumeIndex: min(volumeIndex, maxVolume),
+            maxVolume: maxVolume,
+            canSeek: canSeek,
+            canSkipNext: canSkipNext,
+            canSkipPrevious: canSkipPrevious,
+            canControlVolume: canControlVolume,
+            artworkHash: artworkHash,
+            artworkImage: artworkImage
+        )
+    }
+}
+
+struct IncomingCallInfo: Equatable {
+    let deviceId: UUID
+    let deviceName: String
+    let callId: String
+    let state: String // "ringing" | "active" | "ended"
+    let callerName: String
+    let appName: String
+    let canAnswer: Bool
+    let canDecline: Bool
+    let appIconImage: NSImage?
+    var isMuted: Bool = false
+    var connectedAt: Date? = nil
+
+    func formattedDuration(at now: Date = Date()) -> String? {
+        guard state == "active" else { return nil }
+        let totalSeconds = max(0, Int(now.timeIntervalSince(connectedAt ?? now)))
+        let hours = totalSeconds / 3600
+        let mins = (totalSeconds % 3600) / 60
+        let secs = totalSeconds % 60
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, mins, secs)
+        }
+        return String(format: "%02d:%02d", mins, secs)
+    }
+
+    static func from(
+        jsonObject: [String: Any],
+        deviceId: UUID,
+        deviceName: String,
+        now: Date = Date()
+    ) -> IncomingCallInfo? {
+        guard let callId = jsonObject["callId"] as? String, !callId.isEmpty,
+              let state = jsonObject["state"] as? String, !state.isEmpty else {
+            return nil
+        }
+        let callerName = (jsonObject["callerName"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let lowerCaller = callerName?.lowercased() ?? ""
+        let resolvedCaller: String
+        if let name = callerName, !name.isEmpty, lowerCaller != "call", lowerCaller != "phone" {
+            resolvedCaller = name
+        } else {
+            resolvedCaller = "Unknown Caller"
+        }
+        let appName = (jsonObject["appName"] as? String) ?? ""
+        let canAnswer = (jsonObject["canAnswer"] as? Bool) ?? (state == "ringing")
+        let canDecline = (jsonObject["canDecline"] as? Bool) ?? (state != "ended")
+        let isMuted = (jsonObject["isMuted"] as? Bool) ?? false
+
+        var connectedAt: Date? = nil
+        if state == "active" {
+            let elapsed = (jsonObject["elapsedSeconds"] as? Int) ?? (jsonObject["elapsedSeconds"] as? NSNumber)?.intValue ?? 0
+            connectedAt = now.addingTimeInterval(-TimeInterval(max(0, elapsed)))
+        }
+
+        var appIcon: NSImage? = nil
+        if let iconB64 = jsonObject["icon"] as? String,
+           !iconB64.isEmpty,
+           let iconData = Data(base64Encoded: iconB64, options: .ignoreUnknownCharacters) {
+            appIcon = NSImage(data: iconData)
+        }
+
+        return IncomingCallInfo(
+            deviceId: deviceId,
+            deviceName: deviceName,
+            callId: callId,
+            state: state,
+            callerName: resolvedCaller,
+            appName: appName,
+            canAnswer: canAnswer,
+            canDecline: canDecline,
+            appIconImage: appIcon,
+            isMuted: isMuted,
+            connectedAt: connectedAt
+        )
+    }
+}
+
 struct ConnectedDeviceInfo: Identifiable, Equatable {
     let id: UUID
     let name: String
     let ip: String?
     let isConnected: Bool
+    var batteryLevel: Int? = nil
+    var isCharging: Bool = false
+    var lastBatteryUpdatedAt: TimeInterval? = nil
+    var ringerMode: RingerMode = .normal
+    var isDndEnabled: Bool = false
+    var hasDndPermission: Bool = true
+    var isRingingPhone: Bool = false
+    var mediaInfo: MediaPlaybackInfo? = nil
 }
 
 // MARK: - Helpers
+
+func formatDisplayDeviceName(_ raw: String) -> String {
+    let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return "Android Device" }
+    let parts = trimmed.split(separator: " ", omittingEmptySubsequences: true)
+    guard let first = parts.first else { return trimmed }
+    let firstStr = String(first)
+    // Capitalize lowercase manufacturer prefixes like "samsung" -> "Samsung", "google" -> "Google"
+    if firstStr == firstStr.lowercased(), let firstChar = firstStr.first {
+        let capitalizedFirst = String(firstChar).uppercased() + firstStr.dropFirst()
+        let rest = parts.dropFirst().map(String.init)
+        return ([capitalizedFirst] + rest).joined(separator: " ")
+    }
+    return trimmed
+}
 
 func computeSHA256(_ data: Data) -> String {
     let digest = SHA256.hash(data: data)
@@ -831,7 +1057,19 @@ class BridgeServer {
     private var authenticatedConnections = Set<UUID>()
     private var pendingHandshakes = [UUID: PendingHandshake]()
     private var sessionCiphers = [UUID: BridgeSessionCipher]()
+    private struct DeviceTelemetryState {
+        var batteryLevel: Int? = nil
+        var isCharging: Bool = false
+        var lastBatteryUpdatedAt: TimeInterval? = nil
+        var ringerMode: RingerMode = .normal
+        var isDndEnabled: Bool = false
+        var hasDndPermission: Bool = true
+        var isRingingPhone: Bool = false
+    }
+
     private var clientDeviceNames = [UUID: String]()
+    private var deviceTelemetry = [UUID: DeviceTelemetryState]()
+    private var deviceMediaState = [UUID: MediaPlaybackInfo]()
     private var connectionLastSeen = [UUID: TimeInterval]()
     private var connectionCreatedAt = [UUID: TimeInterval]()
     private var connectionRemoteIp = [UUID: String]()
@@ -870,6 +1108,9 @@ class BridgeServer {
     var onClipboardSynced: ((_ text: String, _ outgoing: Bool) -> Void)?
     var onIpChanged: ((_ ip: String) -> Void)?
     var onRemoteUnpair: ((_ deviceId: UUID, _ deviceName: String?, _ remainingCount: Int) -> Void)?
+    var onDeviceBatteryUpdated: ((_ deviceId: UUID, _ deviceName: String, _ level: Int, _ isCharging: Bool) -> Void)?
+    var onCallEvent: ((IncomingCallInfo) -> Void)?
+    var onDeviceDisconnected: ((_ deviceId: UUID) -> Void)?
     
     init() {
         loadOrGeneratePairingCode()
@@ -878,6 +1119,12 @@ class BridgeServer {
         }
         BridgeFileTransferManager.shared.sendControlMessage = { [weak self] jsonString, targetDeviceId in
             self?.sendRawJson(jsonString, toDeviceId: targetDeviceId)
+        }
+        PhoneMirrorManager.shared.sendMirrorControl = { [weak self] payload, targetDeviceId in
+            self?.sendMirrorControl(payload, toDeviceId: targetDeviceId)
+        }
+        PhoneMirrorManager.shared.sendMirrorInput = { [weak self] payload, targetDeviceId in
+            self?.sendMirrorInput(payload, toDeviceId: targetDeviceId)
         }
     }
     
@@ -911,12 +1158,31 @@ class BridgeServer {
         startServer()
         startClipboardPolling()
         startHeartbeat()
+
+        MacSystemControlManager.shared.onStatusChanged = { [weak self] json in
+            self?.broadcastRawJson(json)
+        }
+        MacSystemControlManager.shared.start()
+
+        MacMediaMonitor.shared.hasConnectedClientsProvider = { [weak self] in
+            guard let self else { return false }
+            return self.networkQueue.sync { !self.authenticatedConnections.isEmpty }
+        }
+        MacMediaMonitor.shared.onStatusChanged = { [weak self] json in
+            self?.broadcastRawJson(json)
+        }
+        MacMediaMonitor.shared.start()
     }
     
     func stop() {
         pollTimer?.invalidate()
         heartbeatTimer?.invalidate()
         pathMonitor.cancel()
+        MacSystemControlManager.shared.stop()
+        MacSystemControlManager.shared.onStatusChanged = nil
+        MacMediaMonitor.shared.stop()
+        MacMediaMonitor.shared.onStatusChanged = nil
+        MacMediaMonitor.shared.hasConnectedClientsProvider = { false }
         closeAllConnections()
         listener?.cancel()
         listener = nil
@@ -1108,11 +1374,17 @@ class BridgeServer {
         }
         sessionCiphers.removeValue(forKey: id)
         clientDeviceNames.removeValue(forKey: id)
+        deviceTelemetry.removeValue(forKey: id)
+        deviceMediaState.removeValue(forKey: id)
         connectionLastSeen.removeValue(forKey: id)
         connectionCreatedAt.removeValue(forKey: id)
         connectionRemoteIp.removeValue(forKey: id)
         if wasAuthenticated {
+            PhoneMirrorManager.shared.handleDeviceDisconnected(deviceId: id)
             notifyUiStatus()
+            DispatchQueue.main.async { [weak self] in
+                self?.onDeviceDisconnected?(id)
+            }
         }
     }
     
@@ -1271,6 +1543,15 @@ class BridgeServer {
                        let settingsData = settingsStr.data(using: .utf8) {
                         self.sendEncryptedData(settingsData, to: conn, id: id)
                     }
+                    DispatchQueue.global(qos: .utility).async { [weak self] in
+                        guard let self else { return }
+                        if let macStatusJson = MacSystemControlManager.shared.currentStatusJson() {
+                            self.sendRawJson(macStatusJson, toDeviceId: id)
+                        }
+                        if let macMediaJson = MacMediaMonitor.shared.currentStatusJson(forceArtwork: true) {
+                            self.sendRawJson(macMediaJson, toDeviceId: id)
+                        }
+                    }
                     self.notifyUiStatus()
                 } else {
                     NSLog("[BridgeSecurity] Invalid SPEKE client auth proof from %@", pending.remoteIp)
@@ -1309,13 +1590,85 @@ class BridgeServer {
             return
         }
         
+        if type == "device_status" {
+            var state = self.deviceTelemetry[id] ?? DeviceTelemetryState()
+            var batteryChanged = false
+
+            if let rawLevel = jsonObject["batteryLevel"] as? Int {
+                state.batteryLevel = max(0, min(100, rawLevel))
+                state.isCharging = (jsonObject["isCharging"] as? Bool) ?? false
+                state.lastBatteryUpdatedAt = Date().timeIntervalSince1970
+                batteryChanged = true
+            }
+            if let rawMode = jsonObject["ringerMode"] as? String,
+               let parsedMode = RingerMode(rawValue: rawMode) {
+                state.ringerMode = parsedMode
+            }
+            if let dndEnabled = jsonObject["isDndEnabled"] as? Bool {
+                state.isDndEnabled = dndEnabled
+            }
+            if let hasDndPerm = jsonObject["hasDndPermission"] as? Bool {
+                state.hasDndPermission = hasDndPerm
+            }
+            if let ringing = jsonObject["isRingingPhone"] as? Bool {
+                state.isRingingPhone = ringing
+            }
+
+            self.deviceTelemetry[id] = state
+            let devName = self.clientDeviceNames[id] ?? "Android Device"
+            self.notifyUiStatus()
+            if batteryChanged, let level = state.batteryLevel {
+                let charging = state.isCharging
+                DispatchQueue.main.async { [weak self] in
+                    self?.onDeviceBatteryUpdated?(id, devName, level, charging)
+                }
+            }
+            return
+        }
+
+        if type == "media_status" {
+            let previous = self.deviceMediaState[id]
+            let updated = MediaPlaybackInfo.from(jsonObject: jsonObject, previous: previous)
+            self.deviceMediaState[id] = updated
+            self.notifyUiStatus()
+            return
+        }
+
+        if type == "call_event" {
+            let devName = self.clientDeviceNames[id] ?? "Android Device"
+            if let call = IncomingCallInfo.from(jsonObject: jsonObject, deviceId: id, deviceName: devName) {
+                DispatchQueue.main.async { [weak self] in
+                    self?.onCallEvent?(call)
+                }
+            }
+            return
+        }
+
+        if type == "mac_control" {
+            MacSystemControlManager.shared.handleControlCommand(jsonObject: jsonObject)
+            return
+        }
+
+        if type == "mac_media_action" {
+            MacMediaMonitor.shared.handleMediaAction(jsonObject: jsonObject)
+            return
+        }
+
+        if type == "mirror_control" {
+            let devName = self.clientDeviceNames[id] ?? "Android Device"
+            PhoneMirrorManager.shared.handleControlMessage(jsonObject, fromDeviceId: id, deviceName: formatDisplayDeviceName(devName))
+            return
+        }
+
         if type == "ping" {
+            self.refreshBatteryKeepalive(for: id)
             let pong = ClipboardPayload(type: "pong")
             self.sendEncrypted(payload: pong, to: conn, id: id)
             return
         }
 
         if type == "pong" {
+            self.refreshBatteryKeepalive(for: id)
             return
         }
         
@@ -1392,16 +1745,90 @@ class BridgeServer {
 
     func getConnectedDevicesList() -> [ConnectedDeviceInfo] {
         return authenticatedConnections.map { id in
-            ConnectedDeviceInfo(
+            let state = deviceTelemetry[id]
+            return ConnectedDeviceInfo(
                 id: id,
-                name: clientDeviceNames[id] ?? "Android Device",
+                name: formatDisplayDeviceName(clientDeviceNames[id] ?? "Android Device"),
                 ip: connectionRemoteIp[id],
-                isConnected: true
+                isConnected: true,
+                batteryLevel: state?.batteryLevel,
+                isCharging: state?.isCharging ?? false,
+                lastBatteryUpdatedAt: state?.lastBatteryUpdatedAt,
+                ringerMode: state?.ringerMode ?? .normal,
+                isDndEnabled: state?.isDndEnabled ?? false,
+                hasDndPermission: state?.hasDndPermission ?? true,
+                isRingingPhone: state?.isRingingPhone ?? false,
+                mediaInfo: deviceMediaState[id]
             )
         }
     }
 
-    func disconnectDevice(id: UUID) {
+    func sendMediaAction(_ payload: [String: Any], toDeviceId id: UUID) {
+        var enriched = payload
+        enriched["type"] = "media_action"
+        guard let data = try? JSONSerialization.data(withJSONObject: enriched),
+              let jsonString = String(data: data, encoding: .utf8) else {
+            return
+        }
+        sendRawJson(jsonString, toDeviceId: id)
+    }
+
+    func sendCallAction(_ payload: [String: Any], toDeviceId id: UUID) {
+        var enriched = payload
+        enriched["type"] = "call_action"
+        guard let data = try? JSONSerialization.data(withJSONObject: enriched),
+              let jsonString = String(data: data, encoding: .utf8) else {
+            return
+        }
+        sendRawJson(jsonString, toDeviceId: id)
+    }
+
+    func sendDeviceControl(_ payload: [String: Any], toDeviceId id: UUID) {
+        var enriched = payload
+        enriched["type"] = "device_control"
+        guard let data = try? JSONSerialization.data(withJSONObject: enriched),
+              let jsonString = String(data: data, encoding: .utf8) else {
+            return
+        }
+        sendRawJson(jsonString, toDeviceId: id)
+    }
+
+    func sendMirrorControl(_ payload: [String: Any], toDeviceId id: UUID) {
+        var enriched = payload
+        enriched["type"] = "mirror_control"
+        guard let data = try? JSONSerialization.data(withJSONObject: enriched),
+              let jsonString = String(data: data, encoding: .utf8) else {
+            return
+        }
+        sendRawJson(jsonString, toDeviceId: id)
+    }
+
+    func sendMirrorInput(_ payload: [String: Any], toDeviceId id: UUID) {
+        var enriched = payload
+        enriched["type"] = "mirror_input"
+        guard let data = try? JSONSerialization.data(withJSONObject: enriched),
+              let jsonString = String(data: data, encoding: .utf8) else {
+            return
+        }
+        sendRawJson(jsonString, toDeviceId: id)
+    }
+
+    /// Gracefully disconnects the active session without unpairing or rotating the pairing code.
+    func disconnectSession(id: UUID) {
+        networkQueue.async { [weak self] in
+            guard let self = self else { return }
+            let disconnectPayload = ClipboardPayload(type: "disconnect")
+            if let conn = self.connections[id] {
+                self.sendEncrypted(payload: disconnectPayload, to: conn, id: id)
+                self.networkQueue.asyncAfter(deadline: .now() + 0.1) {
+                    conn.cancel()
+                    self.removeConnection(id: id)
+                }
+            }
+        }
+    }
+
+    func unpairDevice(id: UUID) {
         networkQueue.async { [weak self] in
             guard let self = self else { return }
             let unpairPayload = ClipboardPayload(type: "unpair")
@@ -1463,12 +1890,22 @@ class BridgeServer {
         }
     }
 
+    private func refreshBatteryKeepalive(for id: UUID) {
+        guard var state = self.deviceTelemetry[id], state.batteryLevel != nil else { return }
+        let now = Date().timeIntervalSince1970
+        let prevUpdated = state.lastBatteryUpdatedAt ?? 0
+        state.lastBatteryUpdatedAt = now
+        self.deviceTelemetry[id] = state
+        if (now - prevUpdated) >= 120 {
+            self.notifyUiStatus()
+        }
+    }
+
     func broadcastRawJson(_ jsonString: String) {
-        guard !authenticatedConnections.isEmpty else { return }
         guard let data = jsonString.data(using: .utf8) else { return }
         
         networkQueue.async { [weak self] in
-            guard let self = self else { return }
+            guard let self = self, !self.authenticatedConnections.isEmpty else { return }
             for id in self.authenticatedConnections {
                 if let conn = self.connections[id] {
                     self.sendEncryptedData(data, to: conn, id: id)
@@ -1684,12 +2121,17 @@ class BridgeServer {
     }
     
     private func closeAllConnections() {
+        for id in Array(authenticatedConnections) {
+            PhoneMirrorManager.shared.handleDeviceDisconnected(deviceId: id)
+        }
         for (_, conn) in connections { conn.cancel() }
         connections.removeAll()
         authenticatedConnections.removeAll()
         pendingHandshakes.removeAll()
         sessionCiphers.removeAll()
         clientDeviceNames.removeAll()
+        deviceTelemetry.removeAll()
+        deviceMediaState.removeAll()
         connectionLastSeen.removeAll()
         connectionCreatedAt.removeAll()
         connectionRemoteIp.removeAll()
