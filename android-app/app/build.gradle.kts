@@ -37,8 +37,8 @@ android {
         applicationId = "com.link.clipboardsync"
         minSdk = 26
         targetSdk = 34
-        versionCode = 8
-        versionName = "1.3.5"
+        versionCode = 9
+        versionName = "1.4.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

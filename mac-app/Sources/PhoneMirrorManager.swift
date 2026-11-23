@@ -40,7 +40,9 @@ final class PhoneMirrorManager: ObservableObject {
     private var handshakeTimeoutWorkItem: DispatchWorkItem?
     private var receiveBuffer = Data()
     private var isStreamAuthenticated = false
+    private var streamCipher: PhoneMirrorStreamCipher?
     private var currentMirrorSessionTokenId = UUID()
+    private static let maxReceiveBufferBytes = PhoneMirrorPacketHeader.maxPayloadLength + 65_536
 
     private init() {
         decoder.onFrameDecoded = { [weak self] image, width, height in
@@ -393,6 +395,12 @@ final class PhoneMirrorManager: ObservableObject {
             guard let self = self, let conn = conn else { return }
             if let chunk = data, !chunk.isEmpty {
                 self.receiveBuffer.append(chunk)
+                if self.receiveBuffer.count > Self.maxReceiveBufferBytes {
+                    NSLog("[PhoneMirrorSecurity] Mirror receive buffer limit exceeded; closing stream")
+                    self.receiveBuffer.removeAll(keepingCapacity: false)
+                    conn.cancel()
+                    return
+                }
                 if !self.processReceiveBuffer(on: conn, sessionTag: sessionTag) {
                     return
                 }
@@ -418,14 +426,26 @@ final class PhoneMirrorManager: ObservableObject {
             receiveBuffer.removeSubrange(0..<PhoneMirrorHandshake.byteLength)
 
             guard let handshake = PhoneMirrorHandshake.parse(from: handshakeSlice),
-                  let expectedToken = activeToken,
-                  constantTimeEquals(handshake.token, expectedToken) else {
+                  let expectedToken = activeToken else {
+                NSLog("[PhoneMirrorSecurity] Rejected malformed mirror stream handshake")
+                conn.cancel()
+                return false
+            }
+
+            let expectedAuthProof = PhoneMirrorHandshake.computeAuthProof(
+                token: expectedToken,
+                width: handshake.width,
+                height: handshake.height,
+                rotation: handshake.rotation
+            )
+            guard constantTimeEquals(handshake.token, expectedAuthProof) else {
                 NSLog("[PhoneMirrorSecurity] Rejected unauthenticated mirror stream handshake")
                 conn.cancel()
                 return false
             }
 
             isStreamAuthenticated = true
+            streamCipher = PhoneMirrorStreamCipher(token: expectedToken)
             handshakeTimeoutWorkItem?.cancel()
             handshakeTimeoutWorkItem = nil
 
@@ -453,10 +473,22 @@ final class PhoneMirrorManager: ObservableObject {
                 break
             }
 
-            let payload = header.length > 0
+            let encryptedPayload = header.length > 0
                 ? receiveBuffer.subdata(in: PhoneMirrorPacketHeader.byteLength..<totalPacketLen)
                 : Data()
             receiveBuffer.removeSubrange(0..<totalPacketLen)
+
+            guard let cipher = streamCipher,
+                  let payload = cipher.open(
+                      type: header.type.rawValue,
+                      flags: header.flags,
+                      ptsUs: header.ptsUs,
+                      encryptedPayload: encryptedPayload
+                  ) else {
+                NSLog("[PhoneMirrorSecurity] Mirror packet decryption or authentication failed; closing stream")
+                conn.cancel()
+                return false
+            }
 
             switch header.type {
             case .config:
@@ -492,6 +524,7 @@ final class PhoneMirrorManager: ObservableObject {
         listener = nil
         receiveBuffer.removeAll(keepingCapacity: false)
         activeToken = nil
+        streamCipher = nil
         isStreamAuthenticated = false
     }
 

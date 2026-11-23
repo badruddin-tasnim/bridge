@@ -9,7 +9,7 @@ Thank you for your interest in contributing to **Bridge**! Our mission is to bui
 Bridge is structured as a native multi-platform repository:
 
 ### 1. macOS Menu Bar App (`mac-app/`)
-- **Stack:** Swift, SwiftUI, AppKit (`NSPopover` + `NSStatusItem`), `CryptoKit` (AES-GCM), `Network.framework` (`NWListener`), UserNotifications, UniformTypeIdentifiers.
+- **Stack:** Swift, SwiftUI, AppKit (`NSPopover` + `NSStatusItem` + `NSPanel`), `CryptoKit` (AES-GCM), `Network.framework` (`NWListener`), `VideoToolbox`, `CoreMedia`, `CoreAudio`, `ServiceManagement`, UserNotifications, UniformTypeIdentifiers, and bundled `MediaRemoteAdapter.framework`.
 - **Extensions:** Finder Quick Action (`BridgeQuickAction.appex`) and macOS Share Extension (`BridgeShare.appex`).
 - **Requirements:** macOS 13.0+ and Xcode Command Line Tools (`xcode-select --install`).
 - **Build & Run:**
@@ -21,7 +21,7 @@ Bridge is structured as a native multi-platform repository:
   ```
 
 ### 2. Android App (`android-app/`)
-- **Stack:** Kotlin, Jetpack, Coroutines, custom `Canvas` animations (`BridgeLinkView`), `Socket` + `NsdManager` (mDNS/Bonjour), Storage Access Framework (SAF), NotificationListenerService, AccessibilityService.
+- **Stack:** Kotlin, Jetpack, Coroutines, `MediaProjection` + `MediaCodec` (H.264), `MediaSessionManager`, `TelecomManager`, custom `Canvas` views (`BridgeLinkView`, `MacBatteryRingView`), `Socket` + `NsdManager` (mDNS/Bonjour), Storage Access Framework (SAF), NotificationListenerService, AccessibilityService.
 - **Requirements:** JDK 17+ and Android SDK (`compileSdk 34`, `minSdk 26`).
 - **Build & Install:**
   ```bash
@@ -34,26 +34,35 @@ Bridge is structured as a native multi-platform repository:
 
 ## 📡 Wire Protocol Specification (`TCP :8765`)
 
-Bridge uses newline-delimited JSON (`\n`) for metadata control framing over a persistent TCP socket on port `8765`, discovered automatically on the local network via Bonjour (`_clipboardsync._tcp`). High-speed binary file streams utilize framed AES-GCM data chunks.
+Bridge authenticates connections with a **2048-bit SPEKE PAKE** handshake and encrypts all post-handshake newline-delimited JSON control traffic inside directional **AES-256-GCM** (`enc`) frames over a persistent TCP socket on port `8765`, discovered automatically on the local network via Bonjour (`_clipboardsync._tcp`). Dedicated file-transfer streams and Phone Mirroring H.264 video sockets authenticate via one-way SHA-256 proofs and encrypt payloads per-packet with **AES-256-GCM**.
 
 ### Control & Data Message Types
 
 | Message `type` | Direction | Description |
 | :--- | :---: | :--- |
-| **`hello`** | Android → Mac | Initial client handshake carrying `hash` (`SHA-256("bridge-hello:" + code + ":" + clientNonce)`), `text` (`clientNonce`), and `device` name. |
-| **`welcome`** | Mac → Android | Server handshake acknowledgment carrying `hash` (`SHA-256("bridge-welcome:" + code + ":" + clientNonce)`) and `name` (Mac hostname). |
-| **`denied`** | Mac → Android | Sent when handshake verification fails or client IP is rate-limited. |
+| **`hello`** | Android → Mac | Initial SPEKE client handshake carrying `clientNonce`, ephemeral public element, and `device` name. |
+| **`challenge`** | Mac → Android | Server SPEKE challenge carrying `serverNonce`, salt, and ephemeral public element `B`. |
+| **`auth`** | Android → Mac | Client mutual key-confirmation transcript proof (`auth`). |
+| **`welcome`** | Mac → Android | Server key-confirmation proof and Mac hostname; upgrades socket to encrypted `enc` session frames. |
+| **`denied`** | Mac → Android | Sent when handshake verification fails or client IP / global rate-limiter is triggered. |
+| **`enc`** | Bi-directional | Encrypted **AES-256-GCM** envelope (`seq`, base64 `d`) wrapping all post-handshake JSON messages. |
 | **`clip`** | Bi-directional | Text clipboard sync payload with `text`, `hash` (SHA-256 digest), and `timestamp`. |
 | **`image`** | Bi-directional | Screenshot/image sync payload carrying Base64 `data`, `mime` (`image/png` or `image/jpeg`), `hash`, and `text` (`"[Image]"`). |
 | **`notif_post`** | Android → Mac | Mirrored notification payload with `id`, `pkg`, `app`, `title`, `text`, optional `icon` (Base64 PNG), `actions`, and `messages`. |
 | **`notif_remove` / `notif_sync`** | Android → Mac | Removes dismissed Android notifications or synchronizes active notification IDs on Mac. |
 | **`notif_action`** | Mac → Android | Action button tap or inline reply (`id`, `actionId`, optional `replyText`) routed back to Android. |
-| **`notif_dismiss`**| Bi-directional | Two-way notification dismissal synchronization (`id`, `target`). |
-| **`settings_sync`**| Bi-directional | Real-time settings synchronization (notification mirroring toggles and `autoAcceptFiles`). |
+| **`notif_dismiss`** | Bi-directional | Two-way notification dismissal synchronization (`id`, `target`). |
+| **`settings_sync`** | Bi-directional | Real-time settings synchronization (notification mirroring toggles, `autoAcceptFiles`, and `callsOnMacEnabled`). |
 | **`file_offer` / `file_request`** | Bi-directional | Proposes a file or zipped folder transfer (`id`, `name`, `size`, `sha256`, `isFolder`; `file_offer` also sends `port`, `token`, `resume`). |
-| **`file_accept` / `file_reject`**| Bi-directional | Accepts (with `port`, `token`, `offset`) or declines (`reason`) a transfer request. |
+| **`file_accept` / `file_reject`** | Bi-directional | Accepts (with `port`, `token`, `offset`) or declines (`reason`) a transfer request. |
 | **`file_pause` / `file_resume` / `file_cancel` / `file_complete` / `file_error`** | Bi-directional | Transfer lifecycle state messages keyed by `id`. |
-| **`ping` / `pong`**| Bi-directional | Keepalive heartbeat sent every 2.5–3 seconds (`ping` → `pong`) to detect dropped connections quickly. |
+| **`device_status` / `device_control`** | Android → Mac / Mac → Android | Live phone battery, charging, ringer mode, and Do Not Disturb telemetry (`device_status`), plus remote controls (`ringer`, `dnd`, `ring_phone`). |
+| **`media_status` / `media_action`** | Android → Mac / Mac → Android | Android active Now Playing metadata/artwork and Mac-to-phone playback/seek/volume commands. |
+| **`mac_status` / `mac_control`** | Mac → Android / Android → Mac | Live Mac battery percentage/charging telemetry (`mac_status`) and Mac mute/volume control actions (`mac_control`). |
+| **`mac_media_status` / `mac_media_action`** | Mac → Android / Android → Mac | Universal Mac Now Playing state (`MediaRemoteAdapter` / players / browsers) and Android-to-Mac playback/seek controls. |
+| **`call_event` / `call_action`** | Android → Mac / Mac → Android | Incoming/active/ended cellular and VoIP call state updates (`call_event`) and `accept` / `decline` / `silence` / `mute` actions (`call_action`). |
+| **`mirror_control` / `mirror_input`** | Bi-directional / Mac → Android | Phone Mirroring stream negotiation (`request_start`, `stream_offer`, `stop`, rotation/dimming) and pointer/keyboard/navigation input (`mirror_input`). |
+| **`ping` / `pong`** | Bi-directional | Keepalive heartbeat sent every 2.5–3 seconds (`ping` → `pong`) to detect dropped connections quickly. |
 | **`sleep`** | Mac → Android | Sent before macOS enters system sleep so Android can drop and cleanly reconnect on wake. |
 | **`disconnect`** | Android → Mac | Cleanly closes the current session while keeping pairing credentials intact. |
 | **`unpair`** | Bi-directional | Terminates pairing and clears/rotates pairing credentials on both devices. |
@@ -67,7 +76,7 @@ Bridge uses newline-delimited JSON (`\n`) for metadata control framing over a pe
 2. **Zero-Cloud & Zero-Telemetry:**
    - Bridge will **never** include third-party tracking, analytics, or cloud infrastructure. All features must work 100% peer-to-peer on a local network or hotspot.
 3. **No Plaintext Logging:**
-   - Never log raw clipboard text, notification messages, replies, or file payloads to `Logcat` or console output. Use truncated SHA-256 hashes for debugging.
+   - Never log raw clipboard text, notification messages, replies, remote mirroring input text, or file payloads to `Logcat` or console output. Use truncated SHA-256 hashes or lengths for diagnostics.
 4. **Security & Sanitization:**
    - File transfer implementations must strictly sanitize paths and block directory traversal attacks (`../`).
    - Android permissions must follow least-privilege principles and be documented in `README.md`.

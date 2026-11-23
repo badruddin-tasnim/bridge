@@ -548,14 +548,40 @@ class BridgeCoreUnitTest {
     @Test
     fun phoneMirrorProtocol_handshakeHeadersGeometryAndCoordinates() {
         val token = "ab".repeat(32)
+        val expectedProof = PhoneMirrorProtocol.computeStreamAuthProof(token, width = 720, height = 1280, rotation = 2)
+        assertEquals(64, expectedProof.length)
+        assertNotEquals(token, expectedProof)
+
         val hs = PhoneMirrorProtocol.buildHandshake(token, width = 720, height = 1280, rotation = 2)
         assertEquals(PhoneMirrorProtocol.HANDSHAKE_BYTES, hs.size)
-        assertEquals(token, String(hs.copyOfRange(0, 64), Charsets.US_ASCII))
+        assertEquals(expectedProof, String(hs.copyOfRange(0, 64), Charsets.US_ASCII))
         assertEquals(0x02, hs[64].toInt() and 0xFF)
         assertEquals(0xD0, hs[65].toInt() and 0xFF)
         assertEquals(0x05, hs[66].toInt() and 0xFF)
         assertEquals(0x00, hs[67].toInt() and 0xFF)
         assertEquals(0x02, hs[68].toInt() and 0xFF)
+
+        // AES-256-GCM stream encryption round-trip, tamper rejection, wrong key & replay/seq mismatch
+        val sender = PhoneMirrorStreamCipher(token)
+        val receiver = PhoneMirrorStreamCipher(token)
+        val sampleNalu = byteArrayOf(0x00, 0x00, 0x00, 0x01, 0x65, 0x88.toByte(), 0x84.toByte())
+        val enc0 = sender.seal(PhoneMirrorProtocol.PACKET_TYPE_FRAME, PhoneMirrorProtocol.FLAG_KEYFRAME, 123_456L, sampleNalu)
+        assertEquals(sampleNalu.size + 28, enc0.size)
+        assertTrue(sampleNalu.contentEquals(receiver.open(PhoneMirrorProtocol.PACKET_TYPE_FRAME, PhoneMirrorProtocol.FLAG_KEYFRAME, 123_456L, enc0)))
+
+        // Replay of seq 0 must fail at seq 1
+        assertNull(receiver.open(PhoneMirrorProtocol.PACKET_TYPE_FRAME, PhoneMirrorProtocol.FLAG_KEYFRAME, 123_456L, enc0))
+
+        // Tampered ciphertext/tag must fail
+        val enc1 = sender.seal(PhoneMirrorProtocol.PACKET_TYPE_CONFIG, PhoneMirrorProtocol.FLAG_NONE, 0L, byteArrayOf(1, 2, 3, 4))
+        val tampered = enc1.copyOf().also { it[it.size - 1] = (it[it.size - 1].toInt() xor 0xFF).toByte() }
+        assertNull(receiver.open(PhoneMirrorProtocol.PACKET_TYPE_CONFIG, PhoneMirrorProtocol.FLAG_NONE, 0L, tampered))
+
+        // Wrong token must fail even at valid seq 0
+        val wrongReceiver = PhoneMirrorStreamCipher("cd".repeat(32))
+        val freshSender = PhoneMirrorStreamCipher(token)
+        val encFresh = freshSender.seal(PhoneMirrorProtocol.PACKET_TYPE_FRAME, PhoneMirrorProtocol.FLAG_NONE, 55L, sampleNalu)
+        assertNull(wrongReceiver.open(PhoneMirrorProtocol.PACKET_TYPE_FRAME, PhoneMirrorProtocol.FLAG_NONE, 55L, encFresh))
 
         val hdr = PhoneMirrorProtocol.buildPacketHeader(
             type = PhoneMirrorProtocol.PACKET_TYPE_FRAME,

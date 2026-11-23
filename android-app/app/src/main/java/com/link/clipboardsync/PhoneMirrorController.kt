@@ -90,7 +90,7 @@ object PhoneMirrorController {
     fun handleControlMessage(context: Context, jsonObj: JSONObject, macHost: String) {
         val appCtx = context.applicationContext
         val cmd = PhoneMirrorProtocol.parseControlCommand(jsonObj) ?: run {
-            Log.d(TAG, "Ignoring unrecognized mirror_control: $jsonObj")
+            Log.d(TAG, "Ignoring unrecognized mirror_control action=${jsonObj.optString("action")}")
             return
         }
 

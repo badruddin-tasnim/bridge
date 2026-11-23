@@ -3,6 +3,11 @@ package com.link.clipboardsync
 import org.json.JSONObject
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.security.MessageDigest
+import java.security.SecureRandom
+import javax.crypto.Cipher
+import javax.crypto.spec.GCMParameterSpec
+import javax.crypto.spec.SecretKeySpec
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
@@ -58,17 +63,30 @@ object PhoneMirrorProtocol {
     const val HEADER_BYTES = 14
     const val GEOMETRY_PAYLOAD_BYTES = 5
 
-    fun buildHandshake(tokenHex: String, width: Int, height: Int, rotation: Int): ByteArray {
+    fun computeStreamAuthProof(tokenHex: String, width: Int, height: Int, rotation: Int): String {
         val normalizedToken = tokenHex.trim().lowercase()
         require(normalizedToken.length == TOKEN_HEX_LENGTH) {
             "Mirror token must be $TOKEN_HEX_LENGTH hex chars, got ${normalizedToken.length}"
         }
-        val tokenBytes = normalizedToken.toByteArray(Charsets.US_ASCII)
+        val safeW = width.coerceIn(1, 65535)
+        val safeH = height.coerceIn(1, 65535)
+        val safeRot = rotation and 0xFF
+        val message = "bridge-mirror-auth-v1:$normalizedToken:$safeW:$safeH:$safeRot"
+        val digest = MessageDigest.getInstance("SHA-256").digest(message.toByteArray(Charsets.UTF_8))
+        return digest.joinToString("") { "%02x".format(it) }
+    }
+
+    fun buildHandshake(tokenHex: String, width: Int, height: Int, rotation: Int): ByteArray {
+        val safeW = width.coerceIn(1, 65535)
+        val safeH = height.coerceIn(1, 65535)
+        val safeRot = rotation and 0xFF
+        val authProof = computeStreamAuthProof(tokenHex, safeW, safeH, safeRot)
+        val authBytes = authProof.toByteArray(Charsets.US_ASCII)
         val buf = ByteBuffer.allocate(HANDSHAKE_BYTES).order(ByteOrder.BIG_ENDIAN)
-        buf.put(tokenBytes)
-        buf.putShort(width.coerceIn(1, 65535).toShort())
-        buf.putShort(height.coerceIn(1, 65535).toShort())
-        buf.put((rotation and 0xFF).toByte())
+        buf.put(authBytes)
+        buf.putShort(safeW.toShort())
+        buf.putShort(safeH.toShort())
+        buf.put(safeRot.toByte())
         return buf.array()
     }
 
@@ -230,5 +248,72 @@ object PhoneMirrorProtocol {
             }
             else -> null
         }
+    }
+}
+
+/**
+ * Per-packet AES-256-GCM cipher for the Phone Mirroring TCP video stream.
+ * Derives key from `SHA-256("<token>:bridge-mirror-encryption")`, uses a 12-byte IV
+ * (`4-byte random salt + 8-byte big-endian monotonic seq`), and binds header metadata via AAD.
+ */
+class PhoneMirrorStreamCipher(tokenHex: String) {
+    private val keySpec: SecretKeySpec
+    private val sendSalt = ByteArray(4).also { SecureRandom().nextBytes(it) }
+    private var sendSeq: Long = 0L
+    private var receiveSeq: Long = 0L
+
+    init {
+        val normalized = tokenHex.trim().lowercase()
+        require(normalized.length == PhoneMirrorProtocol.TOKEN_HEX_LENGTH) {
+            "Mirror token must be ${PhoneMirrorProtocol.TOKEN_HEX_LENGTH} hex chars"
+        }
+        val keyMaterial = MessageDigest.getInstance("SHA-256")
+            .digest("$normalized:bridge-mirror-encryption".toByteArray(Charsets.UTF_8))
+        keySpec = SecretKeySpec(keyMaterial, "AES")
+    }
+
+    @Synchronized
+    fun seal(type: Byte, flags: Byte, ptsUs: Long, plaintext: ByteArray): ByteArray {
+        val seq = sendSeq
+        val iv = ByteBuffer.allocate(12).order(ByteOrder.BIG_ENDIAN).apply {
+            put(sendSalt)
+            putLong(seq)
+        }.array()
+        val aad = buildAad(type, flags, ptsUs, seq)
+        val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+        cipher.init(Cipher.ENCRYPT_MODE, keySpec, GCMParameterSpec(128, iv))
+        cipher.updateAAD(aad)
+        val cipherAndTag = cipher.doFinal(plaintext)
+        sendSeq = seq + 1L
+        return iv + cipherAndTag
+    }
+
+    @Synchronized
+    fun open(type: Byte, flags: Byte, ptsUs: Long, encryptedPayload: ByteArray): ByteArray? {
+        if (encryptedPayload.size < 28) return null
+        val seq = receiveSeq
+        val iv = encryptedPayload.copyOfRange(0, 12)
+        val expectedSeqBytes = ByteBuffer.allocate(8).order(ByteOrder.BIG_ENDIAN).putLong(seq).array()
+        for (i in 0 until 8) {
+            if (iv[4 + i] != expectedSeqBytes[i]) return null
+        }
+        val cipherAndTag = encryptedPayload.copyOfRange(12, encryptedPayload.size)
+        val aad = buildAad(type, flags, ptsUs, seq)
+        return try {
+            val cipher = Cipher.getInstance("AES/GCM/NoPadding")
+            cipher.init(Cipher.DECRYPT_MODE, keySpec, GCMParameterSpec(128, iv))
+            cipher.updateAAD(aad)
+            val plain = cipher.doFinal(cipherAndTag)
+            receiveSeq = seq + 1L
+            plain
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun buildAad(type: Byte, flags: Byte, ptsUs: Long, seq: Long): ByteArray {
+        val t = type.toInt() and 0xFF
+        val f = flags.toInt() and 0xFF
+        return "bridge-mirror-pkt-v1:$t:$f:$ptsUs:$seq".toByteArray(Charsets.UTF_8)
     }
 }

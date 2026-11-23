@@ -1387,18 +1387,68 @@ private func runMacSystemControlAndMediaMonitorTests() {
         MacMediaMonitor.cleanYouTubeTitle("(3) AI Engineering Full Course - YouTube") == "AI Engineering Full Course",
         "YouTube tab title cleaner should strip badge count and suffix"
     )
+    expect(
+        MacMediaMonitor.extractYouTubeVideoId(from: "https://youtu.be/bad!id") == nil,
+        "Invalid characters in YouTube video id must be rejected"
+    )
 }
 
 private func runPhoneMirroringTests() {
-    // 1. Handshake parsing (64-byte ASCII token + width BE + height BE + rotation)
+    // 1. Handshake auth proof & parsing (64-byte ASCII SHA-256 proof + width BE + height BE + rotation)
     let token = String(repeating: "ab", count: 32)
-    var handshakeData = Data(token.utf8)
+    let proof = PhoneMirrorHandshake.computeAuthProof(token: token, width: 720, height: 1280, rotation: 1)
+    expect(proof.count == 64 && proof != token, "Mirror handshake auth proof must be a 64-hex hash different from raw token")
+    expect(
+        proof == computeSHA256("bridge-mirror-auth-v1:\(token):720:1280:1"),
+        "Mirror handshake auth proof must match bridge-mirror-auth-v1 digest"
+    )
+
+    var handshakeData = Data(proof.utf8)
     handshakeData.append(contentsOf: [0x02, 0xD0, 0x05, 0x00, 0x01]) // 720 x 1280, rot 1
     let parsedHandshake = PhoneMirrorHandshake.parse(from: handshakeData)
-    expect(parsedHandshake?.token == token, "Handshake token should parse")
+    expect(parsedHandshake?.token == proof, "Handshake auth proof should parse")
     expect(parsedHandshake?.width == 720 && parsedHandshake?.height == 1280, "Handshake dimensions should parse big-endian")
     expect(parsedHandshake?.rotation == 1, "Handshake rotation should parse")
     expect(PhoneMirrorHandshake.parse(from: Data(repeating: 0x30, count: 40)) == nil, "Short handshake must be rejected")
+
+    // 1b. Per-packet AES-256-GCM stream encryption round-trip, tamper, wrong key, and sequence/replay rejection
+    let senderCipher = PhoneMirrorStreamCipher(token: token)
+    let receiverCipher = PhoneMirrorStreamCipher(token: token)
+    let plainFrame = Data([0x00, 0x00, 0x00, 0x01, 0x65, 0x88, 0x84, 0x21])
+    if let sealed0 = senderCipher.seal(type: PhoneMirrorPacketType.frame.rawValue, flags: 0x01, ptsUs: 123_456, plaintext: plainFrame) {
+        expect(sealed0.count == plainFrame.count + 28, "Encrypted mirror frame must add 12-byte IV + 16-byte GCM tag")
+        let opened0 = receiverCipher.open(type: PhoneMirrorPacketType.frame.rawValue, flags: 0x01, ptsUs: 123_456, encryptedPayload: sealed0)
+        expect(opened0 == plainFrame, "Mirror stream cipher round-trip should recover plaintext")
+        let replay0 = receiverCipher.open(type: PhoneMirrorPacketType.frame.rawValue, flags: 0x01, ptsUs: 123_456, encryptedPayload: sealed0)
+        expect(replay0 == nil, "Replayed seq 0 packet must be rejected at seq 1")
+    } else {
+        expect(false, "Mirror stream seal should succeed")
+    }
+
+    if let sealed1 = senderCipher.seal(type: PhoneMirrorPacketType.config.rawValue, flags: 0x00, ptsUs: 0, plaintext: Data([0x67, 0x42])) {
+        var tampered = sealed1
+        tampered[tampered.count - 1] ^= 0xFF
+        expect(
+            receiverCipher.open(type: PhoneMirrorPacketType.config.rawValue, flags: 0x00, ptsUs: 0, encryptedPayload: tampered) == nil,
+            "Tampered mirror stream packet must fail GCM authentication"
+        )
+        expect(
+            receiverCipher.open(type: PhoneMirrorPacketType.frame.rawValue, flags: 0x00, ptsUs: 0, encryptedPayload: sealed1) == nil,
+            "Header-mismatched AAD must fail GCM authentication"
+        )
+        let wrongKeyReceiver = PhoneMirrorStreamCipher(token: String(repeating: "cd", count: 32))
+        let freshSender = PhoneMirrorStreamCipher(token: token)
+        if let fresh0 = freshSender.seal(type: PhoneMirrorPacketType.frame.rawValue, flags: 0x00, ptsUs: 99, plaintext: plainFrame) {
+            expect(
+                wrongKeyReceiver.open(type: PhoneMirrorPacketType.frame.rawValue, flags: 0x00, ptsUs: 99, encryptedPayload: fresh0) == nil,
+                "Wrong mirror token key must fail decryption"
+            )
+        } else {
+            expect(false, "Fresh mirror seal should succeed")
+        }
+    } else {
+        expect(false, "Second mirror seal should succeed")
+    }
 
     // 2. Packet header & geometry parsing
     let hdrBytes: [UInt8] = [

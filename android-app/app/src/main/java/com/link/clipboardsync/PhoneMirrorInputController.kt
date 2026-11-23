@@ -13,12 +13,12 @@ object PhoneMirrorInputController {
 
     fun handleInputMessage(context: Context, jsonObj: JSONObject) {
         val cmd = PhoneMirrorProtocol.parseInputCommand(jsonObj) ?: run {
-            Log.d(TAG, "Ignoring malformed mirror_input command: $jsonObj")
+            Log.d(TAG, "Ignoring malformed mirror_input command action=${jsonObj.optString("action")}")
             return
         }
         val a11y = ClipboardSyncAccessibilityService.instance
         if (a11y == null) {
-            Log.w(TAG, "Cannot inject mirror input ($cmd): Accessibility service is not active")
+            Log.w(TAG, "Cannot inject mirror input (${cmd::class.java.simpleName}): Accessibility service is not active")
             return
         }
 

@@ -152,7 +152,10 @@ class ScreenMirrorForegroundService : Service() {
         bitRate = intent.getIntExtra(EXTRA_BITRATE, 5_000_000).coerceIn(1_000_000, 16_000_000)
         targetFps = intent.getIntExtra(EXTRA_FPS, 60).coerceIn(15, 60)
 
-        if (resultCode != Activity.RESULT_OK || resultData == null || macHost.isBlank() || mirrorPort !in 1024..65535 || token.length != PhoneMirrorProtocol.TOKEN_HEX_LENGTH) {
+        if (resultCode != Activity.RESULT_OK || resultData == null || macHost.isBlank() ||
+            !NetworkSyncClient.isPrivateLocalAddress(macHost) ||
+            mirrorPort !in 1024..65535 || token.length != PhoneMirrorProtocol.TOKEN_HEX_LENGTH
+        ) {
             stopCaptureAndSelf("invalid_stream_parameters", notifyMac = true)
             return START_NOT_STICKY
         }
@@ -428,8 +431,9 @@ class ScreenMirrorForegroundService : Service() {
             socket = s
 
             val out = DataOutputStream(BufferedOutputStream(s.getOutputStream(), 65536))
+            val streamCipher = PhoneMirrorStreamCipher(tokenHex)
 
-            // 1. Send authenticated 69-byte handshake
+            // 1. Send authenticated 69-byte handshake (one-way SHA-256 auth proof)
             val w0 = currentStreamWidth
             val h0 = currentStreamHeight
             val rot0 = currentRotation
@@ -453,14 +457,20 @@ class ScreenMirrorForegroundService : Service() {
                     val newH = currentStreamHeight
                     val newRot = currentRotation
                     val geomPayload = PhoneMirrorProtocol.buildGeometryPayload(newW, newH, newRot)
+                    val encGeom = streamCipher.seal(
+                        type = PhoneMirrorProtocol.PACKET_TYPE_GEOMETRY,
+                        flags = PhoneMirrorProtocol.FLAG_NONE,
+                        ptsUs = 0L,
+                        plaintext = geomPayload
+                    )
                     val geomHeader = PhoneMirrorProtocol.buildPacketHeader(
                         type = PhoneMirrorProtocol.PACKET_TYPE_GEOMETRY,
                         flags = PhoneMirrorProtocol.FLAG_NONE,
                         ptsUs = 0L,
-                        payloadLength = geomPayload.size
+                        payloadLength = encGeom.size
                     )
                     out.write(geomHeader)
-                    out.write(geomPayload)
+                    out.write(encGeom)
                     out.flush()
 
                     configureEncoderAndVirtualDisplay(newW, newH, densityDpi)
@@ -491,14 +501,20 @@ class ScreenMirrorForegroundService : Service() {
                                 }
                                 val isKey = (bufferInfo.flags and MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0
                                 val flags = if (isKey) PhoneMirrorProtocol.FLAG_KEYFRAME else PhoneMirrorProtocol.FLAG_NONE
+                                val encPayload = streamCipher.seal(
+                                    type = packetType,
+                                    flags = flags,
+                                    ptsUs = bufferInfo.presentationTimeUs,
+                                    plaintext = bytes
+                                )
                                 val header = PhoneMirrorProtocol.buildPacketHeader(
                                     type = packetType,
                                     flags = flags,
                                     ptsUs = bufferInfo.presentationTimeUs,
-                                    payloadLength = bytes.size
+                                    payloadLength = encPayload.size
                                 )
                                 out.write(header)
-                                out.write(bytes)
+                                out.write(encPayload)
                                 out.flush()
                             }
                         }
@@ -515,14 +531,20 @@ class ScreenMirrorForegroundService : Service() {
                                 val b1 = if (csd1 != null) ByteArray(csd1.remaining()).also { csd1.duplicate().get(it) } else ByteArray(0)
                                 val combined = b0 + b1
                                 if (combined.isNotEmpty()) {
+                                    val encConfig = streamCipher.seal(
+                                        type = PhoneMirrorProtocol.PACKET_TYPE_CONFIG,
+                                        flags = PhoneMirrorProtocol.FLAG_NONE,
+                                        ptsUs = 0L,
+                                        plaintext = combined
+                                    )
                                     val header = PhoneMirrorProtocol.buildPacketHeader(
                                         type = PhoneMirrorProtocol.PACKET_TYPE_CONFIG,
                                         flags = PhoneMirrorProtocol.FLAG_NONE,
                                         ptsUs = 0L,
-                                        payloadLength = combined.size
+                                        payloadLength = encConfig.size
                                     )
                                     out.write(header)
-                                    out.write(combined)
+                                    out.write(encConfig)
                                     out.flush()
                                 }
                             }

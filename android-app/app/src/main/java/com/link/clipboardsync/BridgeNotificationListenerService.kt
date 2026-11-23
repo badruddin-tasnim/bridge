@@ -92,7 +92,7 @@ class BridgeNotificationListenerService : NotificationListenerService() {
         val now = System.currentTimeMillis()
         val last = recentPosted[dedupeKey] ?: 0L
         if (now - last < 2500) {
-            Log.d(TAG, "Deduplicating duplicate notification event: $dedupeKey")
+            Log.d(TAG, "Deduplicating duplicate notification event (${ClipboardPayload.computeSHA256(dedupeKey).take(8)})")
             return true
         }
         recentPosted[dedupeKey] = now

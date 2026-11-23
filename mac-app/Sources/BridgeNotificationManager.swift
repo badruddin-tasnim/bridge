@@ -607,7 +607,7 @@ public class BridgeNotificationManager: NSObject, ObservableObject, UNUserNotifi
             sendPayload(str)
             replyErrors.removeValue(forKey: id)
             replyErrors.removeValue(forKey: baseId)
-            NSLog("[BridgeNotif] Sent reply for \(baseId) (action \(actionId)): \(replyText)")
+            NSLog("[BridgeNotif] Sent reply for \(baseId) (action \(actionId), \(replyText.count) chars)")
         } else {
             replyErrors[id] = "Could not encode reply."
         }

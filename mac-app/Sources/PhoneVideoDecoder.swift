@@ -2,6 +2,8 @@ import Foundation
 import CoreGraphics
 import CoreMedia
 import CoreVideo
+import CryptoKit
+import Security
 import VideoToolbox
 
 enum PhoneMirrorPacketType: UInt8 {
@@ -18,6 +20,16 @@ struct PhoneMirrorHandshake: Equatable {
 
     static let byteLength = 69
 
+    static func computeAuthProof(token: String, width: Int, height: Int, rotation: Int) -> String {
+        let normalizedToken = token.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let safeW = min(max(1, width), 65535)
+        let safeH = min(max(1, height), 65535)
+        let safeRot = rotation & 0xFF
+        let message = "bridge-mirror-auth-v1:\(normalizedToken):\(safeW):\(safeH):\(safeRot)"
+        let digest = SHA256.hash(data: Data(message.utf8))
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
     static func parse(from data: Data) -> PhoneMirrorHandshake? {
         guard data.count >= byteLength else { return nil }
         let tokenData = data.subdata(in: 0..<64)
@@ -29,6 +41,70 @@ struct PhoneMirrorHandshake: Equatable {
         let rot = Int(data[68])
         guard w > 0, h > 0 else { return nil }
         return PhoneMirrorHandshake(token: token, width: w, height: h, rotation: rot)
+    }
+}
+
+/// Per-packet AES-256-GCM cipher matching Android's `PhoneMirrorStreamCipher`.
+final class PhoneMirrorStreamCipher {
+    private let key: SymmetricKey
+    private let lock = NSLock()
+    private let sendSalt: Data
+    private var sendSeq: UInt64 = 0
+    private var receiveSeq: UInt64 = 0
+
+    init(token: String) {
+        let normalized = token.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let keyMaterial = SHA256.hash(data: Data("\(normalized):bridge-mirror-encryption".utf8))
+        self.key = SymmetricKey(data: keyMaterial)
+        var saltBytes = [UInt8](repeating: 0, count: 4)
+        _ = SecRandomCopyBytes(kSecRandomDefault, 4, &saltBytes)
+        self.sendSalt = Data(saltBytes)
+    }
+
+    func seal(type: UInt8, flags: UInt8, ptsUs: UInt64, plaintext: Data) -> Data? {
+        lock.lock()
+        defer { lock.unlock() }
+        let seq = sendSeq
+        var iv = Data(capacity: 12)
+        iv.append(sendSalt)
+        var beSeq = seq.bigEndian
+        withUnsafeBytes(of: &beSeq) { iv.append(contentsOf: $0) }
+        guard let nonce = try? AES.GCM.Nonce(data: iv) else { return nil }
+        let aad = Self.buildAad(type: type, flags: flags, ptsUs: ptsUs, seq: seq)
+        guard let sealed = try? AES.GCM.seal(plaintext, using: key, nonce: nonce, authenticating: aad),
+              let combined = sealed.combined else {
+            return nil
+        }
+        sendSeq = seq &+ 1
+        return combined
+    }
+
+    func open(type: UInt8, flags: UInt8, ptsUs: UInt64, encryptedPayload: Data) -> Data? {
+        guard encryptedPayload.count >= 28 else { return nil }
+        lock.lock()
+        defer { lock.unlock() }
+        let seq = receiveSeq
+        var expectedSeq = Data(capacity: 8)
+        var beSeq = seq.bigEndian
+        withUnsafeBytes(of: &beSeq) { expectedSeq.append(contentsOf: $0) }
+        let actualSeqSlice = encryptedPayload.subdata(in: 4..<12)
+        var diff: UInt8 = 0
+        for i in 0..<8 {
+            diff |= (actualSeqSlice[i] ^ expectedSeq[i])
+        }
+        guard diff == 0 else { return nil }
+
+        let aad = Self.buildAad(type: type, flags: flags, ptsUs: ptsUs, seq: seq)
+        guard let box = try? AES.GCM.SealedBox(combined: encryptedPayload),
+              let plain = try? AES.GCM.open(box, using: key, authenticating: aad) else {
+            return nil
+        }
+        receiveSeq = seq &+ 1
+        return plain
+    }
+
+    private static func buildAad(type: UInt8, flags: UInt8, ptsUs: UInt64, seq: UInt64) -> Data {
+        return Data("bridge-mirror-pkt-v1:\(type):\(flags):\(ptsUs):\(seq)".utf8)
     }
 }
 

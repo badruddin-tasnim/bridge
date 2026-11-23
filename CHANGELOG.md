@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-11-23
+
+### Added
+- **In-App Phone Mirroring (Zero ADB Required):** Real-time Android-to-Mac display streaming using `MediaProjection` + H.264 `MediaCodec` ([`ScreenMirrorForegroundService.kt`](android-app/app/src/main/java/com/link/clipboardsync/ScreenMirrorForegroundService.kt), [`PhoneMirrorController.kt`](android-app/app/src/main/java/com/link/clipboardsync/PhoneMirrorController.kt)) and hardware Apple `VideoToolbox` decoding ([`PhoneVideoDecoder.swift`](mac-app/Sources/PhoneVideoDecoder.swift), [`PhoneMirrorManager.swift`](mac-app/Sources/PhoneMirrorManager.swift)), presented in a borderless iPhone Mirroring-style macOS window ([`PhoneMirrorWindowController.swift`](mac-app/Sources/PhoneMirrorWindowController.swift)) with hover-reveal controls (`Screen Dim`, `Pin on Top`, `Back`, `Home`, `Recents`), two-finger trackpad swipes, Mac keyboard input (`⌘C`, `⌘X`, `⌘V`, `⌘A`, `⌘1`–`⌘4`), auto-hidden phone keyboard, and physical phone screen dimming.
+- **Calls on Mac with Live Duration & Multi-App Controls:** Native macOS Notification Center frosted-glass floating call banner ([`CallBannerPanelController.swift`](mac-app/Sources/CallBannerPanelController.swift)) showing resolved caller names and app icons for cellular and VoIP calls (Telegram, Messenger, WhatsApp), live `MM:SS` active call duration timer, **Accept / Decline / Silence** and active **Mute / End Call** controls ([`PhoneCallMonitor.kt`](android-app/app/src/main/java/com/link/clipboardsync/PhoneCallMonitor.kt)), plus optional **Auto-Pause Mac Media** ([`MacMediaPauser.swift`](mac-app/Sources/MacMediaPauser.swift)).
+- **Bidirectional Universal Now Playing & Remote Device Controls:** Control Android media playback and volume from Mac ([`PhoneMediaManager.kt`](android-app/app/src/main/java/com/link/clipboardsync/PhoneMediaManager.kt), [`BridgeMenuView.swift`](mac-app/Sources/BridgeMenuView.swift)) and universal Mac media playback (bundled `MediaRemoteAdapter.framework`, Spotify, Apple Music, VLC, and browser YouTube tabs via [`MacMediaMonitor.swift`](mac-app/Sources/MacMediaMonitor.swift) and [`MacMediaControlCLI.swift`](mac-app/Sources/MacMediaControlCLI.swift)), Mac mute/volume ([`MacSystemControlManager.swift`](mac-app/Sources/MacSystemControlManager.swift)), and live circular battery telemetry on both devices (`BatteryRingView`, [`MacBatteryRingView.kt`](android-app/app/src/main/java/com/link/clipboardsync/MacBatteryRingView.kt)).
+- **Quick Controls, Low-Battery Alerts & Launch at Login:** Added remote Android **Sound / Vibrate / Silent**, **Do Not Disturb**, and **Ring Phone** beacon controls ([`PhoneControlManager.kt`](android-app/app/src/main/java/com/link/clipboardsync/PhoneControlManager.kt)), optional ≤ 15% phone low-battery alerts on Mac, and macOS **Launch at Login** ([`LaunchAtLoginManager.swift`](mac-app/Sources/LaunchAtLoginManager.swift)).
+
+### Fixed
+- **Android 13/14 / One UI 6 Background Clipboard Sync:** Improved Android-to-Mac clipboard copy detection and sync reliability ([`ClipboardSyncAccessibilityService.kt`](android-app/app/src/main/java/com/link/clipboardsync/ClipboardSyncAccessibilityService.kt), [`ClipboardSyncManager.kt`](android-app/app/src/main/java/com/link/clipboardsync/ClipboardSyncManager.kt), [`ClipboardReaderActivity.kt`](android-app/app/src/main/java/com/link/clipboardsync/ClipboardReaderActivity.kt)).
+- **Multi-App Call Answering & Cleanup:** Improved VoIP call answer/decline action resolution across messaging apps ([`BridgeNotificationListenerService.kt`](android-app/app/src/main/java/com/link/clipboardsync/BridgeNotificationListenerService.kt), [`PhoneCallMonitor.kt`](android-app/app/src/main/java/com/link/clipboardsync/PhoneCallMonitor.kt)) and cleaned up `MediaRemoteAdapter` helper stream lifecycles on macOS termination ([`MacMediaControlCLI.swift`](mac-app/Sources/MacMediaControlCLI.swift), [`main.swift`](mac-app/Sources/main.swift)).
+
+### Security
+- **Encrypted Phone Mirroring Video Stream (`PhoneMirrorStreamCipher`):** Secured the dedicated mirroring video socket with one-way SHA-256 handshake proofs (`computeStreamAuthProof`), per-packet **AES-256-GCM** encryption with monotonic 96-bit IVs and header/sequence AAD binding, bounded receive buffers (8 MB + 64 KB), and local-LAN-only RFC 1918 IP validation ([`PhoneMirrorModels.kt`](android-app/app/src/main/java/com/link/clipboardsync/PhoneMirrorModels.kt), [`ScreenMirrorForegroundService.kt`](android-app/app/src/main/java/com/link/clipboardsync/ScreenMirrorForegroundService.kt), [`PhoneVideoDecoder.swift`](mac-app/Sources/PhoneVideoDecoder.swift), [`PhoneMirrorManager.swift`](mac-app/Sources/PhoneMirrorManager.swift)).
+- **Privacy & Input Hardening:** Redacted inline notification reply text, notification dedupe keys, and remote mirroring input JSON from diagnostic logs ([`BridgeNotificationManager.swift`](mac-app/Sources/BridgeNotificationManager.swift), [`BridgeNotificationListenerService.kt`](android-app/app/src/main/java/com/link/clipboardsync/BridgeNotificationListenerService.kt), [`PhoneMirrorController.kt`](android-app/app/src/main/java/com/link/clipboardsync/PhoneMirrorController.kt), [`PhoneMirrorInputController.kt`](android-app/app/src/main/java/com/link/clipboardsync/PhoneMirrorInputController.kt)), validated extracted YouTube `videoId` values before passing to AppleScript/URLs ([`MacMediaMonitor.swift`](mac-app/Sources/MacMediaMonitor.swift)), and updated [`SECURITY.md`](SECURITY.md), [`README.md`](README.md), and [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
 ## [1.3.5] - 2026-11-14
 
 ### Added
@@ -81,7 +97,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Initial public release of Bridge for Android and macOS.
 - Two-way local-network text clipboard synchronization, Bonjour (`_clipboardsync._tcp`) discovery, and 6-digit / QR pairing.
 
-[Unreleased]: https://github.com/badruddin-tasnim/bridge/compare/v1.3.5...HEAD
+[Unreleased]: https://github.com/badruddin-tasnim/bridge/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/badruddin-tasnim/bridge/compare/v1.3.5...v1.4.0
 [1.3.5]: https://github.com/badruddin-tasnim/bridge/compare/v1.3.2...v1.3.5
 [1.3.2]: https://github.com/badruddin-tasnim/bridge/compare/v1.3.1...v1.3.2
 [1.3.1]: https://github.com/badruddin-tasnim/bridge/compare/v1.3.0...v1.3.1

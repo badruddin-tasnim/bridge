@@ -1059,21 +1059,25 @@ final class MacMediaMonitor {
               let host = components.host?.lowercased() else {
             return nil
         }
+        var rawId: String? = nil
         if host.contains("youtu.be") {
             let trimmed = components.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-            return trimmed.split(separator: "/").first.map(String.init)
+            rawId = trimmed.split(separator: "/").first.map(String.init)
+        } else if host.contains("youtube.com") || host.contains("youtube-nocookie.com") {
+            if let v = components.queryItems?.first(where: { $0.name == "v" })?.value, !v.isEmpty {
+                rawId = v
+            } else {
+                let segments = components.path.split(separator: "/").map(String.init)
+                if segments.count >= 2 && (segments[0] == "shorts" || segments[0] == "live" || segments[0] == "embed") {
+                    rawId = segments[1]
+                }
+            }
         }
-        guard host.contains("youtube.com") || host.contains("youtube-nocookie.com") else {
+        guard let candidate = rawId,
+              candidate.range(of: #"^[A-Za-z0-9_-]{6,20}$"#, options: .regularExpression) != nil else {
             return nil
         }
-        if let v = components.queryItems?.first(where: { $0.name == "v" })?.value, !v.isEmpty {
-            return v
-        }
-        let segments = components.path.split(separator: "/").map(String.init)
-        if segments.count >= 2 && (segments[0] == "shorts" || segments[0] == "live" || segments[0] == "embed") {
-            return segments[1]
-        }
-        return nil
+        return candidate
     }
 
     static func cleanYouTubeTitle(_ rawTitle: String) -> String {
