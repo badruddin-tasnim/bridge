@@ -184,13 +184,22 @@ open /Applications/Bridge.app
 
 ### 2. Install on Android (`Android 8.0+`)
 
-> [!IMPORTANT]
-> **Why Android 14–16 Users Should Install via USB (`adb`):**
-> Bridge is a 100% open-source, non-Play utility that requires `BIND_NOTIFICATION_LISTENER_SERVICE` (to mirror notifications and send inline replies) and `BIND_ACCESSIBILITY_SERVICE` (to detect clipboard copy events in the background on Android 10+).
+> [!NOTE]
+> **Play Protect & Restricted Settings on Direct APK Installs:**
+> Bridge is a 100% open-source, non-Play utility that declares `BIND_NOTIFICATION_LISTENER_SERVICE` (to mirror notifications and send inline replies) and `BIND_ACCESSIBILITY_SERVICE` (to detect clipboard copy events in the background on Android 10+).
 >
-> On **Android 14, 15, and 16**, Google Play Protect's *Enhanced Fraud Protection* automatically blocks **any** non-Play APK downloaded from a web browser or file manager that declares these two permissions (*"App blocked to protect your device"*), and hides the *"Install anyway"* button. Installing over **USB with `adb`** from your Mac is the official Android developer installation path—it bypasses the browser sideload block **and** automatically unlocks Android 13+'s *"Restricted settings"* for Accessibility and Notification Access.
+> When downloading the APK directly on your phone, Google Play Protect may display a *"Harmful app blocked"* warning—tap **Install anyway** to proceed, then enable **Allow restricted settings** under App Info so Android lets you turn on Notification Access and Accessibility. Installing over **USB with `adb`** also works and skips Android 13+'s *Restricted settings* prompt automatically (useful if Enhanced Fraud Protection hides *"Install anyway"* on a specific device/region).
 
-#### Method A: Install via USB & ADB from Your Mac *(Required on Android 14–16, Recommended for All)*
+#### Method A: Direct APK Download on Phone *(Recommended — No Cable Needed)*
+
+1. Download **`Bridge-v*-Android.apk`** from [**GitHub Releases**](../../releases) directly on your Android phone.
+2. Open the downloaded **`.apk`** file to install it. If Google Play Protect shows a *"Harmful app blocked"* warning, tap **Install anyway** *(or **More details → Install anyway**)*.
+3. **Allow Restricted Settings (Android 13+):** After sideloading an APK directly, Android initially disables **Accessibility** and **Notification Access** with a *"Restricted setting"* notice (*"For your security, this setting is unavailable"*):
+   - Tap either **Notification Access** or **Accessibility** once inside Bridge so Android registers the permission request.
+   - Open your phone's **Settings → Apps → Bridge → ⋮ (top right / More options) → Allow restricted settings**, then confirm with your PIN or biometrics.
+   - Return to Bridge and enable **Notification Access** and **Background Clipboard Service (Accessibility)**.
+
+#### Method B: Install via USB & ADB from Your Mac *(Alternative — Auto-Unlocks Restricted Settings)*
 
 1. **Enable USB Debugging on your Android phone:**
    - Open **Settings → About phone** and tap **Build number** 7 times until *"You are now a developer!"* appears.
@@ -206,12 +215,6 @@ open /Applications/Bridge.app
    curl -L -o /tmp/Bridge-Android.apk "https://github.com/badruddin-tasnim/bridge/releases/download/${TAG}/Bridge-${TAG}-Android.apk"
    adb install -r /tmp/Bridge-Android.apk
    ```
-
-#### Method B: Direct APK Download on Phone *(Android 8–13 & Devices Without Play Protect Sideload Block)*
-
-1. Download **`Bridge-v*-Android.apk`** from [**GitHub Releases**](../../releases) directly on your Android phone.
-2. Open the downloaded **`.apk`** file to install it. *(If Play Protect shows a standard warning dialog, tap **More details → Install anyway**).*
-3. **Android 13 Restricted Settings:** If **Accessibility** or **Notification Access** appears grayed out after installing the APK directly, open **Settings → Apps → Bridge → ⋮ (top right) → Allow restricted settings**, then enable the permissions.
 
 ---
 
